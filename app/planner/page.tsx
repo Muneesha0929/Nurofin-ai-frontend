@@ -38,6 +38,7 @@ import { tasksService } from '@/services/tasks';
 import { projectsService } from '@/services/projects';
 import { useStore } from '@/store';
 import { Task } from '@/types';
+import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 
 export default function PlannerPage() {
   const { userProfile } = useStore();
@@ -99,6 +100,9 @@ export default function PlannerPage() {
   const [taskScheduleStartTime, setTaskScheduleStartTime] = useState('09:00');
   const [taskScheduleEndTime, setTaskScheduleEndTime] = useState('10:00');
   const [scheduleTaskConflictData, setScheduleTaskConflictData] = useState<any>(null);
+
+  const [completeTaskOpen, setCompleteTaskOpen] = useState(false);
+  const [taskExtendedTime, setTaskExtendedTime] = useState('');
 
   const isOwnSchedule = selectedUserId === currentUserId;
 
@@ -216,10 +220,23 @@ export default function PlannerPage() {
     }
   }, [selectedUserId]);
 
-  const handleCompleteTask = async (e: React.MouseEvent, taskId: string | number) => {
+  const handleCompleteTask = (e: React.MouseEvent, taskId: string | number) => {
     e.stopPropagation();
+    setSelectedTaskId(String(taskId));
+    setTaskExtendedTime('');
+    setCompleteTaskOpen(true);
+  };
+
+  const submitCompleteTask = async (extendedTimeStr: string) => {
+    if (!selectedTaskId) return;
     try {
-      await tasksService.updateTask(taskId, { status: 'completed' });
+      const updateData: any = { status: 'completed' };
+      if (extendedTimeStr && !isNaN(parseFloat(extendedTimeStr))) {
+        updateData.extended_time = parseFloat(extendedTimeStr);
+      }
+      await tasksService.updateTask(selectedTaskId, updateData);
+      setCompleteTaskOpen(false);
+      setSelectedTaskId(null);
       await loadTasks();
     } catch (error) {
       console.error('Failed to complete task:', error);
@@ -424,9 +441,9 @@ export default function PlannerPage() {
       if (!task) return;
       
       await tasksService.updateTask(selectedTaskId, {
-        ...task,
         dueDate: taskPushDate,
-        scheduledDate: taskPushDate
+        scheduledDate: taskPushDate,
+        pushed_to_next_day: true
       });
       
       setTaskPushOpen(false);
@@ -566,7 +583,9 @@ export default function PlannerPage() {
     }
   }, [tasks, selectedDate, activeTab]);
 
-  const getEventBadge = (source: string, type: string) => {
+  const getEventBadge = (source: string, type: string, e?: any) => {
+    if (e && e.pushed_to_next_day) return 'text-amber-500 bg-amber-500/10 border-amber-500/30';
+    if (e && e.extended_time) return 'text-red-500 bg-red-500/10 border-red-500/30';
     if (source === 'google_calendar') return 'text-[#4285F4] bg-[#4285F4]/10 border-[#4285F4]/20';
     if (source === 'nurofin_task' || type === 'task') return 'text-accent-purple bg-accent-purple/10 border-accent-purple/20';
     switch (type) {
@@ -657,7 +676,9 @@ export default function PlannerPage() {
         source: 'nurofin_task',
         type: 'task',
         priority: t.priority,
-        status: t.status
+        status: t.status,
+        extended_time: t.extended_time,
+        pushed_to_next_day: t.pushed_to_next_day
       }));
 
     const localMapped = local.map(e => ({ ...e, source: 'nurofin' }));
@@ -697,8 +718,12 @@ export default function PlannerPage() {
       return new Date(e.end).getHours();
     }
     if (e.end_time) {
-      const parsed = parseInt(e.end_time.split(':')[0]);
-      return isNaN(parsed) ? null : parsed;
+      let parsed = parseInt(e.end_time.split(':')[0]);
+      if (isNaN(parsed)) return null;
+      if (e.extended_time && !isNaN(parseFloat(e.extended_time))) {
+        parsed += Math.floor(parseFloat(e.extended_time));
+      }
+      return parsed;
     }
     return null;
   };
@@ -1241,32 +1266,61 @@ export default function PlannerPage() {
                       let textColor = 'text-text-primary';
                       let userName = '';
                     
-                    if (evt.source !== 'google_calendar') {
-                       const assignedId = isTask ? evt.assigned_to : evt.owner_id;
-                       if (assignedId) {
-                         const user = teammates.find(t => String(t.id) === String(assignedId));
-                           if (user) {
-                             userName = user.full_name;
-                               const colorPalettes = isCompact ? [
-                                 { bg: 'bg-blue-500', border: 'border-blue-600', text: 'text-white' },
-                                 { bg: 'bg-purple-500', border: 'border-purple-600', text: 'text-white' },
-                                 { bg: 'bg-orange-500', border: 'border-orange-600', text: 'text-white' },
-                                 { bg: 'bg-emerald-500', border: 'border-emerald-600', text: 'text-white' },
-                                 { bg: 'bg-rose-500', border: 'border-rose-600', text: 'text-white' },
-                               ] : [
-                                 { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700' },
-                                 { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700' },
-                                 { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700' },
-                                 { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700' },
-                                 { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700' },
-                               ];
-                               const userIdx = teammates.findIndex(t => String(t.id) === String(assignedId));
-                               const colorIdx = userIdx >= 0 ? userIdx % colorPalettes.length : 0;
-                               bgColor = colorPalettes[colorIdx].bg;
-                               borderColor = colorPalettes[colorIdx].border;
-                               textColor = colorPalettes[colorIdx].text;
-                           }
-                         }
+                      if (evt.source !== 'google_calendar') {
+                        if (isTask) {
+                          if (evt.extended_time) {
+                            bgColor = isCompact ? 'bg-red-500' : 'bg-red-50';
+                            borderColor = isCompact ? 'border-red-600' : 'border-red-200';
+                            textColor = isCompact ? 'text-white' : 'text-red-700';
+                          } else if (evt.status === 'completed' || evt.status === 'done') {
+                            bgColor = isCompact ? 'bg-green-500' : 'bg-green-50';
+                            borderColor = isCompact ? 'border-green-600' : 'border-green-200';
+                            textColor = isCompact ? 'text-white' : 'text-green-700';
+                          } else if (evt.pushed_to_next_day) {
+                            bgColor = isCompact ? 'bg-orange-500' : 'bg-orange-50';
+                            borderColor = isCompact ? 'border-orange-600' : 'border-orange-200';
+                            textColor = isCompact ? 'text-white' : 'text-orange-700';
+                          } else if (evt.status === 'in_progress') {
+                            bgColor = isCompact ? 'bg-yellow-500' : 'bg-yellow-50';
+                            borderColor = isCompact ? 'border-yellow-600' : 'border-yellow-200';
+                            textColor = isCompact ? 'text-white' : 'text-yellow-700';
+                          } else {
+                            // Default task color (blue)
+                            bgColor = isCompact ? 'bg-blue-500' : 'bg-blue-50';
+                            borderColor = isCompact ? 'border-blue-600' : 'border-blue-200';
+                            textColor = isCompact ? 'text-white' : 'text-blue-700';
+                          }
+                          const assignedId = evt.assigned_to;
+                          if (assignedId) {
+                            const user = teammates.find(t => String(t.id) === String(assignedId));
+                            if (user) userName = user.full_name;
+                          }
+                        } else {
+                          // Not a task, keep user-based colors or default
+                          const assignedId = evt.owner_id;
+                          if (assignedId) {
+                            const user = teammates.find(t => String(t.id) === String(assignedId));
+                            if (user) {
+                              userName = user.full_name;
+                              const colorPalettes = isCompact ? [
+                                { bg: 'bg-blue-500', border: 'border-blue-600', text: 'text-white' },
+                                { bg: 'bg-purple-500', border: 'border-purple-600', text: 'text-white' },
+                                { bg: 'bg-emerald-500', border: 'border-emerald-600', text: 'text-white' },
+                                { bg: 'bg-rose-500', border: 'border-rose-600', text: 'text-white' },
+                              ] : [
+                                { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700' },
+                                { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700' },
+                                { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700' },
+                                { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700' },
+                              ];
+                              const userIdx = teammates.findIndex(t => String(t.id) === String(assignedId));
+                              const colorIdx = userIdx >= 0 ? userIdx % colorPalettes.length : 0;
+                              bgColor = colorPalettes[colorIdx].bg;
+                              borderColor = colorPalettes[colorIdx].border;
+                              textColor = colorPalettes[colorIdx].text;
+                            }
+                          }
+                        }
                       }
 
                     return (
@@ -1296,6 +1350,16 @@ export default function PlannerPage() {
                             {getEventIcon(evt.source, evt.type)}
                             <span className="line-clamp-2">{evt.title}</span>
                           </h4>
+                          {evt.extended_time && (
+                            <p className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded w-fit uppercase tracking-wider mt-1", isCompact ? "bg-white/20 text-white" : "bg-red-500/10 text-red-500")}>
+                              + {evt.extended_time}h Extended
+                            </p>
+                          )}
+                          {evt.pushed_to_next_day && (
+                            <p className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded w-fit uppercase tracking-wider mt-1", isCompact ? "bg-white/20 text-white" : "bg-orange-500/10 text-orange-500")}>
+                              Pushed to today
+                            </p>
+                          )}
                           {!isCompact && userName && <p className="text-[10px] opacity-80 font-bold uppercase tracking-wider">{userName}</p>}
                           {!isCompact && evt.description && <p className="text-xs opacity-70 line-clamp-1">{evt.description}</p>}
                           {evt.start_time && (
@@ -1529,11 +1593,17 @@ export default function PlannerPage() {
                                       onChange={async (ev) => {
                                         ev.stopPropagation();
                                         const nextStatus = ev.target.value;
-                                        try {
-                                          await tasksService.updateTask(e.id, { status: nextStatus as any });
-                                          loadTasks();
-                                        } catch (err) {
-                                          console.error(err);
+                                        if (nextStatus === 'completed' || nextStatus === 'done') {
+                                          setSelectedTaskId(String(e.id));
+                                          setTaskExtendedTime('');
+                                          setCompleteTaskOpen(true);
+                                        } else {
+                                          try {
+                                            await tasksService.updateTask(e.id, { status: nextStatus as any });
+                                            loadTasks();
+                                          } catch (err) {
+                                            console.error(err);
+                                          }
                                         }
                                       }}
                                       onClick={ev => ev.stopPropagation()}
@@ -1577,7 +1647,7 @@ export default function PlannerPage() {
                                       <><Clock className="w-3 h-3" /> {e.start_time || ''}</>
                                     )}
                                   </span>
-                                  <span className={cn("text-[9px] uppercase font-bold border px-1.5 py-0.5 rounded shadow-sm", getEventBadge(e.source, e.type))}>
+                                  <span className={cn("text-[9px] uppercase font-bold border px-1.5 py-0.5 rounded shadow-sm", getEventBadge(e.source, e.type, e))}>
                                     {e.source === 'google_calendar' ? 'Google' : e.type}
                                   </span>
                                 </div>
@@ -1758,11 +1828,17 @@ export default function PlannerPage() {
                               value={task.status}
                               onChange={async (e) => {
                                 const nextStatus = e.target.value;
-                                try {
-                                  await tasksService.updateTask(task.id, { status: nextStatus as any });
-                                  loadTasks();
-                                } catch (err) {
-                                  console.error(err);
+                                if (nextStatus === 'completed' || nextStatus === 'done') {
+                                  setSelectedTaskId(String(task.id));
+                                  setTaskExtendedTime('');
+                                  setCompleteTaskOpen(true);
+                                } else {
+                                  try {
+                                    await tasksService.updateTask(task.id, { status: nextStatus as any });
+                                    loadTasks();
+                                  } catch (err) {
+                                    console.error(err);
+                                  }
                                 }
                               }}
                               className="bg-background-secondary border border-border-subtle text-[10px] rounded p-1 text-text-secondary outline-none cursor-pointer font-bold"
@@ -1974,6 +2050,17 @@ export default function PlannerPage() {
             </motion.div>
           </div>
         )}
+
+        <CompleteTaskModal
+          isOpen={completeTaskOpen}
+          onClose={() => {
+            setCompleteTaskOpen(false);
+            setSelectedTaskId(null);
+          }}
+          onSubmit={submitCompleteTask}
+          taskExtendedTime={taskExtendedTime}
+          setTaskExtendedTime={setTaskExtendedTime}
+        />
 
         {scheduleTaskOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">

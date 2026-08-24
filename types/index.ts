@@ -87,6 +87,8 @@ export interface Task {
   scheduledDate?: string;
   scheduledStartTime?: string;
   scheduledEndTime?: string;
+  extended_time?: number;
+  pushed_to_next_day?: boolean;
   comments?: TaskComment[];
 }
 

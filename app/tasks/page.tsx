@@ -37,6 +37,7 @@ import {
   AlertCircle,
   MessageCircle
 } from 'lucide-react';
+import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 
 const taskSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters long'),
@@ -58,6 +59,10 @@ export default function TaskCenterPage() {
   const [editMode, setEditMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [completeTaskOpen, setCompleteTaskOpen] = useState(false);
+  const [taskExtendedTime, setTaskExtendedTime] = useState('');
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
 
   const {
     register,
@@ -107,6 +112,22 @@ export default function TaskCenterPage() {
       window.removeEventListener('focus', onFocus);
     };
   }, [setTasks]);
+
+  const submitCompleteTask = async (extendedTimeStr: string) => {
+    if (!completingTaskId) return;
+    try {
+      const updateData: any = { status: 'completed' };
+      if (extendedTimeStr && !isNaN(parseFloat(extendedTimeStr))) {
+        updateData.extended_time = parseFloat(extendedTimeStr);
+      }
+      await tasksService.updateTask(completingTaskId, updateData);
+      changeTaskStatus(completingTaskId, 'completed');
+      setCompleteTaskOpen(false);
+      setCompletingTaskId(null);
+    } catch (error) {
+      console.error('Failed to complete task:', error);
+    }
+  };
 
   const getPriorityColor = (prio: TaskPriority) => {
     switch (prio) {
@@ -331,11 +352,17 @@ export default function TaskCenterPage() {
                             value={task.status}
                             onChange={async (e) => {
                               const nextStatus = e.target.value as TaskStatus;
-                              try {
-                                await tasksService.updateTask(task.id, { status: nextStatus });
-                                changeTaskStatus(task.id, nextStatus);
-                              } catch (err) {
-                                console.error(err);
+                              if (nextStatus === 'completed' || nextStatus === 'done') {
+                                setCompletingTaskId(String(task.id));
+                                setTaskExtendedTime('');
+                                setCompleteTaskOpen(true);
+                              } else {
+                                try {
+                                  await tasksService.updateTask(task.id, { status: nextStatus });
+                                  changeTaskStatus(task.id, nextStatus);
+                                } catch (err) {
+                                  console.error(err);
+                                }
                               }
                             }}
                             className="bg-background-secondary border border-border-subtle text-[10px] rounded p-1 text-text-secondary outline-none cursor-pointer"
@@ -671,6 +698,17 @@ export default function TaskCenterPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <CompleteTaskModal
+        isOpen={completeTaskOpen}
+        onClose={() => {
+          setCompleteTaskOpen(false);
+          setCompletingTaskId(null);
+        }}
+        onSubmit={submitCompleteTask}
+        taskExtendedTime={taskExtendedTime}
+        setTaskExtendedTime={setTaskExtendedTime}
+      />
     </div>
   );
 }
