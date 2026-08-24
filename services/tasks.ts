@@ -31,7 +31,9 @@ export const tasksService = {
       projectId: t.project_id?.toString(),
       scheduledDate: t.scheduled_date || undefined,
       scheduledStartTime: t.scheduled_start_time || undefined,
-      scheduledEndTime: t.scheduled_end_time || undefined
+      scheduledEndTime: t.scheduled_end_time || undefined,
+      extended_time: t.extended_time,
+      pushed_to_next_day: t.pushed_to_next_day
     }));
   },
   
@@ -70,7 +72,9 @@ export const tasksService = {
       projectId: t.project_id?.toString(),
       scheduledDate: t.scheduled_date || undefined,
       scheduledStartTime: t.scheduled_start_time || undefined,
-      scheduledEndTime: t.scheduled_end_time || undefined
+      scheduledEndTime: t.scheduled_end_time || undefined,
+      extended_time: t.extended_time,
+      pushed_to_next_day: t.pushed_to_next_day
     };
   },
   
@@ -85,8 +89,13 @@ export const tasksService = {
       project_id: task.projectId ? parseInt(task.projectId, 10) : undefined,
       scheduled_date: task.scheduledDate,
       scheduled_start_time: task.scheduledStartTime,
-      scheduled_end_time: task.scheduledEndTime
+      scheduled_end_time: task.scheduledEndTime,
+      extended_time: task.extended_time,
+      pushed_to_next_day: task.pushed_to_next_day
     };
+    // Remove undefined values
+    Object.keys(payload).forEach(key => (payload as any)[key] === undefined && delete (payload as any)[key]);
+    
     const res = await fetch(`/api/v1/tasks/${id}`, {
       method: 'PUT',
       headers: getHeaders(),
@@ -109,7 +118,9 @@ export const tasksService = {
       projectId: t.project_id?.toString(),
       scheduledDate: t.scheduled_date || undefined,
       scheduledStartTime: t.scheduled_start_time || undefined,
-      scheduledEndTime: t.scheduled_end_time || undefined
+      scheduledEndTime: t.scheduled_end_time || undefined,
+      extended_time: t.extended_time,
+      pushed_to_next_day: t.pushed_to_next_day
     };
   },
   
