@@ -61,7 +61,6 @@ export interface WCTask {
   created_at: string | null;
   transfer_date?: string | null;
   transfer_to_name?: string | null;
-  actual_completion_date?: string | null;
 }
 
 export interface WCTasksResponse {
