@@ -1,7 +1,7 @@
 export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
-  const backendUrl = env.BACKEND_URL || "https://nurofin-ai-backend.onrender.com";
+  const backendUrl = env.BACKEND_URL || env.NEXT_PUBLIC_API_URL || "https://nurofin-ai-backend.onrender.com";
   const targetUrl = `${backendUrl}${url.pathname}${url.search}`;
 
   const headers = new Headers();
