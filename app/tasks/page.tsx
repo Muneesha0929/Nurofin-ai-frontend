@@ -113,10 +113,10 @@ export default function TaskCenterPage() {
     };
   }, [setTasks]);
 
-  const submitCompleteTask = async (extendedTimeStr: string) => {
+  const submitCompleteTask = async (extendedTimeStr: string, completionDate: string) => {
     if (!completingTaskId) return;
     try {
-      const updateData: any = { status: 'completed' };
+      const updateData: any = { status: 'completed', actual_completion_date: completionDate };
       if (extendedTimeStr && !isNaN(parseFloat(extendedTimeStr))) {
         updateData.extended_time = parseFloat(extendedTimeStr);
       }

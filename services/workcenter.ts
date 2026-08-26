@@ -43,6 +43,8 @@ export interface WCTask {
   parent_id: number | null;
   quarter_id: number | null;
   meeting_id: number | null;
+  actual_completion_date?: string | null;
+  extended_time?: number | null;
   subtasks: {
     id: number;
     title: string;
@@ -59,6 +61,7 @@ export interface WCTask {
   created_at: string | null;
   transfer_date?: string | null;
   transfer_to_name?: string | null;
+  actual_completion_date?: string | null;
 }
 
 export interface WCTasksResponse {
@@ -201,6 +204,8 @@ export interface UpdateTaskPayload {
   assigned_to_id?: number;
   reviewer_id?: number;
   progress?: number;
+  actual_completion_date?: string | null;
+  extended_time?: number;
 }
 
 export const workcenterService = {

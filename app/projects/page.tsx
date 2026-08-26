@@ -1,4 +1,5 @@
 'use client';
+import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 
 import React, { useState, useEffect } from 'react';
 import { useStore } from '@/lib/store';
@@ -318,6 +319,9 @@ export default function ProjectsPage() {
   };
 
   const [blockingTaskInfo, setBlockingTaskInfo] = useState<{ id: number; status: string } | null>(null);
+  const [completeTaskOpen, setCompleteTaskOpen] = useState(false);
+  const [completingTaskId, setCompletingTaskId] = useState<number | null>(null);
+  const [taskExtendedTime, setTaskExtendedTime] = useState('');
   const [blockReason, setBlockReason] = useState('');
 
   const handleConfirmBlock = async () => {
@@ -341,6 +345,17 @@ export default function ProjectsPage() {
 
   const handleWCStatusChange = async (taskId: number, newStatus: string) => {
     if (newStatus === 'blocked') {
+      setBlockingTaskInfo({ id: taskId, status: newStatus });
+      setBlockReason('');
+      return;
+    }
+    if (newStatus === 'completed') {
+      setCompletingTaskId(taskId);
+      setTaskExtendedTime('');
+      setCompleteTaskOpen(true);
+      return;
+    }
+    if (false) {
       setBlockingTaskInfo({ id: taskId, status: newStatus });
       setBlockReason('');
       return;
@@ -1246,7 +1261,35 @@ export default function ProjectsPage() {
               )}
 
               {/* Block Reason Dialog */}
-              <Dialog open={!!blockingTaskInfo} onOpenChange={() => setBlockingTaskInfo(null)}>
+              <CompleteTaskModal
+        isOpen={completeTaskOpen}
+        onClose={() => {
+          setCompleteTaskOpen(false);
+          setCompletingTaskId(null);
+        }}
+        taskExtendedTime={taskExtendedTime}
+        setTaskExtendedTime={setTaskExtendedTime}
+        onSubmit={async (extendedTime, completionDate) => {
+          if (!completingTaskId) return;
+          const extTime = parseFloat(extendedTime);
+          await workcenterService.updateTask(completingTaskId, {
+            status: 'completed',
+            extended_time: isNaN(extTime) ? undefined : extTime,
+            actual_completion_date: completionDate
+          });
+          setCompleteTaskOpen(false);
+          setCompletingTaskId(null);
+          await loadProjectTasks(selectedProjectId);
+          const refreshed = await projectsService.getProjects();
+          setProjects(refreshed);
+          if (selectedSubtask && selectedSubtask.id === completingTaskId) {
+            const updated = await workcenterService.getTask(completingTaskId);
+            setSelectedSubtask(updated);
+          }
+        }}
+      />
+
+      <Dialog open={!!blockingTaskInfo} onOpenChange={() => setBlockingTaskInfo(null)}>
                 <DialogContent className="max-w-sm bg-background-secondary border border-border-subtle rounded-2xl shadow-2xl p-5 font-sans">
                   <DialogHeader>
                     <DialogTitle className="text-sm font-extrabold flex items-center gap-1 text-accent-red">

@@ -33,7 +33,8 @@ export const tasksService = {
       scheduledStartTime: t.scheduled_start_time || undefined,
       scheduledEndTime: t.scheduled_end_time || undefined,
       extended_time: t.extended_time,
-      pushed_to_next_day: t.pushed_to_next_day
+      pushed_to_next_day: t.pushed_to_next_day,
+      actual_completion_date: t.actual_completion_date || undefined
     }));
   },
   
@@ -91,7 +92,8 @@ export const tasksService = {
       scheduled_start_time: task.scheduledStartTime,
       scheduled_end_time: task.scheduledEndTime,
       extended_time: task.extended_time,
-      pushed_to_next_day: task.pushed_to_next_day
+      pushed_to_next_day: task.pushed_to_next_day,
+      actual_completion_date: task.actual_completion_date
     };
     // Remove undefined values
     Object.keys(payload).forEach(key => (payload as any)[key] === undefined && delete (payload as any)[key]);

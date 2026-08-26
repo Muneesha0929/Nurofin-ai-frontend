@@ -227,14 +227,15 @@ export default function PlannerPage() {
     setCompleteTaskOpen(true);
   };
 
-  const submitCompleteTask = async (extendedTimeStr: string) => {
+  const submitCompleteTask = async (extendedTimeStr: string, completionDate: string) => {
     if (!selectedTaskId) return;
     try {
-      const updateData: any = { status: 'completed' };
-      if (extendedTimeStr && !isNaN(parseFloat(extendedTimeStr))) {
-        updateData.extended_time = parseFloat(extendedTimeStr);
-      }
-      await tasksService.updateTask(selectedTaskId, updateData);
+      const extended_time = parseFloat(extendedTimeStr);
+      await tasksService.updateTask(selectedTaskId, {
+        status: 'completed',
+        extended_time: isNaN(extended_time) ? undefined : extended_time,
+        actual_completion_date: completionDate,
+      });
       setCompleteTaskOpen(false);
       setSelectedTaskId(null);
       await loadTasks();
@@ -569,13 +570,27 @@ export default function PlannerPage() {
       prevSelectedDateRef.current = selectedDate.getTime();
       
       const selectedDateStr = formatDateStr(selectedDate);
+      
+      const prevDayDate = new Date(selectedDate);
+      prevDayDate.setDate(prevDayDate.getDate() - 1);
+      const prevDayStr = formatDateStr(prevDayDate);
+
       const hasOverdue = tasks.some(t => {
         if (t.status === 'completed') return false;
         const taskDateStr = t.scheduledDate || (t.dueDate ? t.dueDate.split('T')[0] : null);
         return taskDateStr && taskDateStr < selectedDateStr;
       });
       
-      if (hasOverdue) {
+      const hasCompletedYesterday = tasks.some(t => {
+        if (t.status !== 'completed') return false;
+        if (t.actual_completion_date) {
+          return t.actual_completion_date.split('T')[0] === prevDayStr;
+        }
+        const tDate = t.scheduledDate || (t.dueDate ? t.dueDate.split('T')[0] : null);
+        return tDate === prevDayStr;
+      });
+      
+      if (hasOverdue || hasCompletedYesterday) {
         setShowPrevDayPopup(true);
       } else {
         setShowPrevDayPopup(false);
@@ -1258,7 +1273,7 @@ export default function PlannerPage() {
                   };
 
                   const renderEventCard = (evt: any, idx: number, isCompact: boolean = false) => {
-                      const isTask = evt.source === 'nurofin_task';
+                      const isTask = evt.source === 'nurofin_task' || evt.source === 'issue' || evt.source === 'nurofin_issue';
                       
                       // Assign colors based on user id for team schedule view
                       let bgColor = 'bg-background-primary/80';
@@ -1919,8 +1934,12 @@ export default function PlannerPage() {
         const prevDayStr = formatDateStr(prevDayDate);
 
         const prevCompletedTasks = tasks.filter(t => {
+          if (t.status !== 'completed') return false;
+          if (t.actual_completion_date) {
+            return t.actual_completion_date.split('T')[0] === prevDayStr;
+          }
           const tDate = t.scheduledDate || (t.dueDate ? t.dueDate.split('T')[0] : null);
-          return t.status === 'completed' && tDate === prevDayStr;
+          return tDate === prevDayStr;
         });
         
         return (

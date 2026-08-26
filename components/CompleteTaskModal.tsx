@@ -5,10 +5,12 @@ import { CheckCircle2 } from 'lucide-react';
 interface CompleteTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (extendedTime: string) => void;
+  onSubmit: (extendedTime: string, completionDate: string) => void;
   taskExtendedTime: string;
   setTaskExtendedTime: (val: string) => void;
 }
+
+import { useState } from 'react';
 
 export function CompleteTaskModal({
   isOpen,
@@ -17,11 +19,13 @@ export function CompleteTaskModal({
   taskExtendedTime,
   setTaskExtendedTime,
 }: CompleteTaskModalProps) {
+  const [completionDate, setCompletionDate] = useState(new Date().toISOString().split('T')[0]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(taskExtendedTime);
+    onSubmit(taskExtendedTime, completionDate);
   };
 
   return (
@@ -36,6 +40,15 @@ export function CompleteTaskModal({
           <CheckCircle2 className="w-5 h-5 text-accent-green" /> Complete Task
         </h3>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-[10px] text-text-secondary font-bold uppercase tracking-wider">Actual Date of Completion</label>
+            <input
+              type="date"
+              value={completionDate}
+              onChange={e => setCompletionDate(e.target.value)}
+              className="w-full h-10 bg-background-primary border border-border-subtle rounded-lg px-3 text-sm text-text-primary focus:border-accent-green transition-all"
+            />
+          </div>
           <div className="space-y-1.5">
             <label className="text-[10px] text-text-secondary font-bold uppercase tracking-wider">Extended Time (hours)</label>
             <input

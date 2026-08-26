@@ -1,4 +1,5 @@
 'use client';
+import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { cn } from '@/utils/cn';
@@ -318,6 +319,9 @@ export default function TaskCenterPage() {
   };
 
   const [blockingTaskInfo, setBlockingTaskInfo] = useState<{ id: number; status: string } | null>(null);
+  const [completeTaskOpen, setCompleteTaskOpen] = useState(false);
+  const [completingTaskId, setCompletingTaskId] = useState<number | null>(null);
+  const [taskExtendedTime, setTaskExtendedTime] = useState('');
   const [blockReason, setBlockReason] = useState('');
 
   const handleConfirmBlock = async () => {
@@ -336,6 +340,12 @@ export default function TaskCenterPage() {
     if (status === 'blocked') {
       setBlockingTaskInfo({ id, status });
       setBlockReason('');
+      return;
+    }
+    if (status === 'completed') {
+      setCompletingTaskId(id);
+      setTaskExtendedTime('');
+      setCompleteTaskOpen(true);
       return;
     }
     await workcenterService.updateStatus(id, status);
@@ -1279,6 +1289,31 @@ export default function TaskCenterPage() {
       />
 
       {/* Block Reason Dialog */}
+      <CompleteTaskModal
+        isOpen={completeTaskOpen}
+        onClose={() => {
+          setCompleteTaskOpen(false);
+          setCompletingTaskId(null);
+        }}
+        taskExtendedTime={taskExtendedTime}
+        setTaskExtendedTime={setTaskExtendedTime}
+        onSubmit={async (extendedTime, completionDate) => {
+          if (!completingTaskId) return;
+          const extTime = parseFloat(extendedTime);
+          await workcenterService.updateTask(completingTaskId, {
+            status: 'completed',
+            extended_time: isNaN(extTime) ? undefined : extTime,
+            actual_completion_date: completionDate
+          });
+          setCompleteTaskOpen(false);
+          setCompletingTaskId(null);
+          await loadData();
+          if (selectedTask && selectedTask.id === completingTaskId) {
+            await handleSelectTask({ id: completingTaskId });
+          }
+        }}
+      />
+
       <Dialog open={!!blockingTaskInfo} onOpenChange={() => setBlockingTaskInfo(null)}>
         <DialogContent className="max-w-sm p-5 font-sans">
           <DialogHeader>
@@ -1512,6 +1547,7 @@ function GroupedTaskFeed({
                     <div className="flex-1 min-w-[120px] pr-4">Task & Project</div>
                     <div className="w-20 flex-shrink-0">Start Date</div>
                     <div className="w-20 flex-shrink-0">End Date</div>
+                    <div className="w-24 flex-shrink-0">Completion Date</div>
                     <div className="w-20 flex-shrink-0">Overdue Days</div>
                     <div className="w-20 flex-shrink-0">Assignee</div>
                     <div className="w-24 flex-shrink-0">Transferred Info</div>
@@ -1569,6 +1605,11 @@ function GroupedTaskFeed({
                         {/* 3. End Date */}
                         <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
                           {task.deadline ? task.deadline : '—'}
+                        </div>
+
+                        {/* 4. Completion Date */}
+                        <div className="w-24 flex-shrink-0 text-[10px] font-bold text-text-secondary">
+                          {task.actual_completion_date ? task.actual_completion_date : '—'}
                         </div>
 
                         {/* 4. Overdue Days */}
@@ -2080,6 +2121,7 @@ function TaskTableView({
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Project</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Priority</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Deadline</TableHead>
+            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Actual Completion</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Status</TableHead>
           </TableRow>
         </TableHeader>

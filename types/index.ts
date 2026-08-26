@@ -72,6 +72,7 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   dueDate: string;
+  actual_completion_date?: string;
   assigneeId?: string;
   assignedTo: {
     id?: string;
