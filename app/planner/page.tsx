@@ -676,7 +676,7 @@ export default function PlannerPage() {
     
     const scheduledTasks = currentTasks
       .filter(t => {
-        const isTargetUser = String(t.assignedTo?.id || t.assigneeId) === String(selectedUserId);
+        const isTargetUser = viewTeamSchedule || String(t.assignedTo?.id || t.assigneeId) === String(selectedUserId);
         const isDateMatch = t.scheduledDate === dateStr || (!t.scheduledDate && t.dueDate && t.dueDate.startsWith(dateStr));
         return isTargetUser && isDateMatch;
       })
