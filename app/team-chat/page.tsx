@@ -475,7 +475,11 @@ export default function TeamChatPage() {
             members: members,
           } as Record<string, any>);
           
-          await channel.watch();
+          try {
+            await channel.watch();
+          } catch (e) {
+            console.warn(`Could not watch project channel ${p.id}:`, e);
+          }
           return channel;
         });
 
