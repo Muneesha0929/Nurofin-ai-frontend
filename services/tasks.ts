@@ -29,12 +29,15 @@ export const tasksService = {
         avatar: t.assigned_to?.avatar || ''
       },
       projectId: t.project_id?.toString(),
+      start_date: t.start_date || undefined,
       scheduledDate: t.scheduled_date || undefined,
       scheduledStartTime: t.scheduled_start_time || undefined,
       scheduledEndTime: t.scheduled_end_time || undefined,
       extended_time: t.extended_time,
       pushed_to_next_day: t.pushed_to_next_day,
-      actual_completion_date: t.actual_completion_date || undefined
+      actual_completion_date: t.actual_completion_date || undefined,
+      source: t.source,
+      is_issue: t.is_issue
     }));
   },
   
@@ -47,6 +50,7 @@ export const tasksService = {
       deadline: task.dueDate,
       assigned_to_id: (task as any).assigneeId ? parseInt((task as any).assigneeId, 10) : undefined,
       project_id: task.projectId ? parseInt(task.projectId, 10) : undefined,
+      start_date: (task as any).start_date || (task as any).startDate || undefined,
       scheduled_date: task.scheduledDate,
       scheduled_start_time: task.scheduledStartTime,
       scheduled_end_time: task.scheduledEndTime
@@ -88,6 +92,7 @@ export const tasksService = {
       deadline: task.dueDate,
       assigned_to_id: (task as any).assigneeId ? parseInt((task as any).assigneeId, 10) : undefined,
       project_id: task.projectId ? parseInt(task.projectId, 10) : undefined,
+      start_date: (task as any).start_date || undefined,
       scheduled_date: task.scheduledDate,
       scheduled_start_time: task.scheduledStartTime,
       scheduled_end_time: task.scheduledEndTime,

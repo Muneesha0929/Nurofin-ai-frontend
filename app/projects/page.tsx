@@ -921,7 +921,7 @@ export default function ProjectsPage() {
                           <select value={quickTaskStatus} onChange={(e) => setQuickTaskStatus(e.target.value)} className="w-full h-8 bg-background-secondary border border-border-subtle rounded px-2 text-xs text-text-primary outline-none focus:border-accent-blue transition-colors cursor-pointer font-medium">
                             <option value="in_progress">In Progress</option>
                             <option value="completed">Done</option>
-                            <option value="blocked">Blocked</option>
+                            <option value="blocked">On Hold</option>
                           </select>
                         </div>
                       </div>
@@ -1149,7 +1149,7 @@ export default function ProjectsPage() {
                       <div className="space-y-1"><label className="text-[10px] font-bold text-text-secondary uppercase">Description</label><textarea value={editForm.description} onChange={e => setEditForm({...editForm, description: e.target.value})} rows={2} className="w-full bg-background-primary border border-border-subtle rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue" /></div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1"><label className="text-[10px] font-bold text-text-secondary uppercase">Priority</label><select value={editForm.priority} onChange={e => setEditForm({...editForm, priority: e.target.value})} className="w-full h-8 bg-background-primary border border-border-subtle rounded px-2 text-xs text-text-primary outline-none focus:border-accent-blue cursor-pointer font-medium"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></div>
-                        <div className="space-y-1"><label className="text-[10px] font-bold text-text-secondary uppercase">Status</label><select value={editForm.status} onChange={e => setEditForm({...editForm, status: e.target.value})} className="w-full h-8 bg-background-primary border border-border-subtle rounded px-2 text-xs text-text-primary outline-none focus:border-accent-blue cursor-pointer font-medium"><option value="in_progress">In Progress</option><option value="completed">Done</option><option value="blocked">Blocked</option></select></div>
+                        <div className="space-y-1"><label className="text-[10px] font-bold text-text-secondary uppercase">Status</label><select value={editForm.status} onChange={e => setEditForm({...editForm, status: e.target.value})} className="w-full h-8 bg-background-primary border border-border-subtle rounded px-2 text-xs text-text-primary outline-none focus:border-accent-blue cursor-pointer font-medium"><option value="in_progress">In Progress</option><option value="completed">Done</option><option value="blocked">On Hold</option></select></div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1"><label className="text-[10px] font-bold text-text-secondary uppercase">Deadline</label><input type="date" value={editForm.deadline} onChange={e => setEditForm({...editForm, deadline: e.target.value})} className="w-full h-8 bg-background-primary border border-border-subtle rounded px-2 text-xs text-text-primary outline-none focus:border-accent-blue cursor-pointer" /></div>
@@ -1791,13 +1791,13 @@ export default function ProjectsPage() {
 const STATUS_COLS = [
   { key: 'in_progress', label: 'In Progress', color: 'text-accent-blue', bg: 'bg-accent-blue/10' },
   { key: 'completed', label: 'Done', color: 'text-accent-green', bg: 'bg-accent-green/10' },
-  { key: 'blocked', label: 'Blocked', color: 'text-accent-red', bg: 'bg-accent-red/10' },
+  { key: 'blocked', label: 'On Hold', color: 'text-accent-red', bg: 'bg-accent-red/10' },
 ] as const;
 
 const STATUS_OPTIONS = [
   { value: 'in_progress', label: 'In Progress' },
   { value: 'completed', label: 'Done' },
-  { value: 'blocked', label: 'Blocked' },
+  { value: 'blocked', label: 'On Hold' },
 ];
 
 function GroupedTaskFeed({

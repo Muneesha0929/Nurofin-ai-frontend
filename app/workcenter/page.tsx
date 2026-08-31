@@ -89,13 +89,13 @@ import {
 const STATUS_COLS = [
   { key: 'in_progress', label: 'In Progress', color: 'text-accent-blue', bg: 'bg-accent-blue/10' },
   { key: 'completed', label: 'Done', color: 'text-accent-green', bg: 'bg-accent-green/10' },
-  { key: 'blocked', label: 'Blocked', color: 'text-accent-red', bg: 'bg-accent-red/10' },
+  { key: 'blocked', label: 'On Hold', color: 'text-accent-red', bg: 'bg-accent-red/10' },
 ] as const;
 
 const STATUS_OPTIONS = [
   { value: 'in_progress', label: 'In Progress' },
   { value: 'completed', label: 'Done' },
-  { value: 'blocked', label: 'Blocked' },
+  { value: 'blocked', label: 'On Hold' },
 ];
 
 const PRIORITY_OPTIONS = [
@@ -768,7 +768,7 @@ export default function TaskCenterPage() {
                 <option value="">All Statuses</option>
                 <option value="in_progress">In Progress</option>
                 <option value="completed">Done</option>
-                <option value="blocked">Blocked</option>
+                <option value="blocked">On Hold</option>
               </select>
               <select
                 value={priorityFilter}
@@ -948,7 +948,7 @@ export default function TaskCenterPage() {
 
               <div className="bg-background-secondary border border-border-subtle rounded-xl p-4 flex flex-col justify-between h-28 hover:-translate-y-0.5 transition-transform duration-200">
                 <div className="flex items-center justify-between text-text-secondary">
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Blocked Tasks</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Tasks On Hold</span>
                   <AlertCircle className="w-4 h-4 text-accent-orange" />
                 </div>
                 <div>

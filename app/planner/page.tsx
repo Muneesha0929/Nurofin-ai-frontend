@@ -36,6 +36,7 @@ import { meetingsService } from '@/services/meetings';
 import { plannerService, PlannerUser, ScheduleEvent } from '@/services/planner';
 import { tasksService } from '@/services/tasks';
 import { projectsService } from '@/services/projects';
+import { issuesService } from '@/services/issues';
 import { useStore } from '@/store';
 import { Task } from '@/types';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
@@ -69,7 +70,8 @@ export default function PlannerPage() {
 
   // Event Form State
   const [newEventTitle, setNewEventTitle] = useState('');
-  const [newEventDate, setNewEventDate] = useState('');
+  const [newEventStartDate, setNewEventStartDate] = useState('');
+  const [newEventEndDate, setNewEventEndDate] = useState('');
   const [newEventStartTime, setNewEventStartTime] = useState('');
   const [newEventEndTime, setNewEventEndTime] = useState('');
   const [showParticipants, setShowParticipants] = useState(false);
@@ -88,6 +90,7 @@ export default function PlannerPage() {
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState('medium');
+  const [newTaskStartDate, setNewTaskStartDate] = useState('');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
   const [newTaskOpen, setNewTaskOpen] = useState(false);
 
@@ -230,12 +233,22 @@ export default function PlannerPage() {
   const submitCompleteTask = async (extendedTimeStr: string, completionDate: string) => {
     if (!selectedTaskId) return;
     try {
+      const task = tasks.find(t => t.id === selectedTaskId);
       const extended_time = parseFloat(extendedTimeStr);
-      await tasksService.updateTask(selectedTaskId, {
-        status: 'completed',
-        extended_time: isNaN(extended_time) ? undefined : extended_time,
-        actual_completion_date: completionDate,
-      });
+      
+      if (task?.source === 'issue') {
+        await issuesService.updateIssue(Number(selectedTaskId), { 
+          status: 'resolved', 
+          actual_completion_date: completionDate 
+        } as any);
+      } else {
+        await tasksService.updateTask(selectedTaskId, {
+          status: 'completed',
+          extended_time: isNaN(extended_time) ? undefined : extended_time,
+          actual_completion_date: completionDate,
+        });
+      }
+      
       setCompleteTaskOpen(false);
       setSelectedTaskId(null);
       await loadTasks();
@@ -247,7 +260,7 @@ export default function PlannerPage() {
   useEffect(() => {
     loadTeammates();
     loadProjects();
-    setNewEventDate(new Date().toISOString().split('T')[0]);
+    setNewEventStartDate(new Date().toISOString().split('T')[0]);
     setNewTaskDueDate(new Date().toISOString().split('T')[0]);
   }, []);
 
@@ -263,7 +276,7 @@ export default function PlannerPage() {
   const [availabilityWarnings, setAvailabilityWarnings] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (!newEventDate || !newEventStartTime) {
+    if (!newEventStartDate || !newEventStartTime) {
       setConflictData(null);
       return;
     }
@@ -285,7 +298,7 @@ export default function PlannerPage() {
       
       for (const id of idsToCheck) {
         try {
-          const res = await fetch(`/api/v1/users/${id}/availability?date=${newEventDate}&start_time=${newEventStartTime}&end_time=${computedEndTime}`, {
+          const res = await fetch(`/api/v1/users/${id}/availability?date=${newEventStartDate}&start_time=${newEventStartTime}&end_time=${computedEndTime}`, {
             headers: {
               'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
             }
@@ -314,7 +327,7 @@ export default function PlannerPage() {
       }
     };
     checkAvailability();
-  }, [newEventDate, newEventStartTime, newEventParticipantIds, selectedUserId, teammates]);
+  }, [newEventStartDate, newEventStartTime, newEventParticipantIds, selectedUserId, teammates]);
 
   useEffect(() => {
     if (!taskScheduleDate || !taskScheduleStartTime) {
@@ -356,8 +369,8 @@ export default function PlannerPage() {
 
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newEventTitle || !newEventDate || !newEventStartTime || !newEventEndTime) {
-      alert("Please fill in all required fields (title, date, start time, end time).");
+    if (!newEventTitle || !newEventStartDate || !newEventEndDate || !newEventStartTime || !newEventEndTime) {
+      alert("Please fill in all required fields (title, start date, end date, start time, end time).");
       return;
     }
     if (conflictData) {
@@ -371,27 +384,30 @@ export default function PlannerPage() {
           description: '',
           status: 'in_progress',
           priority: 'medium',
-          dueDate: newEventDate,
-          scheduledDate: newEventDate,
+          startDate: newEventStartDate,
+          dueDate: newEventEndDate,
+          scheduledDate: newEventStartDate,
           scheduledStartTime: newEventStartTime,
           scheduledEndTime: newEventEndTime,
-          assigneeId: selectedUserId.toString()
+          assigneeId: selectedUserId.toString(),
+          projectId: newEventTaskId !== 'none' ? (allTasks.find(t => String(t.id) === newEventTaskId)?.projectId || (newEventProjectId !== 'none' ? newEventProjectId : undefined)) : (newEventProjectId !== 'none' ? newEventProjectId : undefined),
+          parentId: newEventTaskId !== 'none' ? newEventTaskId : undefined
         } as any);
         loadTasks();
       } else {
         const newEvent = await meetingsService.createMeeting({
           title: newEventTitle,
-          date: newEventDate,
+          date: newEventStartDate,
           time: newEventStartTime,
           end_time: newEventEndTime,
           type: newEventType,
           participants: newEventParticipants.map(String) as any,
-          project_id: newEventProjectId !== 'none' ? newEventProjectId : undefined,
+          project_id: newEventTaskId !== 'none' ? (allTasks.find(t => String(t.id) === newEventTaskId)?.projectId || (newEventProjectId !== 'none' ? newEventProjectId : undefined)) : (newEventProjectId !== 'none' ? newEventProjectId : undefined),
           task_id: newEventTaskId !== 'none' ? newEventTaskId : undefined
         });
         if (newEventTaskId !== 'none') {
           await tasksService.updateTask(newEventTaskId, {
-            scheduledDate: newEventDate,
+            scheduledDate: newEventStartDate,
             scheduledStartTime: newEventStartTime,
             scheduledEndTime: newEventEndTime,
           });
@@ -421,6 +437,7 @@ export default function PlannerPage() {
         description: newTaskDescription,
         status: 'in_progress',
         priority: newTaskPriority,
+        startDate: newTaskStartDate,
         dueDate: newTaskDueDate,
         assigneeId: selectedUserId.toString()
       } as any);
@@ -441,11 +458,15 @@ export default function PlannerPage() {
       const task = tasks.find(t => t.id === selectedTaskId);
       if (!task) return;
       
-      await tasksService.updateTask(selectedTaskId, {
-        dueDate: taskPushDate,
-        scheduledDate: taskPushDate,
-        pushed_to_next_day: true
-      });
+      if (task.source === 'issue') {
+        await issuesService.updateIssue(Number(selectedTaskId), { deadline: taskPushDate, scheduled_date: taskPushDate } as any);
+      } else {
+        await tasksService.updateTask(selectedTaskId, {
+          dueDate: taskPushDate,
+          scheduledDate: taskPushDate,
+          pushed_to_next_day: true
+        });
+      }
       
       setTaskPushOpen(false);
       setSelectedTaskId(null);
@@ -674,27 +695,47 @@ export default function PlannerPage() {
       }
     });
     
+    const parentIds = new Set(allTasks.map((t: any) => t.parentId).filter(Boolean));
+    
     const scheduledTasks = currentTasks
       .filter(t => {
         const isTargetUser = viewTeamSchedule || String(t.assignedTo?.id || t.assigneeId) === String(selectedUserId);
-        const isDateMatch = t.scheduledDate === dateStr || (!t.scheduledDate && t.dueDate && t.dueDate.startsWith(dateStr));
-        return isTargetUser && isDateMatch;
+        
+        let isDateMatch = false;
+        if (t.status === 'completed' || t.status === 'done') {
+           if (t.actual_completion_date) {
+               isDateMatch = t.actual_completion_date.startsWith(dateStr);
+           } else {
+               isDateMatch = t.scheduledDate === dateStr || !!(!t.scheduledDate && t.dueDate && t.dueDate.startsWith(dateStr));
+           }
+        } else {
+           isDateMatch = t.scheduledDate === dateStr || !!(!t.scheduledDate && t.dueDate && t.dueDate.startsWith(dateStr));
+        }
+        
+        const isLeaf = !parentIds.has(t.id);
+        return isTargetUser && isDateMatch && isLeaf;
       })
-      .map(t => ({
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        date: t.scheduledDate || (t.dueDate ? t.dueDate.split('T')[0] : dateStr),
-        start_time: t.scheduledStartTime,
-        end_time: t.scheduledEndTime,
-        assigned_to: t.assignedTo?.id || t.assigneeId,
-        source: 'nurofin_task',
-        type: 'task',
-        priority: t.priority,
-        status: t.status,
-        extended_time: t.extended_time,
-        pushed_to_next_day: t.pushed_to_next_day
-      }));
+      .map(t => {
+        let taskDate = t.scheduledDate || (t.dueDate ? t.dueDate.split('T')[0] : dateStr);
+        if ((t.status === 'completed' || t.status === 'done') && t.actual_completion_date) {
+            taskDate = t.actual_completion_date.split('T')[0];
+        }
+        return {
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          date: taskDate,
+          start_time: t.scheduledStartTime,
+          end_time: t.scheduledEndTime,
+          assigned_to: t.assignedTo?.id || t.assigneeId,
+          source: 'nurofin_task',
+          type: 'task',
+          priority: t.priority,
+          status: t.status,
+          extended_time: t.extended_time,
+          pushed_to_next_day: t.pushed_to_next_day
+        };
+      });
 
     const localMapped = local.map(e => ({ ...e, source: 'nurofin' }));
     const finalLocal: any[] = [];
@@ -949,7 +990,7 @@ export default function PlannerPage() {
                             key={idx}
                             type="button"
                             onClick={() => {
-                              setNewEventDate(alt.date);
+                              setNewEventStartDate(alt.date);
                               setNewEventStartTime(alt.start_time);
                               setConflictData(null);
                             }}
@@ -974,11 +1015,25 @@ export default function PlannerPage() {
                 />
               </div>
               <div className="space-y-1.5 sm:col-span-1">
-                <label className="text-[10px] text-text-secondary font-bold uppercase tracking-wider">Date</label>
+                <label className="text-[10px] text-text-secondary font-bold uppercase tracking-wider">Start Date</label>
                 <input
                   type="date"
-                  value={newEventDate}
-                  onChange={e => setNewEventDate(e.target.value)}
+                  value={newEventStartDate}
+                  onChange={e => {
+                    setNewEventStartDate(e.target.value);
+                    if (!newEventEndDate || newEventEndDate < e.target.value) {
+                      setNewEventEndDate(e.target.value);
+                    }
+                  }}
+                  className="w-full h-10 bg-background-primary border border-border-subtle rounded-lg px-3 text-sm text-text-primary focus:border-accent-blue transition-all"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-1">
+                <label className="text-[10px] text-text-secondary font-bold uppercase tracking-wider">End Date</label>
+                <input
+                  type="date"
+                  value={newEventEndDate}
+                  onChange={e => setNewEventEndDate(e.target.value)}
                   className="w-full h-10 bg-background-primary border border-border-subtle rounded-lg px-3 text-sm text-text-primary focus:border-accent-blue transition-all"
                 />
               </div>
@@ -1043,9 +1098,13 @@ export default function PlannerPage() {
                   className="w-full h-10 bg-background-primary border border-border-subtle rounded-lg px-3 text-sm text-text-primary focus:border-accent-blue transition-all"
                 >
                   <option value="none">None</option>
-                  {allTasks.filter((t: any) => newEventProjectId === 'none' || String(t.projectId) === String(newEventProjectId)).map((t: any) => (
-                    <option key={t.id} value={t.id}>{t.title}</option>
-                  ))}
+                  {allTasks.filter((t: any) => newEventProjectId === 'none' || String(t.projectId) === String(newEventProjectId)).map((t: any) => {
+                    const parent = t.parentId ? allTasks.find((p: any) => p.id === t.parentId) : null;
+                    const displayTitle = parent ? `${parent.title} ➔ ${t.title}` : t.title;
+                    return (
+                      <option key={t.id} value={t.id}>{displayTitle}</option>
+                    );
+                  })}
                 </select>
               </div>
               <div className="space-y-1.5 sm:col-span-6">
@@ -1137,6 +1196,20 @@ export default function PlannerPage() {
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
                 </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-text-secondary font-bold uppercase tracking-wider">Start Date</label>
+                <input
+                  type="date"
+                  value={newTaskStartDate}
+                  onChange={e => {
+                    setNewTaskStartDate(e.target.value);
+                    if (!newTaskDueDate || newTaskDueDate < e.target.value) {
+                      setNewTaskDueDate(e.target.value);
+                    }
+                  }}
+                  className="w-full h-10 bg-background-primary border border-border-subtle rounded-lg px-3 text-sm text-text-primary focus:border-accent-purple transition-all"
+                />
               </div>
               <div className="space-y-1.5">
                 <label className="text-[10px] text-text-secondary font-bold uppercase tracking-wider">Due Date</label>
@@ -1628,7 +1701,7 @@ export default function PlannerPage() {
                                       <option value="in_progress">In Prog</option>
                                       <option value="review">Review</option>
                                       <option value="completed">Done</option>
-                                      <option value="blocked">Block</option>
+                                      <option value="blocked">On Hold</option>
                                       <option value="done">Done</option>
                                     </select>
                                   )}
@@ -1862,7 +1935,7 @@ export default function PlannerPage() {
                               <option value="in_progress">In Progress</option>
                               <option value="review">Review</option>
                               <option value="completed">Completed</option>
-                              <option value="blocked">Blocked</option>
+                              <option value="blocked">On Hold</option>
                               <option value="done">Done</option>
                             </select>
                           </div>

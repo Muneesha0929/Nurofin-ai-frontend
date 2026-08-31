@@ -144,7 +144,7 @@ export default function TaskCenterPage() {
       case 'review': return 'Under Review';
       case 'done': return 'Done';
       case 'completed': return 'Completed';
-      case 'blocked': return 'Blocked';
+      case 'blocked': return 'On Hold';
     }
   };
 
@@ -371,7 +371,7 @@ export default function TaskCenterPage() {
                             <option value="in_progress">In Progress</option>
                             <option value="review">Review</option>
                             <option value="completed">Completed</option>
-                            <option value="blocked">Blocked</option>
+                            <option value="blocked">On Hold</option>
                             <option value="done">Done</option>
                           </select>
                         </div>
@@ -675,7 +675,7 @@ export default function TaskCenterPage() {
                 <option value="in_progress">In Progress</option>
                 <option value="review">Under Review</option>
                 <option value="completed">Completed</option>
-                <option value="blocked">Blocked</option>
+                <option value="blocked">On Hold</option>
                 <option value="done">Done</option>
               </select>
             </div>
