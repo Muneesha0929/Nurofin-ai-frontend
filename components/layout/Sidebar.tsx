@@ -20,7 +20,8 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageSquare,
-  CalendarDays
+  CalendarDays,
+  Target
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
@@ -43,6 +44,7 @@ export const navSections: NavSection[] = [
       { label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
       { label: 'Projects', href: '/projects', icon: Briefcase },
       { label: 'Task Center', href: '/workcenter', icon: CheckSquare },
+      { label: 'My Targets', href: '/targets', icon: Target },
     ]
   },
   {
@@ -63,6 +65,7 @@ export const navSections: NavSection[] = [
       { label: 'Notifications', href: '/notifications', icon: Bell },
       { label: 'Account Settings', href: '/profile', icon: UserCircle },
       { label: 'User Management', href: '/admin', icon: Settings },
+      { label: 'Targets Admin', href: '/targets/ceo', icon: Target },
     ]
   }
 ];
