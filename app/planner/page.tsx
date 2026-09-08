@@ -80,6 +80,8 @@ export default function PlannerPage() {
   const [selectedTaskDetails, setSelectedTaskDetails] = useState<any>(null);
   const [newEventType, setNewEventType] = useState('meeting');
   const [newEventOpen, setNewEventOpen] = useState(false);
+  const [unscheduledSlotOpen, setUnscheduledSlotOpen] = useState(false);
+  const [unscheduledSlotHour, setUnscheduledSlotHour] = useState<number | null>(null);
   const [conflictData, setConflictData] = useState<{message: string, alternative_times: any[]} | null>(null);
   const [newEventParticipantIds, setNewEventParticipantIds] = useState<number[]>([]);
   const [newEventParticipants, setNewEventParticipants] = useState<number[]>([]);
@@ -211,8 +213,9 @@ export default function PlannerPage() {
       setAllTasks(data);
       
       const userTasks = data.filter(t => 
-        String(t.assignedTo?.id) === String(selectedUserId) ||
-        String(t.assigneeId) === String(selectedUserId)
+        (String(t.assignedTo?.id) === String(selectedUserId) ||
+        String(t.assigneeId) === String(selectedUserId)) &&
+        (!t.has_subtasks) // Only show leaf tasks (tasks with no subtasks)
       );
       
       setTasks(userTasks);
@@ -459,7 +462,7 @@ export default function PlannerPage() {
       if (!task) return;
       
       if (task.source === 'issue') {
-        await issuesService.updateIssue(Number(selectedTaskId), { deadline: taskPushDate, scheduled_date: taskPushDate } as any);
+        await issuesService.updateIssue(Number(selectedTaskId), { deadline: taskPushDate, scheduled_date: taskPushDate, pushed_to_next_day: true } as any);
       } else {
         await tasksService.updateTask(selectedTaskId, {
           dueDate: taskPushDate,
@@ -488,12 +491,20 @@ export default function PlannerPage() {
       const task = tasks.find(t => t.id === selectedTaskId);
       if (!task) return;
       
-      await tasksService.updateTask(selectedTaskId, {
-        ...task,
-        scheduledDate: taskScheduleDate,
-        scheduledStartTime: taskScheduleStartTime,
-        scheduledEndTime: taskScheduleEndTime
-      });
+      if (task.source === 'issue') {
+        await issuesService.updateIssue(Number(selectedTaskId), {
+          scheduled_date: taskScheduleDate,
+          scheduled_start_time: taskScheduleStartTime,
+          scheduled_end_time: taskScheduleEndTime
+        } as any);
+      } else {
+        await tasksService.updateTask(selectedTaskId, {
+          ...task,
+          scheduledDate: taskScheduleDate,
+          scheduledStartTime: taskScheduleStartTime,
+          scheduledEndTime: taskScheduleEndTime
+        });
+      }
       
       setScheduleTaskOpen(false);
       setSelectedTaskId(null);
@@ -1237,6 +1248,88 @@ export default function PlannerPage() {
               </div>
             </motion.form>
           )}
+
+          {/* Unscheduled Tasks Modal */}
+          {unscheduledSlotOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: -20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: -20 }}
+                className="bg-surface-card border border-border-subtle rounded-xl p-6 shadow-xl w-full max-w-lg flex flex-col gap-5 relative z-[60]"
+              >
+                <h3 className="text-lg font-bold text-text-primary flex items-center gap-2">
+                  <CalendarDays className="w-5 h-5 text-accent-blue" /> Schedule Task ({unscheduledSlotHour != null ? `${unscheduledSlotHour % 12 === 0 ? 12 : unscheduledSlotHour % 12}:00 ${unscheduledSlotHour >= 12 ? 'PM' : 'AM'}` : ''})
+                </h3>
+                <p className="text-xs text-text-secondary">Select an unscheduled task to assign it to this time slot.</p>
+                
+                <div className="max-h-[300px] overflow-y-auto space-y-2 pr-2">
+                  {tasks.filter(t => !t.scheduledDate && t.status !== 'completed' && t.status !== 'done').length === 0 ? (
+                    <div className="text-center py-6 text-text-muted text-xs italic">
+                      No unscheduled tasks available.
+                    </div>
+                  ) : (
+                    tasks.filter(t => !t.scheduledDate && t.status !== 'completed' && t.status !== 'done').map(t => (
+                      <div 
+                        key={t.id}
+                        onClick={async () => {
+                          const dateStr = formatDateStr(selectedDate);
+                          const startHour = unscheduledSlotHour || 0;
+                          const endHour = startHour + 1;
+                          const startStr = `${startHour.toString().padStart(2, '0')}:00`;
+                          const endStr = `${endHour.toString().padStart(2, '0')}:00`;
+                          
+                          try {
+                            if (t.source === 'issue') {
+                              await issuesService.updateIssue(Number(t.id), {
+                                scheduled_date: dateStr,
+                                scheduled_start_time: startStr,
+                                scheduled_end_time: endStr
+                              } as any);
+                            } else {
+                              await tasksService.updateTask(t.id, {
+                                ...t,
+                                scheduledDate: dateStr,
+                                scheduledStartTime: startStr,
+                                scheduledEndTime: endStr
+                              });
+                            }
+                            setUnscheduledSlotOpen(false);
+                            loadTasks();
+                            loadSchedule();
+                          } catch (err) {
+                            console.error("Failed to quick-schedule task:", err);
+                          }
+                        }}
+                        className="p-3 border border-border-subtle hover:border-accent-blue/50 bg-background-primary/50 hover:bg-accent-blue/5 rounded-lg cursor-pointer transition-all flex flex-col gap-1"
+                      >
+                        <div className="text-xs font-bold text-text-primary">{t.title}</div>
+                        <div className="text-[10px] text-text-secondary flex gap-3">
+                          <span className={t.priority === 'high' || t.priority === 'critical' ? 'text-accent-red font-semibold' : ''}>
+                            Priority: {t.priority}
+                          </span>
+                          {t.is_issue && <span className="text-accent-orange font-semibold">Issue</span>}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                
+                <div className="flex gap-2 justify-end h-10 items-center mt-2 border-t border-border-subtle pt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUnscheduledSlotOpen(false);
+                      setUnscheduledSlotHour(null);
+                    }}
+                    className="px-4 h-10 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded-lg font-bold transition-all text-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
         </AnimatePresence>
 
         {/* Views */}
@@ -1592,8 +1685,20 @@ export default function PlannerPage() {
                                     {hourEvents.map((evt, idx) => renderEventCard(evt, idx))}
                                   </div>
                                 ) : (
-                                  <div className="flex-1 border border-dashed border-border-subtle p-4 rounded-xl text-text-muted italic bg-background-primary/30 flex items-center justify-center opacity-50 text-xs font-medium">
+                                  <div className="flex-1 border border-dashed border-border-subtle p-4 rounded-xl text-text-muted italic bg-background-primary/30 flex items-center justify-center opacity-50 text-xs font-medium relative group hover:opacity-100 hover:bg-surface-hover/50 transition-all">
                                     No events scheduled
+                                    {isOwnSchedule && (
+                                      <button 
+                                        onClick={() => {
+                                          setUnscheduledSlotHour(hourNum as number);
+                                          setUnscheduledSlotOpen(true);
+                                        }}
+                                        className="absolute right-4 p-1.5 rounded-full bg-accent-blue/10 text-accent-blue opacity-0 group-hover:opacity-100 transition-opacity hover:bg-accent-blue hover:text-white"
+                                        title="Schedule a task here"
+                                      >
+                                        <Plus className="w-4 h-4" />
+                                      </button>
+                                    )}
                                   </div>
                                 )}
                               </motion.div>
@@ -1889,7 +1994,7 @@ export default function PlannerPage() {
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setSelectedTaskId(task.id);
-                                  setTaskScheduleDate(new Date().toISOString().split('T')[0]);
+                                  setTaskScheduleDate(formatDateStr(new Date()));
                                   setScheduleTaskOpen(true);
                                 }}
                                 className="px-2.5 py-1 bg-background-secondary hover:bg-surface-hover border border-border-subtle/50 text-[9px] font-bold rounded text-accent-purple hover:text-accent-purple/80 transition-all flex items-center gap-1 select-none"

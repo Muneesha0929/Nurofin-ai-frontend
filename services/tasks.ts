@@ -13,16 +13,20 @@ const getHeaders = () => {
 
 export const tasksService = {
   getTasks: async (): Promise<Task[]> => {
-    const res = await fetch('/api/v1/tasks', { headers: getHeaders() });
-    if (!res.ok) throw new Error('Failed to fetch tasks');
+    const res = await fetch('/api/v1/tasks?limit=1000', { headers: getHeaders() });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error('Failed to fetch tasks:', res.status, text);
+      throw new Error(`Failed to load tasks: ${res.status} ${text.substring(0, 50)}`);
+    }
     const json = await res.json();
-    return (json.data || []).map((t: any) => ({
+    return (json.data || []).filter((t: any) => t && t.id).map((t: any) => ({
       id: t.id.toString(),
-      title: t.title,
+      title: t.title || 'Untitled',
       description: t.description || '',
       status: t.status,
       priority: t.priority,
-      dueDate: t.deadline || 'No deadline',
+      dueDate: t.deadline || '',
       assignedTo: {
         id: t.assigned_to_id?.toString() || t.assigned_to?.id?.toString() || '',
         name: t.assigned_to?.name || 'Unassigned',
@@ -36,6 +40,8 @@ export const tasksService = {
       extended_time: t.extended_time,
       pushed_to_next_day: t.pushed_to_next_day,
       actual_completion_date: t.actual_completion_date || undefined,
+      parentId: t.parent_id?.toString() || undefined,
+      has_subtasks: t.has_subtasks || false,
       source: t.source,
       is_issue: t.is_issue
     }));
@@ -48,12 +54,13 @@ export const tasksService = {
       status: task.status,
       priority: task.priority,
       deadline: task.dueDate,
-      assigned_to_id: (task as any).assigneeId ? parseInt((task as any).assigneeId, 10) : undefined,
-      project_id: task.projectId ? parseInt(task.projectId, 10) : undefined,
+      assigned_to_id: (task as any).assigneeId ? parseInt((task as any).assigneeId, 10) : ((task as any).assigneeId === "" ? null : undefined),
+      project_id: task.projectId ? parseInt(task.projectId, 10) : (task.projectId === "" ? null : undefined),
       start_date: (task as any).start_date || (task as any).startDate || undefined,
       scheduled_date: task.scheduledDate,
       scheduled_start_time: task.scheduledStartTime,
-      scheduled_end_time: task.scheduledEndTime
+      scheduled_end_time: task.scheduledEndTime,
+      parent_id: (task as any).parentId ? parseInt((task as any).parentId, 10) : undefined
     };
     const res = await fetch('/api/v1/tasks', {
       method: 'POST',
@@ -69,7 +76,7 @@ export const tasksService = {
       description: t.description || '',
       status: t.status,
       priority: t.priority,
-      dueDate: t.deadline || 'No deadline',
+      dueDate: t.deadline || '',
       assignedTo: {
         name: t.assigned_to?.name || 'Unassigned',
         avatar: t.assigned_to?.avatar || ''
@@ -90,15 +97,16 @@ export const tasksService = {
       status: task.status,
       priority: task.priority,
       deadline: task.dueDate,
-      assigned_to_id: (task as any).assigneeId ? parseInt((task as any).assigneeId, 10) : undefined,
-      project_id: task.projectId ? parseInt(task.projectId, 10) : undefined,
+      assigned_to_id: (task as any).assigneeId ? parseInt((task as any).assigneeId, 10) : ((task as any).assigneeId === "" ? null : undefined),
+      project_id: task.projectId ? parseInt(task.projectId, 10) : (task.projectId === "" ? null : undefined),
       start_date: (task as any).start_date || undefined,
       scheduled_date: task.scheduledDate,
       scheduled_start_time: task.scheduledStartTime,
       scheduled_end_time: task.scheduledEndTime,
       extended_time: task.extended_time,
       pushed_to_next_day: task.pushed_to_next_day,
-      actual_completion_date: task.actual_completion_date
+      actual_completion_date: task.actual_completion_date,
+      parent_id: (task as any).parentId ? parseInt((task as any).parentId, 10) : undefined
     };
     // Remove undefined values
     Object.keys(payload).forEach(key => (payload as any)[key] === undefined && delete (payload as any)[key]);
@@ -117,7 +125,7 @@ export const tasksService = {
       description: t.description || '',
       status: t.status,
       priority: t.priority,
-      dueDate: t.deadline || 'No deadline',
+      dueDate: t.deadline || '',
       assignedTo: {
         name: t.assigned_to?.name || 'Unassigned',
         avatar: t.assigned_to?.avatar || ''

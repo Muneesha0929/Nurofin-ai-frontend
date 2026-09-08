@@ -27,6 +27,8 @@ import {
   Flag,
   RefreshCw,
   Paperclip,
+  Edit2,
+  Trash2,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -63,6 +65,7 @@ function IssueCenterPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editIssueId, setEditIssueId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [severityFilter, setSeverityFilter] = useState('all');
@@ -160,16 +163,29 @@ function IssueCenterPage() {
   const onSubmit = async (data: IssueFormValues) => {
     setSubmitting(true);
     try {
-      await issuesService.createIssue({
-        title: data.title,
-        description: data.description,
-        priority: data.severity,
-        category: data.category || 'Bug',
-        deadline: data.deadline || undefined,
-        assigned_user_id: data.assigned_user_id ? parseInt(data.assigned_user_id) : undefined,
-        project_id: data.project_id ? parseInt(data.project_id) : undefined,
-        attachments: data.attachments || undefined,
-      });
+      if (editIssueId) {
+        await issuesService.updateIssue(editIssueId, {
+          title: data.title,
+          description: data.description,
+          priority: data.severity,
+          category: data.category || 'Bug',
+          deadline: data.deadline || undefined,
+          assigned_user_id: data.assigned_user_id ? parseInt(data.assigned_user_id) : undefined,
+          project_id: data.project_id ? parseInt(data.project_id) : undefined,
+          attachments: data.attachments || undefined,
+        } as any);
+      } else {
+        await issuesService.createIssue({
+          title: data.title,
+          description: data.description,
+          priority: data.severity,
+          category: data.category || 'Bug',
+          deadline: data.deadline || undefined,
+          assigned_user_id: data.assigned_user_id ? parseInt(data.assigned_user_id) : undefined,
+          project_id: data.project_id ? parseInt(data.project_id) : undefined,
+          attachments: data.attachments || undefined,
+        });
+      }
       reset({
         title: '',
         description: '',
@@ -181,9 +197,10 @@ function IssueCenterPage() {
         attachments: [],
       });
       setCreateOpen(false);
+      setEditIssueId(null);
       await loadData();
     } catch (err: any) {
-      alert(err.message || 'Failed to report issue');
+      alert(err.message || 'Failed to save issue');
     } finally {
       setSubmitting(false);
     }
@@ -199,6 +216,20 @@ function IssueCenterPage() {
       }
     } catch (err: any) {
       alert(err.message || 'Failed to update status');
+    }
+  };
+
+  const handleDeleteIssue = async (issueId: number) => {
+    if (!window.confirm("Are you sure you want to delete this issue?")) return;
+    try {
+      await issuesService.deleteIssue(issueId);
+      if (selectedIssue && selectedIssue.id === String(issueId)) {
+        setDetailOpen(false);
+        setSelectedIssue(null);
+      }
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete issue');
     }
   };
 
@@ -359,7 +390,20 @@ function IssueCenterPage() {
             <RefreshCw className="w-4 h-4" /> Refresh
           </button>
           <button
-            onClick={() => setCreateOpen(true)}
+            onClick={() => {
+              setEditIssueId(null);
+              reset({
+                title: '',
+                description: '',
+                severity: 'medium',
+                category: 'Bug',
+                assigned_user_id: '',
+                project_id: '',
+                deadline: '',
+                attachments: [],
+              });
+              setCreateOpen(true);
+            }}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-blue hover:bg-accent-blue-hover text-white text-xs font-semibold rounded-md shadow transition-colors"
           >
             <Plus className="w-4 h-4" /> Report Issue
@@ -527,9 +571,9 @@ function IssueCenterPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Report Issue</DialogTitle>
+            <DialogTitle>{editIssueId ? 'Edit Issue' : 'Report Issue'}</DialogTitle>
             <DialogDescription>
-              Report a bug, feature request, or blocker. The assignee will be notified immediately.
+              {editIssueId ? 'Update issue details.' : 'Report a bug, feature request, or blocker. The assignee will be notified immediately.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -659,7 +703,7 @@ function IssueCenterPage() {
                 className="px-3 py-1.5 bg-accent-blue hover:bg-accent-blue-hover text-white text-2xs font-semibold rounded shadow transition-all flex items-center gap-1.5 disabled:opacity-50"
               >
                 {submitting && <Loader2 className="w-3 h-3 animate-spin" />}
-                Submit Issue
+                {editIssueId ? 'Save Changes' : 'Submit Issue'}
               </button>
             </DialogFooter>
           </form>
@@ -672,14 +716,48 @@ function IssueCenterPage() {
           {selectedIssue && (
             <>
               <DialogHeader>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <DialogTitle className="text-base">{selectedIssue.title}</DialogTitle>
-                  <span className={cn("px-2 py-0.5 rounded border text-[9px] uppercase font-bold tracking-wider", getSeverityBadge(selectedIssue.severity))}>
-                    {selectedIssue.severity}
-                  </span>
-                  <span className={cn("px-2 py-0.5 rounded border text-[9px] uppercase font-bold tracking-wider", getStatusColor(selectedIssue.status))}>
-                    {selectedIssue.status.replace('_', ' ')}
-                  </span>
+                <div className="flex justify-between items-start gap-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <DialogTitle className="text-base">{selectedIssue.title}</DialogTitle>
+                    <span className={cn("px-2 py-0.5 rounded border text-[9px] uppercase font-bold tracking-wider", getSeverityBadge(selectedIssue.severity))}>
+                      {selectedIssue.severity}
+                    </span>
+                    <span className={cn("px-2 py-0.5 rounded border text-[9px] uppercase font-bold tracking-wider", getStatusColor(selectedIssue.status))}>
+                      {selectedIssue.status.replace('_', ' ')}
+                    </span>
+                  </div>
+                  {(String(selectedIssue.reporterId) === currentUserId || String(selectedIssue.assigneeId) === currentUserId) && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => {
+                          setEditIssueId(parseInt(selectedIssue.id));
+                          reset({
+                            title: selectedIssue.title,
+                            description: selectedIssue.description,
+                            severity: selectedIssue.severity,
+                            category: selectedIssue.category || 'Bug',
+                            assigned_user_id: String(selectedIssue.assigneeId || ''),
+                            project_id: String(selectedIssue.projectId || ''),
+                            deadline: selectedIssue.deadline || '',
+                            attachments: selectedIssue.attachments || [],
+                          });
+                          setDetailOpen(false);
+                          setCreateOpen(true);
+                        }}
+                        className="p-1.5 text-text-secondary hover:text-accent-blue bg-background-primary border border-border-subtle hover:border-accent-blue rounded-md transition-colors"
+                        title="Edit Issue"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteIssue(parseInt(selectedIssue.id))}
+                        className="p-1.5 text-text-secondary hover:text-accent-red bg-background-primary border border-border-subtle hover:border-accent-red rounded-md transition-colors"
+                        title="Delete Issue"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <DialogDescription>
                   {selectedIssue.description}

@@ -1800,6 +1800,176 @@ const STATUS_OPTIONS = [
   { value: 'blocked', label: 'On Hold' },
 ];
 
+function RecursiveSubtaskList({ subtasks, onSelectTask, onStatusChange, onEditTask, onDeleteTask, depth = 1 }: any) {
+  if (!subtasks || subtasks.length === 0) return null;
+  return (
+    <div className="grid grid-cols-1 gap-1.5 w-full">
+      {subtasks.map((st: any) => {
+        const isCompleted = st.status === 'completed' || st.status === 'done';
+        const hasChildren = st.subtasks && st.subtasks.length > 0;
+        return (
+          <div key={st.id} className="w-full">
+            <div 
+              onClick={e => {
+                e.stopPropagation();
+                onSelectTask(st);
+              }}
+              className="p-2 bg-background-secondary/50 border border-border-subtle/40 rounded-lg hover:bg-surface-hover/30 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px] mb-1.5"
+              style={{ marginLeft: `${(depth - 1) * 20}px` }}
+            >
+              {/* Desktop columns layout */}
+              <div className="hidden lg:flex items-center w-full gap-4 min-w-[990px]">
+                {/* 1. Title */}
+                <div className="flex-1 min-w-[120px] flex items-center gap-2 pr-4 pl-2">
+                  <div className={cn("w-3.5 h-3.5 rounded border flex items-center justify-center text-[9px] font-bold flex-shrink-0", isCompleted ? "bg-accent-green border-accent-green text-white" : "border-text-muted/40 text-transparent")}>✓</div>
+                  <span className={cn("font-medium truncate", isCompleted && "line-through text-text-muted")}>{st.title}</span>
+                </div>
+
+                {/* 1.5 Description */}
+                <div className="w-32 flex-shrink-0 text-[10px] text-text-muted truncate pr-2 font-medium" title={st.description || ''}>
+                  {st.description ? st.description : '—'}
+                </div>
+
+                {/* 2. Start Date */}
+                <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
+                  {st.start_date ? st.start_date : '—'}
+                </div>
+
+                {/* 3. End Date */}
+                <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
+                  {st.deadline ? st.deadline : '—'}
+                </div>
+
+                {/* 4. Overdue Days */}
+                <div className="w-20 flex-shrink-0 text-[10px] font-bold">
+                  {(() => {
+                    if (isCompleted || !st.deadline) return <span className="text-text-muted">—</span>;
+                    const todayDate = new Date();
+                    todayDate.setHours(0, 0, 0, 0);
+                    const [yr, mo, dy] = st.deadline.split('-').map(Number);
+                    const dlDate = new Date(yr, mo - 1, dy);
+                    dlDate.setHours(0, 0, 0, 0);
+                    if (todayDate > dlDate) {
+                      const diffTime = Math.abs(todayDate.getTime() - dlDate.getTime());
+                      const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+                      return <span className="text-accent-red bg-accent-red/5 border border-accent-red/10 px-2 py-0.5 rounded-full">{diffDays} {diffDays === 1 ? 'day' : 'days'}</span>;
+                    }
+                    return <span className="text-text-muted">—</span>;
+                  })()}
+                </div>
+
+                {/* 5. Assignee */}
+                <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
+                  {st.assigned_to_name ? (
+                    <span className="bg-background-primary border border-border-subtle px-1.5 py-0.5 rounded text-text-secondary font-bold inline-block max-w-[80px] truncate">
+                      {st.assigned_to_name.split(' ')[0]}
+                    </span>
+                  ) : (
+                    <span className="text-text-muted select-none">—</span>
+                  )}
+                </div>
+
+                {/* 6. Transferred Info */}
+                <div className="w-24 flex-shrink-0 text-[10px] text-text-secondary font-bold truncate">
+                  {st.transfer_date && st.transfer_to_name ? (
+                    <div className="flex flex-col min-w-0" title={`Transferred to ${st.transfer_to_name} on ${st.transfer_date}`}>
+                      <span className="text-accent-blue text-[9px] bg-accent-blue/5 border border-accent-blue/10 px-1.5 py-0.5 rounded-md inline-block max-w-max truncate">
+                        {st.transfer_date}
+                      </span>
+                      <span className="text-[9px] text-text-muted truncate mt-0.5">
+                        to {st.transfer_to_name.split(' ')[0]}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-text-muted pl-4">—</span>
+                  )}
+                </div>
+
+                {/* 7. Status */}
+                <div className="w-24 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                  <select
+                    value={st.status === 'done' ? 'completed' : st.status}
+                    onChange={e => onStatusChange(st.id, e.target.value)}
+                    className="bg-background-primary border border-border-subtle text-[9px] rounded p-0.5 text-text-secondary outline-none cursor-pointer font-bold w-full"
+                  >
+                    <option value="todo">To Do</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="completed">Completed</option>
+                    <option value="blocked">Blocked</option>
+                  </select>
+                </div>
+
+                {/* 8. Actions */}
+                <div className="w-14 flex-shrink-0 flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
+                  {onEditTask && (
+                    <button 
+                      onClick={() => onEditTask(st as any)} 
+                      className="p-1 rounded hover:bg-background-primary text-text-muted hover:text-accent-blue transition-colors" 
+                      title="Edit Subtask"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {onDeleteTask && (
+                    <button 
+                      onClick={() => onDeleteTask(st.id)} 
+                      className="p-1 rounded hover:bg-background-primary text-text-muted hover:text-accent-red transition-colors" 
+                      title="Delete Subtask"
+                    >
+                      <Trash className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              
+              {/* Mobile layout */}
+              <div className="flex flex-col lg:hidden w-full gap-2.5">
+                <div className="flex items-center gap-2">
+                  <div className={cn("w-3.5 h-3.5 rounded border flex items-center justify-center text-[9px] font-bold flex-shrink-0", isCompleted ? "bg-accent-green border-accent-green text-white" : "border-text-muted/40 text-transparent")}>✓</div>
+                  <span className={cn("font-medium truncate", isCompleted && "line-through text-text-muted")}>{st.title}</span>
+                </div>
+
+                {st.description && <div className="text-[10px] text-text-muted/80 italic pl-6">{st.description}</div>}
+
+                <div className="flex flex-wrap items-center gap-3 text-[10px] text-text-muted pl-6">
+                  {st.start_date && <span>Start: {st.start_date}</span>}
+                  {st.deadline && <span>End: {st.deadline}</span>}
+                  {st.deadline && !isCompleted && (
+                    (() => {
+                      const todayDate = new Date();
+                      todayDate.setHours(0, 0, 0, 0);
+                      const [yr, mo, dy] = st.deadline.split('-').map(Number);
+                      const dlDate = new Date(yr, mo - 1, dy);
+                      dlDate.setHours(0, 0, 0, 0);
+                      if (todayDate > dlDate) {
+                        const diffDays = Math.round(Math.abs(todayDate.getTime() - dlDate.getTime()) / (1000 * 60 * 60 * 24));
+                        return <span className="text-accent-red font-bold">{diffDays}d overdue</span>;
+                      }
+                      return null;
+                    })()
+                  )}
+                  {st.assigned_to_name && <span className="font-bold">Assigned to: {st.assigned_to_name}</span>}
+                </div>
+              </div>
+            </div>
+            
+            {hasChildren && (
+              <RecursiveSubtaskList 
+                subtasks={st.subtasks}
+                onSelectTask={onSelectTask}
+                onStatusChange={onStatusChange}
+                onEditTask={onEditTask}
+                onDeleteTask={onDeleteTask}
+                depth={depth + 1}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function GroupedTaskFeed({
   tasks,
   onSelectTask,
@@ -2240,180 +2410,14 @@ function GroupedTaskFeed({
                           </div>
 
                           <div className="grid grid-cols-1 gap-1.5">
-                            {task.subtasks.map(st => {
-                              const isCompleted = st.status === 'completed' || st.status === 'done';
-                              return (
-                                <div 
-                                  key={st.id} 
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    onSelectTask(st);
-                                  }}
-                                  className="p-2 bg-background-secondary/50 border border-border-subtle/40 rounded-lg hover:bg-surface-hover/30 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px]"
-                                >
-                                  {/* Desktop columns layout */}
-                                  <div className="hidden lg:flex items-center w-full gap-4 min-w-[990px]">
-                                    {/* 1. Title */}
-                                    <div className="flex-1 min-w-[120px] flex items-center gap-2 pr-4 pl-2">
-                                      <div className={cn("w-3.5 h-3.5 rounded border flex items-center justify-center text-[9px] font-bold flex-shrink-0", isCompleted ? "bg-accent-green border-accent-green text-white" : "border-text-muted/40 text-transparent")}>✓</div>
-                                      <span className={cn("font-medium truncate", isCompleted && "line-through text-text-muted")}>{st.title}</span>
-                                    </div>
-
-                                    {/* 1.5 Description */}
-                                    <div className="w-32 flex-shrink-0 text-[10px] text-text-muted truncate pr-2 font-medium" title={st.description || ''}>
-                                      {st.description ? st.description : '—'}
-                                    </div>
-
-                                    {/* 2. Start Date */}
-                                    <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
-                                      {st.start_date ? st.start_date : '—'}
-                                    </div>
-
-                                    {/* 3. End Date */}
-                                    <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
-                                      {st.deadline ? st.deadline : '—'}
-                                    </div>
-
-                                    {/* 4. Overdue Days */}
-                                    <div className="w-20 flex-shrink-0 text-[10px] font-bold">
-                                      {(() => {
-                                        if (isCompleted || !st.deadline) return <span className="text-text-muted">—</span>;
-                                        const todayDate = new Date();
-                                        todayDate.setHours(0, 0, 0, 0);
-                                        const [yr, mo, dy] = st.deadline.split('-').map(Number);
-                                        const dlDate = new Date(yr, mo - 1, dy);
-                                        dlDate.setHours(0, 0, 0, 0);
-                                        if (todayDate > dlDate) {
-                                          const diffTime = Math.abs(todayDate.getTime() - dlDate.getTime());
-                                          const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-                                          return <span className="text-accent-red bg-accent-red/5 border border-accent-red/10 px-2 py-0.5 rounded-full">{diffDays} {diffDays === 1 ? 'day' : 'days'}</span>;
-                                        }
-                                        return <span className="text-text-muted">—</span>;
-                                      })()}
-                                    </div>
-
-                                    {/* 5. Assignee */}
-                                    <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
-                                      {st.assigned_to_name ? (
-                                        <span className="bg-background-primary border border-border-subtle px-1.5 py-0.5 rounded text-text-secondary font-bold inline-block max-w-[80px] truncate">
-                                          {st.assigned_to_name.split(' ')[0]}
-                                        </span>
-                                      ) : (
-                                        <span className="text-text-muted select-none">—</span>
-                                      )}
-                                    </div>
-
-                                    {/* 6. Transferred Info */}
-                                    <div className="w-24 flex-shrink-0 text-[10px] text-text-secondary font-bold truncate">
-                                      {(st as any).transfer_date && (st as any).transfer_to_name ? (
-                                        <div className="flex flex-col min-w-0" title={`Transferred to ${(st as any).transfer_to_name} on ${(st as any).transfer_date}`}>
-                                          <span className="text-accent-blue text-[9px] bg-accent-blue/5 border border-accent-blue/10 px-1.5 py-0.5 rounded-md inline-block max-w-max truncate">
-                                            {(st as any).transfer_date}
-                                          </span>
-                                          <span className="text-[9px] text-text-muted truncate mt-0.5">
-                                            to {(st as any).transfer_to_name.split(' ')[0]}
-                                          </span>
-                                        </div>
-                                      ) : (
-                                        <span className="text-text-muted pl-4">—</span>
-                                      )}
-                                    </div>
-
-                                    {/* 7. Status */}
-                                    <div className="w-24 flex-shrink-0" onClick={e => e.stopPropagation()}>
-                                      <select
-                                        value={st.status === 'done' ? 'completed' : st.status}
-                                        onChange={e => onStatusChange(st.id, e.target.value)}
-                                        className="bg-background-primary border border-border-subtle text-[9px] rounded p-0.5 text-text-secondary outline-none cursor-pointer font-bold w-full"
-                                      >
-                                        {STATUS_OPTIONS.map(o => (
-                                          <option key={o.value} value={o.value}>{o.label}</option>
-                                        ))}
-                                      </select>
-                                    </div>
-
-                                    {/* 8. Actions */}
-                                    <div className="w-14 flex-shrink-0 flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
-                                      {onEditTask && (
-                                        <button 
-                                          onClick={() => onEditTask(st as any)} 
-                                          className="p-1 rounded hover:bg-background-primary text-text-muted hover:text-accent-blue transition-colors" 
-                                          title="Edit Subtask"
-                                        >
-                                          <Edit3 className="w-3.5 h-3.5" />
-                                        </button>
-                                      )}
-                                      {onDeleteTask && (
-                                        <button 
-                                          onClick={() => onDeleteTask(st.id)} 
-                                          className="p-1 rounded hover:bg-background-primary text-text-muted hover:text-accent-red transition-colors" 
-                                          title="Delete Subtask"
-                                        >
-                                          <Trash className="w-3.5 h-3.5" />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* Mobile layout */}
-                                  <div className="flex flex-col lg:hidden w-full gap-2.5">
-                                    <div className="flex items-center gap-2">
-                                      <div className={cn("w-3.5 h-3.5 rounded border flex items-center justify-center text-[9px] font-bold flex-shrink-0", isCompleted ? "bg-accent-green border-accent-green text-white" : "border-text-muted/40 text-transparent")}>✓</div>
-                                      <span className={cn("font-medium truncate", isCompleted && "line-through text-text-muted")}>{st.title}</span>
-                                    </div>
-
-                                    {st.description && <div className="text-[10px] text-text-muted/80 italic pl-6">{st.description}</div>}
-
-                                    <div className="flex flex-wrap items-center gap-3 text-[10px] text-text-muted pl-6">
-                                      {st.start_date && <span>Start: {st.start_date}</span>}
-                                      {st.deadline && <span>End: {st.deadline}</span>}
-                                      {st.deadline && !isCompleted && (
-                                        (() => {
-                                          const todayDate = new Date();
-                                          todayDate.setHours(0, 0, 0, 0);
-                                          const [yr, mo, dy] = st.deadline.split('-').map(Number);
-                                          const dlDate = new Date(yr, mo - 1, dy);
-                                          dlDate.setHours(0, 0, 0, 0);
-                                          if (todayDate > dlDate) {
-                                            const diffDays = Math.round(Math.abs(todayDate.getTime() - dlDate.getTime()) / (1000 * 60 * 60 * 24));
-                                            return <span className="text-accent-red font-bold">{diffDays}d overdue</span>;
-                                          }
-                                          return null;
-                                        })()
-                                      )}
-                                      {st.assigned_to_name && <span className="font-bold">Assigned to: {st.assigned_to_name}</span>}
-                                    </div>
-
-                                    <div className="flex items-center justify-between gap-2 pl-6 pt-1 border-t border-border-subtle/30" onClick={e => e.stopPropagation()}>
-                                      <div className="flex items-center gap-2">
-                                        {(st as any).transfer_date && (st as any).transfer_to_name && (
-                                          <span className="text-[9px] text-text-muted">Transferred: {(st as any).transfer_date} to {(st as any).transfer_to_name}</span>
-                                        )}
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        <select
-                                          value={st.status === 'done' ? 'completed' : st.status}
-                                          onChange={e => onStatusChange(st.id, e.target.value)}
-                                          className="bg-background-primary border border-border-subtle text-[9px] rounded p-0.5 text-text-secondary outline-none cursor-pointer font-bold"
-                                        >
-                                          {STATUS_OPTIONS.map(o => (
-                                            <option key={o.value} value={o.value}>{o.label}</option>
-                                          ))}
-                                        </select>
-                                        {onDeleteTask && (
-                                          <button 
-                                            onClick={() => onDeleteTask(st.id)} 
-                                            className="p-1 rounded hover:bg-background-primary text-text-muted hover:text-accent-red transition-colors"
-                                          >
-                                            <Trash className="w-3.5 h-3.5" />
-                                          </button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
+                            <RecursiveSubtaskList 
+                              subtasks={task.subtasks}
+                              onSelectTask={onSelectTask}
+                              onStatusChange={onStatusChange}
+                              onEditTask={onEditTask}
+                              onDeleteTask={onDeleteTask}
+                              depth={1}
+                            />
                           </div>
                         </div>
                       )}

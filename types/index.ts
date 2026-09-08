@@ -55,7 +55,7 @@ export interface Project {
 }
 
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done' | 'completed' | 'blocked';
-export type TaskPriority = 'low' | 'medium' | 'high';
+export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
 
 export interface TaskComment {
   id: string;
@@ -73,8 +73,11 @@ export interface Task {
   priority: TaskPriority;
   dueDate: string;
   source?: string;
+  is_issue?: boolean;
   actual_completion_date?: string;
   assigneeId?: string;
+  parentId?: string;
+  has_subtasks?: boolean;
   assignedTo: {
     id?: string;
     name: string;

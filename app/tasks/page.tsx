@@ -86,8 +86,8 @@ export default function TaskCenterPage() {
         setError(null);
         const [tasksData, usersData, projectsData] = await Promise.all([
           tasksService.getTasks(),
-          usersService.getUsers(),
-          projectsService.getProjects()
+          usersService.getUsers().catch(() => []),
+          projectsService.getProjects().catch(() => [])
         ]);
         if (active) {
           setTasks(tasksData);
