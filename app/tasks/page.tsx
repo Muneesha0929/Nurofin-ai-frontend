@@ -43,7 +43,7 @@ const taskSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters long'),
   description: z.string().optional(),
   status: z.enum(['todo', 'in_progress', 'review', 'done', 'completed', 'blocked'] as const),
-  priority: z.enum(['low', 'medium', 'high'] as const),
+  priority: z.enum(['low', 'medium', 'high', 'critical'] as const),
   dueDate: z.string().min(1, 'Due date is required'),
   assigneeId: z.string().optional(),
   projectId: z.string().optional(),
