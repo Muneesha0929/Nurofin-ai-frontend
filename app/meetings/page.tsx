@@ -20,10 +20,22 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 
+const timeOptions = Array.from({ length: 48 }, (_, i) => {
+  const hour = Math.floor(i / 2);
+  const min = i % 2 === 0 ? '00' : '30';
+  const val = `${hour.toString().padStart(2, '0')}:${min}`;
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  let h = hour % 12;
+  if (h === 0) h = 12;
+  const label = `${h}:${min} ${ampm}`;
+  return { value: val, label };
+});
+
 const meetingSchema = z.object({
   title: z.string().min(3, 'Title is required'),
   date: z.string().min(1, 'Date is required'),
-  time: z.string().min(1, 'Time is required'),
+  time: z.string().min(1, 'Start Time is required'),
+  end_time: z.string().optional(),
   type: z.enum(['meeting', 'reminder', 'event']),
 });
 type MeetingFormValues = z.infer<typeof meetingSchema>;
@@ -88,10 +100,16 @@ export default function MeetingsPage() {
         const data = filter === 'all'
           ? await meetingsService.getMeetings(undefined, search || undefined)
           : await meetingsService.getMeetings(filter as any, search || undefined);
+        
+        // Filter to only show meetings created by the user or where the user is a participant
+        const filteredData = data.filter((m: any) => 
+          String(m.owner_id) === String(userProfile?.id) || 
+          m.participants?.some((p: any) => String(p.user_id) === String(userProfile?.id))
+        );
         if (active) {
-          setMeetings(data);
-          if (data.length > 0 && !selectedId) {
-            setSelectedId(data[0].id);
+          setMeetings(filteredData);
+          if (filteredData.length > 0 && !selectedId) {
+            setSelectedId(filteredData[0].id);
           }
         }
       } catch (err: any) {
@@ -221,6 +239,7 @@ export default function MeetingsPage() {
         title: data.title, 
         date: data.date, 
         time: data.time, 
+        end_time: data.end_time,
         type: data.type,
         participant_ids: newEventParticipantIds
       });
@@ -579,12 +598,12 @@ export default function MeetingsPage() {
                   {selectedMeeting.owner_name && <p className="text-[11px] text-text-muted">Hosted by {selectedMeeting.owner_name}</p>}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {selectedMeeting?.participants?.find(p => p.user_id === userProfile?.id)?.status === 'pending' && (
+                  {selectedMeeting?.participants?.find(p => p.user_id === userProfile?.id)?.status === 'pending' && String(selectedMeeting?.owner_id) !== String(userProfile?.id) && (
                     <>
-                      <button onClick={handleAccept} disabled={actionLoading === 'accept'} className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-green hover:bg-accent-green/80 text-white text-xs font-semibold rounded-md shadow disabled:opacity-50 transition-colors">
+                      <button onClick={handleAccept} disabled={actionLoading === 'accept'} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-semibold rounded-md shadow disabled:opacity-50 transition-colors">
                         {actionLoading === 'accept' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Accept
                       </button>
-                      <button onClick={handleDecline} disabled={actionLoading === 'decline'} className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-red/80 hover:bg-accent-red text-white text-xs font-semibold rounded-md shadow disabled:opacity-50 transition-colors">
+                      <button onClick={handleDecline} disabled={actionLoading === 'decline'} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-300 hover:text-red-700 text-xs font-semibold rounded-md disabled:opacity-50 transition-all">
                         {actionLoading === 'decline' ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />} Decline
                       </button>
                     </>
@@ -1293,14 +1312,34 @@ export default function MeetingsPage() {
               <Input type="text" placeholder="Q3 Planning Sync" {...register('title')} className={errors.title ? 'border-accent-red' : ''} />
               {errors.title && <span className="text-[10px] text-accent-red">{errors.title.message as string}</span>}
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="space-y-1.5">
                 <label className="text-2xs font-bold text-text-secondary uppercase">Date</label>
                 <Input type="date" {...register('date')} className={errors.date ? 'border-accent-red' : ''} />
               </div>
               <div className="space-y-1.5">
                 <label className="text-2xs font-bold text-text-secondary uppercase">Time</label>
-                <Input type="time" {...register('time')} className={errors.time ? 'border-accent-red' : ''} />
+                <select
+                  {...register('time')}
+                  className={`w-full h-10 bg-background-primary border rounded-lg px-3 text-sm text-text-primary focus:border-accent-blue transition-all ${errors.time ? 'border-accent-red' : 'border-border-subtle'}`}
+                >
+                  <option value="">Select Time</option>
+                  {timeOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-2xs font-bold text-text-secondary uppercase">End Time (Optional)</label>
+                <select
+                  {...register('end_time')}
+                  className="w-full h-10 bg-background-primary border border-border-subtle rounded-lg px-3 text-sm text-text-primary focus:border-accent-blue transition-all"
+                >
+                  <option value="">Select End Time</option>
+                  {timeOptions.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
             </div>
             <div className="space-y-1.5">

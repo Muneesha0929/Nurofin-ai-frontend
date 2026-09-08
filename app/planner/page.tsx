@@ -80,6 +80,8 @@ export default function PlannerPage() {
   const [selectedTaskDetails, setSelectedTaskDetails] = useState<any>(null);
   const [newEventType, setNewEventType] = useState('meeting');
   const [newEventOpen, setNewEventOpen] = useState(false);
+  const [isCreatingEvent, setIsCreatingEvent] = useState(false);
+  const [isSchedulingTask, setIsSchedulingTask] = useState(false);
   const [unscheduledSlotOpen, setUnscheduledSlotOpen] = useState(false);
   const [unscheduledSlotHour, setUnscheduledSlotHour] = useState<number | null>(null);
   const [conflictData, setConflictData] = useState<{message: string, alternative_times: any[]} | null>(null);
@@ -191,7 +193,8 @@ export default function PlannerPage() {
       const data = await plannerService.getSchedule(selectedUserId, startStr, endStr);
       setScheduleEvents((data.schedule || []).map((e: any) => e.source === 'google_calendar' ? { ...e, owner_id: selectedUserId } : e));
 
-      const localData = await meetingsService.getMeetings();
+      const rawLocalData = await meetingsService.getMeetings();
+      const localData = rawLocalData.map(e => ({ ...e, source: 'nurofin' }));
       setAllLocalEvents(localData);
       const filteredLocalData = localData.filter(m => 
         String(m.owner_id) === String(selectedUserId) || 
@@ -416,7 +419,7 @@ export default function PlannerPage() {
           });
           loadTasks();
         }
-        setLocalEvents([...localEvents, newEvent]);
+        setLocalEvents([...localEvents, { ...newEvent, source: 'nurofin' }]);
       }
       setNewEventTitle('');
       setNewEventParticipants([]);
@@ -428,6 +431,8 @@ export default function PlannerPage() {
       } else {
         console.error('Failed to create event:', error);
       }
+    } finally {
+      setIsCreatingEvent(false);
     }
   };
 
@@ -487,6 +492,8 @@ export default function PlannerPage() {
       alert("Please resolve the scheduling conflict by selecting an alternative time before scheduling the task.");
       return;
     }
+    if (isSchedulingTask) return;
+    setIsSchedulingTask(true);
     try {
       const task = tasks.find(t => t.id === selectedTaskId);
       if (!task) return;
@@ -773,8 +780,10 @@ export default function PlannerPage() {
     if (e.source === 'google_calendar' && e.start) {
       return new Date(e.start).getHours();
     }
-    if (e.start_time) {
-      const parsed = parseInt(e.start_time.split(':')[0]);
+    // Meetings from meetingsService use 'time' field; tasks use 'start_time'
+    const timeStr = e.start_time || e.time;
+    if (timeStr) {
+      const parsed = parseInt(String(timeStr).split(':')[0]);
       return isNaN(parsed) ? null : parsed;
     }
     return null;
@@ -935,6 +944,16 @@ export default function PlannerPage() {
       <div className="flex-1 flex flex-col gap-6 relative">
         {/* Background ambient light */}
         <div className="absolute top-0 right-0 w-96 h-96 bg-accent-blue/5 rounded-full blur-3xl pointer-events-none transform translate-x-1/2 -translate-y-1/2"></div>
+        
+        {scheduleEvents.some(e => e.source === 'google_error') && (
+          <div className="bg-accent-red/10 border border-accent-red/30 p-4 rounded-xl shadow-sm flex items-center gap-3 z-10 relative">
+            <AlertCircle className="w-5 h-5 text-accent-red flex-shrink-0" />
+            <div>
+              <h4 className="text-sm font-bold text-accent-red tracking-tight">Google Calendar Disconnected</h4>
+              <p className="text-xs text-text-secondary mt-0.5">Your Google Calendar connection expired or was revoked. Please reconnect to sync your events.</p>
+            </div>
+          </div>
+        )}
         
         {/* Header */}
         <div className="bg-surface-card border border-border-subtle rounded-xl p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 z-10">
@@ -1543,10 +1562,10 @@ export default function PlannerPage() {
                           )}
                           {!isCompact && userName && <p className="text-[10px] opacity-80 font-bold uppercase tracking-wider">{userName}</p>}
                           {!isCompact && evt.description && <p className="text-xs opacity-70 line-clamp-1">{evt.description}</p>}
-                          {evt.start_time && (
+                          {(evt.start_time || evt.time) && (
                             <p className={`font-medium flex items-center gap-1 mt-1 opacity-90 ${isCompact ? 'text-[9px]' : 'text-[11px]'}`}>
                               <Clock className="w-3 h-3" />
-                              {evt.start_time} {evt.end_time ? `- ${evt.end_time}` : ''}
+                              {evt.start_time || evt.time} {evt.end_time ? `- ${evt.end_time}` : ''}
                             </p>
                           )}
                           {!evt.start_time && evt.source === 'google_calendar' && evt.start && evt.end && (
