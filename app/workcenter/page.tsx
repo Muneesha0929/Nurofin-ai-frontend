@@ -236,9 +236,9 @@ export default function TaskCenterPage() {
           priority: priorityFilter || undefined,
           page_size: 200
         }),
-        workcenterService.getSummary(selectedQuarterId ?? undefined),
-        workcenterService.getInsights(selectedQuarterId ?? undefined),
-        workcenterService.getQuarters(),
+        workcenterService.getSummary(selectedQuarterId ?? undefined).catch(() => null),
+        workcenterService.getInsights(selectedQuarterId ?? undefined).catch(() => null),
+        workcenterService.getQuarters().catch(() => []),
         projectsService.getProjects().catch(() => []),
         usersService.getUsers().catch(() => []),
       ]);
@@ -644,7 +644,7 @@ export default function TaskCenterPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto font-sans text-text-primary pb-12 animate-fade-in">
+    <div className="space-y-6 min-w-[1700px] font-sans text-text-primary pb-12 animate-fade-in">
       
       {/* Top Header Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border-subtle/55">
@@ -1521,7 +1521,7 @@ function GroupedTaskFeed({
         const isGroupExpanded = expandedGroups[col.key];
 
         return (
-          <div key={col.key} className="bg-background-secondary border border-border-subtle rounded-xl overflow-hidden transition-all shadow-sm">
+          <div key={col.key} className="bg-background-secondary border border-border-subtle rounded-xl transition-all shadow-sm">
             {/* Status Header Bar */}
             <div 
               onClick={() => toggleGroup(col.key)}
@@ -1540,10 +1540,10 @@ function GroupedTaskFeed({
 
             {/* Tasks List */}
             {isGroupExpanded && (
-              <div className="divide-y divide-border-subtle/50 bg-background-primary overflow-x-auto">
+              <div className="divide-y divide-border-subtle/50 bg-background-primary overflow-x-auto scrollbar-thin">
                 {/* Column Headers Row */}
                 {colTasks.length > 0 && (
-                  <div className="hidden lg:flex items-center p-3.5 bg-background-secondary/40 border-b border-border-subtle text-[10px] font-extrabold text-text-muted uppercase tracking-wider select-none gap-4 min-w-[1020px]">
+                  <div className="hidden lg:flex items-center p-3.5 bg-background-secondary/40 border-b border-border-subtle text-[10px] font-extrabold text-text-muted uppercase tracking-wider select-none gap-4 min-w-[1280px]">
                     <div className="flex-1 min-w-[120px] pr-4">Task & Project</div>
                     <div className="w-20 flex-shrink-0">Start Date</div>
                     <div className="w-20 flex-shrink-0">End Date</div>
@@ -1575,7 +1575,7 @@ function GroupedTaskFeed({
                     >
                       {/* Main Task Metadata Row */}
                       {/* Desktop Aligned Row */}
-                      <div className="hidden lg:flex items-center w-full gap-4 min-w-[1020px]">
+                      <div className="hidden lg:flex items-center w-full gap-4 min-w-[1280px]">
                         {/* 1. Title & Project */}
                         <div className="flex-1 min-w-[120px] pr-4">
                           <h4 className="text-xs font-bold text-text-primary hover:text-accent-blue transition-colors leading-normal truncate">
@@ -2112,8 +2112,8 @@ function TaskTableView({
   onSelectTask: (t: any) => void;
 }) {
   return (
-    <div className="bg-background-secondary border border-border-subtle rounded-xl overflow-hidden text-left shadow-sm">
-      <Table>
+    <div className="bg-background-secondary border border-border-subtle rounded-xl overflow-x-auto scrollbar-thin text-left shadow-sm">
+      <Table className="min-w-[1100px]">
         <TableHeader>
           <TableRow>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Title</TableHead>

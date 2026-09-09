@@ -286,7 +286,8 @@ export default function TaskCenterPage() {
 
         {/* 1. Kanban Board view tab content */}
         <TabsContent value="kanban" className="mt-4">
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+          <div className="overflow-x-auto pb-2">
+          <div className="grid grid-cols-6 gap-4 min-w-[960px]">
             {(['todo', 'in_progress', 'review', 'completed', 'blocked', 'done'] as TaskStatus[]).map((col) => {
               const colTasks = tasks.filter(t => {
                 if (t.status !== col) return false;
@@ -385,20 +386,21 @@ export default function TaskCenterPage() {
               );
             })}
           </div>
+          </div>
         </TabsContent>
 
         {/* 2. Table List view tab content */}
         <TabsContent value="table" className="mt-4">
-          <div className="bg-background-secondary border border-border-subtle rounded-lg overflow-hidden shadow-md">
-            <Table>
+          <div className="bg-background-secondary border border-border-subtle rounded-lg overflow-x-auto shadow-md">
+            <Table className="min-w-[900px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Task Title</TableHead>
-                  <TableHead>Assigned To</TableHead>
-                  <TableHead>Project</TableHead>
-                  <TableHead>Priority</TableHead>
-                  <TableHead>Due Date</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead className="min-w-[200px]">Task Title</TableHead>
+                  <TableHead className="min-w-[140px]">Assigned To</TableHead>
+                  <TableHead className="min-w-[140px]">Project</TableHead>
+                  <TableHead className="min-w-[100px]">Priority</TableHead>
+                  <TableHead className="min-w-[120px]">Due Date</TableHead>
+                  <TableHead className="min-w-[120px]">Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

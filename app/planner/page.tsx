@@ -287,7 +287,7 @@ export default function PlannerPage() {
       return;
     }
     const checkAvailability = async () => {
-      const computedEndTime = (() => {
+      const computedEndTime = newEventEndTime || (() => {
         try {
           const parts = newEventStartTime.split(':');
           const endH = (parseInt(parts[0]) + 1).toString().padStart(2, '0');
@@ -297,7 +297,7 @@ export default function PlannerPage() {
         }
       })();
       
-      const idsToCheck = Array.from(new Set([selectedUserId, ...newEventParticipantIds]));
+      const idsToCheck = Array.from(new Set([selectedUserId, ...newEventParticipants]));
       let foundConflict = false;
       let allAlternatives: any[] = [];
       let conflictMessages: string[] = [];
@@ -333,7 +333,7 @@ export default function PlannerPage() {
       }
     };
     checkAvailability();
-  }, [newEventStartDate, newEventStartTime, newEventParticipantIds, selectedUserId, teammates]);
+  }, [newEventStartDate, newEventStartTime, newEventEndTime, newEventParticipants, selectedUserId, teammates]);
 
   useEffect(() => {
     if (!taskScheduleDate || !taskScheduleStartTime) {
@@ -341,7 +341,7 @@ export default function PlannerPage() {
       return;
     }
     const checkAvailability = async () => {
-      const computedEndTime = taskScheduleEndTime || (() => {
+      const fallbackEnd = (() => {
         try {
           const parts = taskScheduleStartTime.split(':');
           const endH = (parseInt(parts[0]) + 1).toString().padStart(2, '0');
@@ -350,9 +350,14 @@ export default function PlannerPage() {
           return taskScheduleStartTime;
         }
       })();
+      let computedEndTime = taskScheduleEndTime || fallbackEnd;
+      if (computedEndTime <= taskScheduleStartTime) {
+        computedEndTime = fallbackEnd;
+      }
       
       try {
-        const res = await fetch(`/api/v1/users/${selectedUserId}/availability?date=${taskScheduleDate}&start_time=${taskScheduleStartTime}&end_time=${computedEndTime}`, {
+        const excludeParam = selectedTaskId ? `&exclude_task_id=${selectedTaskId}` : '';
+        const res = await fetch(`/api/v1/users/${selectedUserId}/availability?date=${taskScheduleDate}&start_time=${taskScheduleStartTime}&end_time=${computedEndTime}${excludeParam}`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
           }
@@ -371,7 +376,7 @@ export default function PlannerPage() {
       }
     };
     checkAvailability();
-  }, [taskScheduleDate, taskScheduleStartTime, taskScheduleEndTime, selectedUserId]);
+  }, [taskScheduleDate, taskScheduleStartTime, taskScheduleEndTime, selectedUserId, selectedTaskId]);
 
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2013,7 +2018,9 @@ export default function PlannerPage() {
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setSelectedTaskId(task.id);
-                                  setTaskScheduleDate(formatDateStr(new Date()));
+                                  setTaskScheduleDate(task.scheduledDate || formatDateStr(new Date()));
+                                  setTaskScheduleStartTime(task.scheduledStartTime || '09:00');
+                                  setTaskScheduleEndTime(task.scheduledEndTime || '10:00');
                                   setScheduleTaskOpen(true);
                                 }}
                                 className="px-2.5 py-1 bg-background-secondary hover:bg-surface-hover border border-border-subtle/50 text-[9px] font-bold rounded text-accent-purple hover:text-accent-purple/80 transition-all flex items-center gap-1 select-none"

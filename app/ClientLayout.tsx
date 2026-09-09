@@ -263,7 +263,7 @@ export default function ClientLayout({
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen bg-background-primary text-text-primary font-sans flex relative overflow-hidden">
+      <div className="min-h-screen bg-background-primary text-text-primary font-sans flex relative">
         {/* Fixed Animated Grid & Glow Backdrop */}
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
           {/* Soft animated glowing background blobs */}
@@ -290,7 +290,7 @@ export default function ClientLayout({
         {/* Unified Content Frame */}
         <div 
           className={cn(
-            "flex-1 flex flex-col min-h-screen transition-all duration-300 relative z-10",
+            "flex-1 flex flex-col min-h-screen min-w-0 transition-all duration-300 relative z-10",
             sidebarCollapsed ? "pl-16" : "pl-64"
           )}
         >
@@ -298,7 +298,7 @@ export default function ClientLayout({
           <Topbar />
 
           {/* Core Content Area */}
-          <main className="flex-1 pt-[5.5rem] p-6 overflow-y-auto overflow-x-auto max-w-full">
+          <main className="flex-1 min-w-0 pt-[5.5rem] p-6 overflow-y-auto overflow-x-auto scrollbar-thin min-h-screen">
             {children}
           </main>
           {/* Floating AI Helper overlay */}
