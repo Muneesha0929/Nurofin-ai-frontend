@@ -141,6 +141,19 @@ const targetService = {
     return res.json();
   },
 
+
+  deletePermission: async (permissionId: number): Promise<{success: boolean}> => {
+    const res = await fetch(`/api/v1/targets/permissions/${permissionId}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to delete permission' }));
+      throw new Error(err.detail || 'Failed to delete permission');
+    }
+    return res.json();
+  },
+
   getPermissions: async (): Promise<TargetPermission[]> => {
     const res = await fetch('/api/v1/targets/permissions', { headers: getHeaders() });
     if (!res.ok) {

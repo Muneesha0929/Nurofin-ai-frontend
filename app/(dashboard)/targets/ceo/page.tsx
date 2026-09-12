@@ -15,6 +15,7 @@ export default function CEOTargetsPage() {
   // Permission based user lists
   const [scoreableUsers, setScoreableUsers] = useState<UserProfile[]>([]);
   const [addableUsers, setAddableUsers] = useState<UserProfile[]>([]);
+  const [activePermissions, setActivePermissions] = useState<any[]>([]);
 
   // Selection States
   const [selectedDashboardUser, setSelectedDashboardUser] = useState<number | null>(null);
@@ -47,8 +48,17 @@ export default function CEOTargetsPage() {
       setLoadingUsers(true);
       const allUsers = await usersService.getUsers();
       // Filter out CEOs from assignment pools
-      const filtered = allUsers.filter(u => u.role?.toLowerCase() !== 'ceo');
+            const filtered = allUsers.filter(u => u.role?.toLowerCase() !== 'ceo');
       setUsers(filtered);
+      
+      let perms: any[] = [];
+      try {
+        perms = await targetService.getPermissions();
+        setActivePermissions(perms);
+      } catch (e) {
+        console.error("Failed to load perms", e);
+      }
+
 
       if (canManageTargets) {
         setScoreableUsers(filtered);
@@ -132,6 +142,17 @@ export default function CEOTargetsPage() {
   };
 
   
+  
+  const handleRevokePermission = async (id: number) => {
+    if (!confirm('Are you sure you want to revoke this permission?')) return;
+    try {
+      await targetService.deletePermission(id);
+      loadUsers();
+    } catch (err: any) {
+      alert('Failed to revoke permission: ' + err.message);
+    }
+  };
+
   const handleDelete = async (targetId: number) => {
     if (!confirm('Are you sure you want to delete this target?')) return;
     try {
@@ -290,7 +311,9 @@ export default function CEOTargetsPage() {
                 Assign Target
               </button>
             </form>
-          </section>
+
+            </section>
+
         )}
 
         {/* DELEGATE PERMISSIONS SECTION (CEO ONLY) */}
@@ -357,7 +380,44 @@ export default function CEOTargetsPage() {
                 Grant Permission
               </button>
             </form>
+<div className="mt-8 border-t border-border-subtle dark:border-[#1e2030] pt-6">
+              <h3 className="text-sm font-semibold text-text-secondary dark:text-slate-300 mb-4">Active Delegated Permissions</h3>
+              {activePermissions.length === 0 ? (
+                <div className="text-xs text-text-muted">No delegated permissions found.</div>
+              ) : (
+                <div className="space-y-3">
+                  {activePermissions.map(perm => {
+                    const grantee = users.find(u => Number(u.id) === perm.grantee_id);
+                    const targetU = users.find(u => Number(u.id) === perm.target_user_id);
+                    return (
+                      <div key={perm.id} className="flex items-center justify-between bg-background-secondary dark:bg-[#1c1d29] p-3 rounded-lg border border-border-subtle dark:border-[#2a2d3d]">
+                        <div className="flex flex-col gap-1">
+                          <div className="text-sm font-medium text-text-primary dark:text-white">
+                            <span className="font-bold text-accent-blue">{grantee?.name || grantee?.username || 'Unknown'}</span> 
+                            <span className="text-text-muted mx-2">can manage</span> 
+                            <span className="font-bold text-accent-purple">{targetU?.name || targetU?.username || 'Unknown'}</span>
+                          </div>
+                          <div className="flex gap-2">
+                            {perm.can_score && <span className="text-[10px] bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded">Score</span>}
+                            {perm.can_add_targets && <span className="text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-0.5 rounded">Add Targets</span>}
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => handleRevokePermission(perm.id)}
+                          className="p-2 text-text-muted hover:text-accent-red hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
+                          title="Revoke Permission"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          
           </section>
+
         )}
 
       </div>
