@@ -65,7 +65,7 @@ export const navSections: NavSection[] = [
       { label: 'Notifications', href: '/notifications', icon: Bell },
       { label: 'Account Settings', href: '/profile', icon: UserCircle },
       { label: 'User Management', href: '/admin', icon: Settings },
-      { label: 'Targets Admin', href: '/targets/ceo', icon: Target },
+      { label: 'Targets Administration', href: '/targets/ceo', icon: Target },
     ]
   }
 ];

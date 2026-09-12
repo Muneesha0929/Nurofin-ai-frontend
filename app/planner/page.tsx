@@ -281,11 +281,14 @@ export default function PlannerPage() {
 
   const [availabilityWarnings, setAvailabilityWarnings] = useState<Record<string, string>>({});
 
+
   useEffect(() => {
     if (!newEventStartDate || !newEventStartTime) {
       setConflictData(null);
       return;
     }
+    const controller = new AbortController();
+    
     const checkAvailability = async () => {
       const computedEndTime = newEventEndTime || (() => {
         try {
@@ -307,19 +310,27 @@ export default function PlannerPage() {
           const res = await fetch(`/api/v1/users/${id}/availability?date=${newEventStartDate}&start_time=${newEventStartTime}&end_time=${computedEndTime}`, {
             headers: {
               'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
-            }
+            },
+            signal: controller.signal
           });
           const json = await res.json();
           if (json.data && json.data.is_busy) {
             foundConflict = true;
-            const user = teammates.find(t => t.id === id) || { full_name: id === currentUserId ? 'You' : 'Participant' };
-            conflictMessages.push(`${user.full_name} is busy: ${json.data.reasons.join(', ')}`);
+            const user = teammates.find((t: any) => t.id === id) || { full_name: id === currentUserId ? 'You' : 'Participant' };
+            if (json.data.conflicts && json.data.conflicts.length > 0) {
+              json.data.conflicts.forEach((c: any) => {
+                const titleStr = c.title ? ` — ${c.title}` : '';
+                conflictMessages.push(`${user.full_name} is busy from ${c.start_time} to ${c.end_time}${titleStr}`);
+              });
+            } else {
+              conflictMessages.push(`${user.full_name} is busy: ${json.data.reasons.join(', ')}`);
+            }
             if (json.data.alternative_times && json.data.alternative_times.length > 0 && allAlternatives.length === 0) {
-              allAlternatives = json.data.alternative_times; // keep the first set of alternative times
+              allAlternatives = json.data.alternative_times; 
             }
           }
-        } catch (e) {
-          console.error('Availability check failed', e);
+        } catch (e: any) {
+          if (e.name !== 'AbortError') console.error('Availability check failed', e);
         }
       }
       
@@ -332,7 +343,15 @@ export default function PlannerPage() {
         setConflictData(null);
       }
     };
-    checkAvailability();
+    
+    const timeoutId = setTimeout(() => {
+      checkAvailability();
+    }, 400);
+    
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [newEventStartDate, newEventStartTime, newEventEndTime, newEventParticipants, selectedUserId, teammates]);
 
   useEffect(() => {
@@ -340,6 +359,8 @@ export default function PlannerPage() {
       setScheduleTaskConflictData(null);
       return;
     }
+    const controller = new AbortController();
+    
     const checkAvailability = async () => {
       const fallbackEnd = (() => {
         try {
@@ -360,22 +381,40 @@ export default function PlannerPage() {
         const res = await fetch(`/api/v1/users/${selectedUserId}/availability?date=${taskScheduleDate}&start_time=${taskScheduleStartTime}&end_time=${computedEndTime}${excludeParam}`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
-          }
+          },
+          signal: controller.signal
         });
         const json = await res.json();
         if (json.data && json.data.is_busy) {
+          let conflictMsgs: string[] = [];
+          if (json.data.conflicts && json.data.conflicts.length > 0) {
+            json.data.conflicts.forEach((c: any) => {
+              const titleStr = c.title ? ` — ${c.title}` : '';
+              conflictMsgs.push(`You are busy from ${c.start_time} to ${c.end_time}${titleStr}`);
+            });
+          } else {
+            conflictMsgs.push(`You are busy: ${json.data.reasons.join(', ')}`);
+          }
           setScheduleTaskConflictData({
-            message: `Overlap detected! You are busy: ${json.data.reasons.join(', ')}. Can we schedule it at another time?`,
+            message: `Overlap detected! ${conflictMsgs.join('. ')}. Can we schedule it at another time?`,
             alternative_times: json.data.alternative_times || []
           });
         } else {
           setScheduleTaskConflictData(null);
         }
-      } catch (e) {
-        console.error('Availability check failed', e);
+      } catch (e: any) {
+        if (e.name !== 'AbortError') console.error('Availability check failed', e);
       }
     };
-    checkAvailability();
+    
+    const timeoutId = setTimeout(() => {
+      checkAvailability();
+    }, 400);
+    
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [taskScheduleDate, taskScheduleStartTime, taskScheduleEndTime, selectedUserId, selectedTaskId]);
 
   const handleAddEvent = async (e: React.FormEvent) => {

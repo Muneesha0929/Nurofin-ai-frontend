@@ -5,7 +5,7 @@ import targetService, { Target, TargetCreate, TargetScoreUpdate, TargetPermissio
 import { usersService } from '@/services/users';
 import { useStore } from '@/lib/store';
 import { UserProfile } from '@/types';
-import { Target as TargetIcon, CheckSquare, Plus, Shield, User as UserIcon } from 'lucide-react';
+import { Target as TargetIcon, CheckSquare, Plus, Shield, User as UserIcon, Trash2 } from 'lucide-react';
 
 export default function CEOTargetsPage() {
   const { userProfile } = useStore();
@@ -34,6 +34,7 @@ export default function CEOTargetsPage() {
   });
 
   const isCEO = userProfile.role?.toLowerCase() === 'ceo' || userProfile.role?.toLowerCase() === 'super_admin';
+  const canManageTargets = isCEO || userProfile.role?.toLowerCase() === 'team_lead';
 
   useEffect(() => {
     if (userProfile.id) {
@@ -49,7 +50,7 @@ export default function CEOTargetsPage() {
       const filtered = allUsers.filter(u => u.role?.toLowerCase() !== 'ceo');
       setUsers(filtered);
 
-      if (isCEO) {
+      if (canManageTargets) {
         setScoreableUsers(filtered);
         setAddableUsers(filtered);
       } else {
@@ -100,7 +101,7 @@ export default function CEOTargetsPage() {
     
     let targetUsers = selectedAssignees;
     // If it's global (CEO only feature), assign to all addable users
-    if (targetForm.is_global && isCEO) {
+    if (targetForm.is_global && canManageTargets) {
       targetUsers = addableUsers.map(u => Number(u.id));
     }
 
@@ -130,6 +131,17 @@ export default function CEOTargetsPage() {
     }
   };
 
+  
+  const handleDelete = async (targetId: number) => {
+    if (!confirm('Are you sure you want to delete this target?')) return;
+    try {
+      await targetService.deleteTarget(targetId);
+      if (selectedDashboardUser) loadUserTargets(selectedDashboardUser);
+    } catch (err: any) {
+      alert('Failed to delete target: ' + err.message);
+    }
+  };
+
   const handleScoreUpdate = async (targetId: number, score: string) => {
     const numScore = parseFloat(score);
     if (isNaN(numScore)) return;
@@ -156,8 +168,8 @@ export default function CEOTargetsPage() {
     }
   };
 
-  const showAssignSection = isCEO || addableUsers.length > 0;
-  const showScoreSection = isCEO || scoreableUsers.length > 0;
+  const showAssignSection = canManageTargets || addableUsers.length > 0;
+  const showScoreSection = canManageTargets || scoreableUsers.length > 0;
 
   if (loadingUsers) {
     return (
@@ -167,7 +179,7 @@ export default function CEOTargetsPage() {
     );
   }
 
-  if (!showAssignSection && !showScoreSection && !isCEO) {
+  if (!showAssignSection && !showScoreSection && !canManageTargets) {
     return (
       <div className="p-6 max-w-7xl mx-auto text-center py-20 text-text-muted">
         You do not have any target administration permissions.
@@ -226,7 +238,7 @@ export default function CEOTargetsPage() {
                     required
                   />
                 </div>
-                {isCEO && (
+                {canManageTargets && (
                   <div className="flex items-center mb-3 gap-2 cursor-pointer">
                     <input 
                       type="checkbox" 
@@ -243,7 +255,7 @@ export default function CEOTargetsPage() {
               </div>
 
               {/* User Selection List (Hidden if Global) */}
-              {(!targetForm.is_global || !isCEO) && (
+              {(!targetForm.is_global || !canManageTargets) && (
                 <div className="mt-4 pt-4 border-t border-border-subtle dark:border-[#1e2030]">
                   <label className="block text-sm font-semibold text-text-secondary dark:text-slate-300 mb-2">Select Assignees (by Username)</label>
                   <div className="max-h-48 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
@@ -282,7 +294,7 @@ export default function CEOTargetsPage() {
         )}
 
         {/* DELEGATE PERMISSIONS SECTION (CEO ONLY) */}
-        {isCEO && (
+        {canManageTargets && (
           <section className="bg-background-primary dark:bg-[#12131c] p-6 rounded-xl shadow-sm border border-border-subtle dark:border-[#1e2030]">
             <div className="flex items-center gap-2 mb-6">
               <Shield className="w-5 h-5 text-accent-purple" />
@@ -390,7 +402,9 @@ export default function CEOTargetsPage() {
                     <th className="p-4 text-xs font-bold text-text-secondary dark:text-slate-400 uppercase tracking-wider">Month</th>
                     <th className="p-4 text-xs font-bold text-text-secondary dark:text-slate-400 uppercase tracking-wider">Status</th>
                     <th className="p-4 text-xs font-bold text-text-secondary dark:text-slate-400 uppercase tracking-wider">Completed At</th>
-                    <th className="p-4 text-xs font-bold text-text-secondary dark:text-slate-400 uppercase tracking-wider text-right">Score</th>
+                    <th className="p-4 text-xs font-bold text-text-secondary dark:text-slate-400 uppercase tracking-wider text-right">Aggregate Score</th>
+                    <th className="p-4 text-xs font-bold text-text-secondary dark:text-slate-400 uppercase tracking-wider text-right">Your Score</th>
+                    <th className="p-4 text-xs font-bold text-text-secondary dark:text-slate-400 uppercase tracking-wider text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-subtle dark:divide-[#1e2030]">
@@ -421,14 +435,27 @@ export default function CEOTargetsPage() {
                         {t.completed_at ? new Date(t.completed_at).toLocaleDateString() : '-'}
                       </td>
                       <td className="p-4 text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="font-bold">{t.average_score != null ? t.average_score.toFixed(1) : '-'}</span>
+                          <span className="text-[10px] text-text-muted">{t.score_count} reviews</span>
+                        </div>
+                      </td>
+                      <td className="p-4 text-right">
                         <input 
                           type="number" 
                           step="0.1" 
-                          defaultValue={t.score || ''}
+                          defaultValue={t.my_score || ''}
                           onBlur={e => handleScoreUpdate(t.id, e.target.value)}
                           className="w-24 bg-white dark:bg-[#12131c] border border-border-subtle dark:border-[#2a2d3d] rounded-md p-1.5 text-sm text-right text-text-primary dark:text-white outline-none focus:border-accent-blue transition-colors font-medium"
                           placeholder="e.g. 8.5"
                         />
+                      </td>
+                      <td className="p-4 text-right">
+                        {String(t.created_by_id) === String(userProfile.id) && (
+                          <button onClick={() => handleDelete(t.id)} className="p-2 text-text-muted hover:text-accent-red hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors inline-flex">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

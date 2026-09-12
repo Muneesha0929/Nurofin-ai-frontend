@@ -8,8 +8,10 @@ export interface Target {
   created_by_id: number;
   is_completed: boolean;
   completed_at?: string;
-  score?: number;
-  scored_by_id?: number;
+  average_score?: number;
+  score_count?: number;
+  my_score?: number;
+  reviewer_scores?: {reviewer_id: number, score: number}[];
 }
 
 export interface TargetCreate {
@@ -89,7 +91,7 @@ const targetService = {
 
   updateTarget: async (targetId: number, data: TargetUpdate): Promise<Target> => {
     const res = await fetch(`/api/v1/targets/${targetId}`, {
-      method: 'PATCH',
+      method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
@@ -101,14 +103,27 @@ const targetService = {
   },
 
   scoreTarget: async (targetId: number, data: TargetScoreUpdate): Promise<Target> => {
-    const res = await fetch(`/api/v1/targets/${targetId}/score`, {
-      method: 'PATCH',
+    const res = await fetch(`/api/v1/targets/${targetId}/scores/me`, {
+      method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Failed to score target' }));
       throw new Error(err.detail || 'Failed to score target');
+    }
+    return res.json();
+  },
+
+
+  deleteTarget: async (targetId: number): Promise<{success: boolean}> => {
+    const res = await fetch(`/api/v1/targets/${targetId}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to delete target' }));
+      throw new Error(err.detail || 'Failed to delete target');
     }
     return res.json();
   },

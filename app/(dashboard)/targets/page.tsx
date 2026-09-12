@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import targetService, { Target, TargetUpdate, TargetCreate } from '@/services/targetService';
 import { useStore } from '@/lib/store';
-import { Target as TargetIcon, CheckSquare, Plus, Globe, User as UserIcon } from 'lucide-react';
+import { Target as TargetIcon, CheckSquare, Plus, Globe, User as UserIcon, Trash2 } from 'lucide-react';
 
 export default function TargetsPage() {
   const { userProfile } = useStore();
@@ -29,6 +29,17 @@ export default function TargetsPage() {
       setError(err.message || 'Failed to fetch targets');
     } finally {
       setLoading(false);
+    }
+  };
+
+  
+  const handleDelete = async (targetId: number) => {
+    if (!confirm('Are you sure you want to delete this target?')) return;
+    try {
+      await targetService.deleteTarget(targetId);
+      fetchTargets();
+    } catch (err: any) {
+      alert('Failed to delete target: ' + err.message);
     }
   };
 
@@ -174,10 +185,25 @@ export default function TargetsPage() {
                             Completed: {new Date(target.completed_at).toLocaleDateString()}
                           </span>
                         )}
+                        {target.average_score != null && (
+                          <span className="text-xs font-bold text-accent-blue bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+                            Avg Score: {target.average_score.toFixed(1)}
+                          </span>
+                        )}
                       </div>
                     </div>
                     
-                    <div className="flex items-center flex-shrink-0">
+                    <div className="flex items-center flex-shrink-0 gap-2">
+                        {String(target.created_by_id) === String(userProfile.id) && (
+                          <button onClick={() => handleDelete(target.id)} className="p-2 text-text-muted hover:text-accent-red hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      {target.average_score != null && (
+                        <span className="text-[10px] font-bold text-accent-blue bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+                          Score: {target.average_score.toFixed(1)}
+                        </span>
+                      )}
                       <button
                         onClick={() => handleToggleComplete(target)}
                         className={`px-4 py-2 rounded-lg font-bold text-sm transition-colors shadow-sm flex items-center gap-2 ${
@@ -220,9 +246,19 @@ export default function TargetsPage() {
                       {target.description && <p className="text-xs text-text-secondary dark:text-slate-400 mt-1 line-clamp-2">{target.description}</p>}
                     </div>
                     
-                    <div className="flex items-center justify-between border-t border-border-subtle dark:border-[#1e2030] pt-3 mt-1">
+                    <div className="flex items-center justify-between border-t border-border-subtle dark:border-[#1e2030] pt-3 mt-1 gap-2">
+                      {String(target.created_by_id) === String(userProfile.id) && (
+                          <button onClick={() => handleDelete(target.id)} className="p-1.5 text-text-muted hover:text-accent-red hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors mr-auto">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                      )}
                       <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{target.month}</span>
                       
+                      {target.average_score != null && (
+                        <span className="text-[10px] font-bold text-accent-blue bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+                          Score: {target.average_score.toFixed(1)}
+                        </span>
+                      )}
                       <button
                         onClick={() => handleToggleComplete(target)}
                         className={`px-3 py-1.5 rounded-md font-bold text-xs transition-colors flex items-center gap-1.5 ${
