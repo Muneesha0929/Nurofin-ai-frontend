@@ -174,7 +174,7 @@ export default function AdminPanelPage() {
   });
 
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editUserForm, setEditUserForm] = useState({
+  const [editUserForm, setEditUserForm] = useState({ can_view_finance: false,
     full_name: '',
     username: '',
     email: '',
@@ -308,9 +308,9 @@ export default function AdminPanelPage() {
   };
 
   // Start edit flow
-  const handleStartEditUser = (user: User) => {
+  const handleStartEditUser = (user: any) => {
     setEditingUserId(user.id);
-    setEditUserForm({ can_view_finance: u.can_view_finance,
+    setEditUserForm({ can_view_finance: user.can_view_finance,
       full_name: user.name,
       username: user.username || '',
       email: user.email,

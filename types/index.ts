@@ -13,6 +13,7 @@ export interface UserProfile {
   is_active?: boolean;
   salary?: number;
   performance_score?: number;
+  can_view_finance?: boolean;
 }
 export interface User {
   id: string;
@@ -20,6 +21,7 @@ export interface User {
   email: string;
   role: string;
   avatar: string;
+  can_view_finance?: boolean;
 }
 
 export interface ProjectMember {
@@ -27,6 +29,7 @@ export interface ProjectMember {
   name: string;
   role: string;
   avatar: string;
+  can_view_finance?: boolean;
 }
 
 export interface ProjectActivity {

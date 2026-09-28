@@ -124,7 +124,7 @@ export function DailyCheckinModal({
             onClick={onClose}
             className="px-6 h-10 bg-accent-blue hover:bg-blue-600 text-white font-bold rounded-lg shadow-md transition-all text-xs"
           >
-            I'll do this later
+            I&apos;ll do this later
           </button>
         </div>
       </motion.div>
