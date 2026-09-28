@@ -11,7 +11,7 @@ import {
   CheckSquare, 
   Briefcase, 
   FolderOpen, 
-  DollarSign, 
+  IndianRupee, 
   Bell, 
   Settings, 
   ShieldAlert, 
@@ -37,7 +37,7 @@ interface NavSection {
   items: NavItem[];
 }
 
-export const navSections: NavSection[] = [
+export const getNavSections = (isAdmin: boolean, userProfile: any): NavSection[] => [
   {
     title: 'Nuro Core',
     items: [
@@ -59,7 +59,7 @@ export const navSections: NavSection[] = [
   {
     title: 'System Control',
     items: [
-      { label: 'Finance', href: '/finance', icon: DollarSign },
+      ...(isAdmin || userProfile?.can_view_finance ? [{ label: 'Finance', href: '/finance', icon: IndianRupee }] : []),
       { label: 'Team Chat', href: '/team-chat', icon: MessageSquare },
       { label: 'AI Assistant', href: '/chat', icon: BrainCircuit },
       { label: 'Notifications', href: '/notifications', icon: Bell },
@@ -77,6 +77,7 @@ export default function Sidebar() {
   const logoSrc = theme === 'light' ? '/logo-black.svg' : '/logo-white.svg';
 
   const unreadNotificationsCount = notifications.filter(n => !n.read).length;
+  const isAdmin = userProfile && ['super_admin', 'ceo'].includes(userProfile.role);
 
   const handleLogout = () => {
     localStorage.removeItem('auth_token');
@@ -131,7 +132,7 @@ export default function Sidebar() {
 
       {/* Navigation List */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-4">
-        {navSections.map((section) => (
+        {getNavSections(isAdmin, userProfile).map((section) => (
           <div key={section.title} className="space-y-1">
             {!sidebarCollapsed && (
               <div className="text-[10px] font-bold text-text-muted/80 dark:text-slate-500 uppercase tracking-widest px-3 pt-4 pb-1.5 select-none">

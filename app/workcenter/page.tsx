@@ -243,7 +243,14 @@ export default function TaskCenterPage() {
         usersService.getUsers().catch(() => []),
       ]);
 
-      setTasks(tasksRes.tasks || []);
+      let filtered = tasksRes.tasks || [];
+        if (statusFilter === 'pending') {
+          filtered = filtered.filter((t:any) => t.status !== 'completed' && t.status !== 'done');
+        } else if (statusFilter === 'overdue') {
+          const now = new Date().toISOString().split('T')[0];
+          filtered = filtered.filter((t:any) => t.status !== 'completed' && t.status !== 'done' && t.deadline && t.deadline < now);
+        }
+        setTasks(filtered);
       setTotalTasks(tasksRes.total || 0);
       setSummary(summaryData);
       setInsights(insightsData);

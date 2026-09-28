@@ -1,3 +1,4 @@
+import { useRouter } from 'next/navigation';
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -17,7 +18,7 @@ import {
   Legend,
 } from 'recharts';
 import {
-  DollarSign,
+  IndianRupee,
   CreditCard,
   PiggyBank,
   Calendar,
@@ -39,8 +40,7 @@ import {
   Receipt,
   Cloud,
   ShieldCheck,
-  CircleDollarSign,
-  AlertCircle,
+  AlertCircle
 } from 'lucide-react';
 import { FinanceTracker, CostCategory } from '@/types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -122,7 +122,7 @@ const TYPE_COLORS: Record<string, string> = {
   other: 'text-text-secondary bg-surface-card border-border-subtle',
 };
 
-const fmt = (n: number) => `$${(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmt = (n: number) => `₹${(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function FinancePage() {
   const { financeRecords, setFinanceRecords } = useStore();
@@ -156,7 +156,7 @@ export default function FinancePage() {
     record_type: 'expense' as FinanceRecordType,
     status: 'pending',
     amount: '',
-    currency: 'USD',
+    currency: 'INR',
     vendor: '',
     department: '',
     cost_category: '' as string,
@@ -214,7 +214,7 @@ export default function FinancePage() {
       record_type: 'expense',
       status: 'pending',
       amount: '',
-      currency: 'USD',
+      currency: 'INR',
       vendor: '',
       department: '',
       cost_category: '',
@@ -238,7 +238,7 @@ export default function FinancePage() {
       record_type: (rec.record_type || rec.category) as FinanceRecordType,
       status: rec.status,
       amount: String(rec.amount || 0),
-      currency: rec.currency || 'USD',
+      currency: rec.currency || 'INR',
       vendor: rec.vendor || '',
       department: rec.department || '',
       cost_category: rec.cost_category || '',
@@ -527,7 +527,7 @@ export default function FinancePage() {
             {/* Salaries */}
             <TrackerCard
               title="Salary Dates"
-              icon={<CircleDollarSign className="w-4 h-4 text-accent-purple" />}
+              icon={<IndianRupee className="w-4 h-4 text-accent-purple" />}
               items={tracker.salaries}
               count={tracker.summary.salaries_count}
               emptyText="No salary records."
@@ -596,7 +596,7 @@ export default function FinancePage() {
                             {TYPE_LABELS[type] || type}
                           </span>
                         </TableCell>
-                        <TableCell className="font-mono text-xs font-bold">{inv.currency || 'USD'} {(inv.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
+                        <TableCell className="font-mono text-xs font-bold">{inv.currency || 'INR'} {(inv.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
                         <TableCell className="text-2xs flex items-center gap-1">
                           <Calendar className="w-3 h-3 text-text-muted" />
                           <span className={cn(inv._urgency === 'overdue' && 'text-accent-red font-bold', inv._urgency === 'critical' && 'text-accent-orange font-bold')}>
@@ -650,7 +650,7 @@ export default function FinancePage() {
 
         <div className="bg-background-secondary border border-border-subtle rounded-lg p-5 shadow-md space-y-4">
           <h3 className="text-xs font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1.5">
-            <DollarSign className="w-4 h-4 text-accent-green" /> Budget Allocation by Project
+            <IndianRupee className="w-4 h-4 text-accent-green" /> Budget Allocation by Project
           </h3>
           {allocationData.length === 0 ? (
             <p className="text-2xs text-text-muted italic py-10 text-center">No allocations yet.</p>
@@ -866,7 +866,7 @@ export default function FinancePage() {
                     </span>
                   </TableCell>
                   <TableCell className="font-mono text-xs font-bold text-text-primary">
-                    {rec.currency || 'USD'} {rec.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {rec.currency || 'INR'} {rec.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </TableCell>
                   <TableCell className="text-2xs text-text-secondary">
                     {rec.project_name || rec.user_name || '—'}
@@ -999,7 +999,7 @@ export default function FinancePage() {
                   value={recordForm.currency}
                   onChange={e => setRecordForm({ ...recordForm, currency: e.target.value })}
                 >
-                  <option value="USD">USD</option>
+                  <option value="INR">INR</option>
                   <option value="INR">INR</option>
                   <option value="EUR">EUR</option>
                   <option value="GBP">GBP</option>

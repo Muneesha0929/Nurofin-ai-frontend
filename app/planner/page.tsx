@@ -1,4 +1,5 @@
 'use client';
+import { useSearchParams } from 'next/navigation';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -56,7 +57,8 @@ export default function PlannerPage() {
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   
-  const [viewTeamSchedule, setViewTeamSchedule] = useState(false);
+  const searchParams = useSearchParams();
+  const [viewTeamSchedule, setViewTeamSchedule] = useState(searchParams.get('view') === 'team' || isAdmin);
   const [showPrevDayPopup, setShowPrevDayPopup] = useState(false);
   
   const [searchQuery, setSearchQuery] = useState('');
@@ -66,7 +68,7 @@ export default function PlannerPage() {
 
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [activeTab, setActiveTab] = useState('week');
+  const [activeTab, setActiveTab] = useState('day');
 
   // Event Form State
   const [newEventTitle, setNewEventTitle] = useState('');
@@ -730,6 +732,7 @@ export default function PlannerPage() {
   });
 
   const getEventsForDate = (dateStr: string) => {
+      const effectiveViewTeam = viewTeamSchedule && activeTab === 'day';
     let local = localEvents.filter(e => e.date === dateStr);
     let currentTasks = tasks;
     let currentGoogleSource = scheduleEvents;
@@ -761,7 +764,7 @@ export default function PlannerPage() {
     
     const scheduledTasks = currentTasks
       .filter(t => {
-        const isTargetUser = viewTeamSchedule || String(t.assignedTo?.id || t.assigneeId) === String(selectedUserId);
+        const isTargetUser = effectiveViewTeam || String(t.assignedTo?.id || t.assigneeId) === String(selectedUserId);
         
         let isDateMatch = false;
         if (t.status === 'completed' || t.status === 'done') {

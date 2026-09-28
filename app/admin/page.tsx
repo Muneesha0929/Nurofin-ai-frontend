@@ -310,7 +310,7 @@ export default function AdminPanelPage() {
   // Start edit flow
   const handleStartEditUser = (user: User) => {
     setEditingUserId(user.id);
-    setEditUserForm({
+    setEditUserForm({ can_view_finance: u.can_view_finance,
       full_name: user.name,
       username: user.username || '',
       email: user.email,
@@ -1426,7 +1426,21 @@ export default function AdminPanelPage() {
                 />
               </div>
 
-              {/* LinkedIn */}
+              
+                <div className="space-y-1.5 flex flex-col justify-center">
+                  <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Finance Access</label>
+                  <label className="flex items-center gap-2 text-2xs text-white cursor-pointer">
+                    <input 
+                      type="checkbox"
+                      checked={editUserForm.can_view_finance || false}
+                      onChange={(e) => setEditUserForm(prev => ({ ...prev, can_view_finance: e.target.checked }))}
+                      className="rounded bg-white/5 border-white/10 text-blue-500 focus:ring-blue-500/20"
+                    />
+                    Allow viewing Finance module
+                  </label>
+                </div>
+
+                {/* LinkedIn */}
               <div className="space-y-1.5">
                 <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">LinkedIn Profile</label>
                 <input 
@@ -1592,7 +1606,21 @@ export default function AdminPanelPage() {
                 />
               </div>
 
-              {/* LinkedIn */}
+              
+                <div className="space-y-1.5 flex flex-col justify-center">
+                  <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Finance Access</label>
+                  <label className="flex items-center gap-2 text-2xs text-white cursor-pointer">
+                    <input 
+                      type="checkbox"
+                      checked={editUserForm.can_view_finance || false}
+                      onChange={(e) => setEditUserForm(prev => ({ ...prev, can_view_finance: e.target.checked }))}
+                      className="rounded bg-white/5 border-white/10 text-blue-500 focus:ring-blue-500/20"
+                    />
+                    Allow viewing Finance module
+                  </label>
+                </div>
+
+                {/* LinkedIn */}
               <div className="space-y-1.5">
                 <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">LinkedIn Profile</label>
                 <input 

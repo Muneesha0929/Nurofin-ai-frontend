@@ -97,7 +97,32 @@ function mapReview(raw: any): PerformanceReview {
   };
 }
 
+export interface FinancialMetrics {
+  totalRevenue: number;
+  totalExpenses: number;
+  netProfit: number;
+  burnRate: number;
+  runway: number;
+  mr: number;
+  arr: number;
+  cac: number;
+  ltv: number;
+}
+
 export const financeService = {
+  getMetrics: async (): Promise<FinancialMetrics> => {
+    return {
+      totalRevenue: 100000,
+      totalExpenses: 50000,
+      netProfit: 50000,
+      burnRate: 10000,
+      runway: 12,
+      mr: 10000,
+      arr: 120000,
+      cac: 100,
+      ltv: 1000,
+    };
+  },
   getRecords: async (params?: {
     record_type?: string;
     status?: string;

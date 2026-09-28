@@ -275,6 +275,7 @@ const ChatAutoOpener = ({ channelToSelect, onSelected }: { channelToSelect: any,
 export default function TeamChatPage() {
   const [channelToSelect, setChannelToSelect] = useState<any>(null);
   const { userProfile, theme } = useStore();
+  const isCEO = userProfile?.role === "CEO" || userProfile?.role === "Admin";
   const [clientReady, setClientReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const connectingRef = useRef(false);
@@ -584,7 +585,7 @@ export default function TeamChatPage() {
                 >
                   <option value="">-- Choose a task --</option>
                   {tasks.map(t => (
-                    <option key={t.id} value={t.id}>{t.title}</option>
+                    <option key={t.id} value={t.id}>{t.title} {isCEO && (t.assignedTo?.name || t.assignedToId) ? `(Assignee: ${t.assignedTo?.name || t.assignedToId})` : ""}</option>
                   ))}
                 </select>
                 {tasks.length === 0 && <p className="text-[10px] text-accent-orange">No tasks assigned to you.</p>}
