@@ -44,7 +44,7 @@ export const getNavSections = (isAdmin: boolean, userProfile: any): NavSection[]
       { label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
       { label: 'Projects', href: '/projects', icon: Briefcase },
       { label: 'Task Center', href: '/workcenter', icon: CheckSquare },
-      { label: 'My Targets', href: '/targets', icon: Target },
+      { label: 'Targets & Performance', href: '/targets', icon: Target },
     ]
   },
   {
@@ -65,7 +65,7 @@ export const getNavSections = (isAdmin: boolean, userProfile: any): NavSection[]
       { label: 'Notifications', href: '/notifications', icon: Bell },
       { label: 'Account Settings', href: '/profile', icon: UserCircle },
       { label: 'User Management', href: '/admin', icon: Settings },
-      { label: 'Targets Administration', href: '/targets/ceo', icon: Target },
+
     ]
   }
 ];

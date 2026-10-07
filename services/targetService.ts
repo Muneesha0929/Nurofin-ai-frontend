@@ -91,7 +91,7 @@ const targetService = {
 
   updateTarget: async (targetId: number, data: TargetUpdate): Promise<Target> => {
     const res = await fetch(`/api/v1/targets/${targetId}`, {
-      method: 'PUT',
+      method: 'PATCH',
       headers: getHeaders(),
       body: JSON.stringify(data)
     });
