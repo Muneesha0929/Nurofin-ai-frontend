@@ -117,7 +117,8 @@ export default function UnifiedTargetsPage() {
           await targetService.createPermission({
               grantee_id: Number(delegationForm.grantee_id),
               target_user_id: Number(delegationForm.target_user_id),
-              can_score: true
+              can_score: true,
+              can_add_targets: false
           });
           alert('Scoring permission granted successfully!');
           setShowDelegationModal(false);
@@ -268,8 +269,7 @@ export default function UnifiedTargetsPage() {
       if (editingTarget && editingTarget.id > 0) {
         await targetService.updateTarget(editingTarget.id, {
           title: finalTitle,
-          description: targetForm.description,
-          is_completed: targetForm.is_completed
+          description: targetForm.description
         });
       } else {
         await targetService.createTarget({
@@ -463,7 +463,7 @@ export default function UnifiedTargetsPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delegate Scoring Permission</DialogTitle>
-            <DialogDescription>Allow an employee to peer-evaluate another employee's targets.</DialogDescription>
+            <DialogDescription>Allow an employee to peer-evaluate another employee&apos;s targets.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleDelegateScore} className="space-y-4 pt-4">
             <div>

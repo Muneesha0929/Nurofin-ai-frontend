@@ -168,13 +168,13 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                         validWorkTargets++;
                         hasSelfScore = true;
                     }
-                    if (t.average_score != null && t.score_count > 0) {
-                        if (t.my_score != null && t.score_count > 1) {
-                            const othersTotal = (t.average_score * t.score_count) - (isEvalTarget ? 0 : t.my_score);
-                            const othersAvg = othersTotal / (t.score_count - (isEvalTarget ? 0 : 1));
+                    if (t.average_score != null && (t.score_count || 0) > 0) {
+                        if (t.my_score != null && (t.score_count || 0) > 1) {
+                            const othersTotal = (t.average_score * (t.score_count || 0)) - (isEvalTarget ? 0 : t.my_score);
+                            const othersAvg = othersTotal / ((t.score_count || 0) - (isEvalTarget ? 0 : 1));
                             ceoSum += othersAvg;
                             validCeoTargets++;
-                        } else if (t.my_score == null && t.score_count > 0) {
+                        } else if (t.my_score == null && (t.score_count || 0) > 0) {
                             ceoSum += t.average_score;
                             validCeoTargets++;
                         }
@@ -253,11 +253,11 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                     });
                 } else {
                     if (t.my_score != null && t.my_score > 0) { tWork = t.my_score; hasWork = true; }
-                    if (t.average_score != null && t.score_count > 0) {
-                        if (t.my_score != null && t.score_count > 1) {
-                            const othersTotal = (t.average_score * t.score_count) - t.my_score;
-                            tCeo = othersTotal / (t.score_count - 1); hasCeo = true;
-                        } else if (t.my_score == null && t.score_count > 0) {
+                    if (t.average_score != null && (t.score_count || 0) > 0) {
+                        if (t.my_score != null && (t.score_count || 0) > 1) {
+                            const othersTotal = (t.average_score * (t.score_count || 0)) - t.my_score;
+                            tCeo = othersTotal / ((t.score_count || 0) - 1); hasCeo = true;
+                        } else if (t.my_score == null && (t.score_count || 0) > 0) {
                             tCeo = t.average_score; hasCeo = true;
                         }
                     }
