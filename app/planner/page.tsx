@@ -598,6 +598,27 @@ export default function PlannerPage() {
     }
   };
 
+  
+  const handleConnectOutlook = async () => {
+    try {
+      const redirectUri = `${window.location.origin}/planner/outlook/callback`;
+      const authUrl = await plannerService.getOutlookLoginUrl(redirectUri);
+      window.location.href = authUrl;
+    } catch (error) {
+      console.error('Failed to get Outlook login URL:', error);
+    }
+  };
+
+  const handleDisconnectOutlook = async () => {
+    try {
+      await plannerService.disconnectOutlook();
+      loadTeammates();
+      loadSchedule();
+    } catch (error) {
+      console.error('Failed to disconnect Outlook Calendar:', error);
+    }
+  };
+
   const getMonthStart = (date: Date): string => {
     const d = new Date(date.getFullYear(), date.getMonth(), 1);
     return d.toISOString().split('T')[0];
@@ -891,15 +912,26 @@ export default function PlannerPage() {
             <h3 className="text-sm font-bold flex items-center gap-2">
               <Users className="w-4 h-4 text-accent-blue" /> Team
             </h3>
-            {selectedUserInfo?.google_connected && isOwnSchedule && (
-              <button
-                onClick={handleDisconnectGoogle}
-                className="text-[10px] text-accent-red hover:text-accent-red/80 flex items-center gap-1"
-                title="Disconnect Google Calendar"
-              >
-                <Unlink className="w-3 h-3" /> Disconnect
-              </button>
-            )}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {selectedUserInfo?.google_connected && isOwnSchedule && (
+                <button
+                  onClick={handleDisconnectGoogle}
+                  className="text-[10px] text-accent-red hover:text-accent-red/80 flex items-center gap-1 font-medium bg-accent-red/10 px-2 py-0.5 rounded transition-colors"
+                  title="Disconnect Google Calendar"
+                >
+                  <Unlink className="w-3 h-3" /> Disconnect Google
+                </button>
+              )}
+              {selectedUserInfo?.outlook_connected && isOwnSchedule && (
+                <button
+                  onClick={handleDisconnectOutlook}
+                  className="text-[10px] text-accent-red hover:text-accent-red/80 flex items-center gap-1 font-medium bg-accent-red/10 px-2 py-0.5 rounded transition-colors"
+                  title="Disconnect Outlook Calendar"
+                >
+                  <Unlink className="w-3 h-3" /> Disconnect Outlook
+                </button>
+              )}
+            </div>
           </div>
           <div className="relative">
             <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
@@ -968,22 +1000,77 @@ export default function PlannerPage() {
                       <Globe className="w-3 h-3 text-[#4285F4]" />
                     </span>
                   )}
+                  {user.outlook_connected && (
+                    <span title="Outlook Calendar connected" className="bg-white/10 p-1 rounded-full">
+                      <Calendar className="w-3 h-3 text-[#0078D4]" />
+                    </span>
+                  )}
                 </div>
               </motion.button>
             ))}
           </AnimatePresence>
         </div>
 
-        {/* Google Calendar Connect Button */}
-        {!selectedUserInfo?.google_connected && isOwnSchedule && (
-          <div className="p-4 border-t border-border-subtle bg-background-secondary/80">
-            <button
-              onClick={handleConnectGoogle}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-[#4285F4] hover:bg-[#3367D6] text-white text-xs font-bold rounded-lg transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-            >
-              <Link2 className="w-3.5 h-3.5" /> Connect Google Calendar
-            </button>
-          </div>
+        {/* Outlook Calendar Section */}
+        {isOwnSchedule && (
+          selectedUserInfo?.outlook_connected ? (
+            <div className="p-3 border-t border-border-subtle bg-[#0078D4]/10 flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <Calendar className="w-4 h-4 text-[#0078D4] flex-shrink-0" />
+                <div className="truncate">
+                  <p className="text-xs font-semibold text-text-primary">Outlook Connected</p>
+                  <p className="text-[10px] text-text-muted">Calendar synced</p>
+                </div>
+              </div>
+              <button
+                onClick={handleDisconnectOutlook}
+                className="text-[11px] font-medium text-accent-red hover:text-accent-red/80 flex items-center gap-1 px-2 py-1 rounded hover:bg-accent-red/10 transition-colors flex-shrink-0"
+                title="Disconnect Outlook Calendar"
+              >
+                <Unlink className="w-3 h-3" /> Disconnect
+              </button>
+            </div>
+          ) : (
+            <div className="p-4 border-t border-border-subtle bg-background-secondary/80">
+              <button
+                onClick={handleConnectOutlook}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-[#0078D4] hover:bg-[#106EBE] text-white text-xs font-bold rounded-lg transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+              >
+                <Link2 className="w-3.5 h-3.5" /> Connect Outlook Calendar
+              </button>
+            </div>
+          )
+        )}
+
+        {/* Google Calendar Section */}
+        {isOwnSchedule && (
+          selectedUserInfo?.google_connected ? (
+            <div className="p-3 border-t border-border-subtle bg-[#4285F4]/10 flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <Globe className="w-4 h-4 text-[#4285F4] flex-shrink-0" />
+                <div className="truncate">
+                  <p className="text-xs font-semibold text-text-primary">Google Connected</p>
+                  <p className="text-[10px] text-text-muted">Calendar synced</p>
+                </div>
+              </div>
+              <button
+                onClick={handleDisconnectGoogle}
+                className="text-[11px] font-medium text-accent-red hover:text-accent-red/80 flex items-center gap-1 px-2 py-1 rounded hover:bg-accent-red/10 transition-colors flex-shrink-0"
+                title="Disconnect Google Calendar"
+              >
+                <Unlink className="w-3 h-3" /> Disconnect
+              </button>
+            </div>
+          ) : (
+            <div className="p-4 border-t border-border-subtle bg-background-secondary/80">
+              <button
+                onClick={handleConnectGoogle}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-[#4285F4] hover:bg-[#3367D6] text-white text-xs font-bold rounded-lg transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+              >
+                <Link2 className="w-3.5 h-3.5" /> Connect Google Calendar
+              </button>
+            </div>
+          )
         )}
       </div>
 
@@ -1011,10 +1098,20 @@ export default function PlannerPage() {
               {!isOwnSchedule && <span title="Read-only view"><Lock className="w-4 h-4 text-text-muted" /></span>}
             </h2>
             <p className="text-xs text-text-secondary mt-1 flex items-center gap-1.5">
-              {selectedUserInfo?.google_connected ? <CheckCircle2 className="w-3 h-3 text-accent-green" /> : <AlertCircle className="w-3 h-3 text-text-muted" />}
-              {selectedUserInfo?.google_connected
-                ? "Synced with Google Calendar + Nurofin"
-                : "Nurofin schedule only (Google Calendar not connected)"}
+              {(selectedUserInfo?.google_connected || selectedUserInfo?.outlook_connected) ? (
+                <CheckCircle2 className="w-3 h-3 text-accent-green" />
+              ) : (
+                <AlertCircle className="w-3 h-3 text-text-muted" />
+              )}
+              {(() => {
+                const connected: string[] = [];
+                if (selectedUserInfo?.google_connected) connected.push('Google Calendar');
+                if (selectedUserInfo?.outlook_connected) connected.push('Outlook Calendar');
+                if (connected.length > 0) {
+                  return `Synced with ${connected.join(' & ')} + Nurofin`;
+                }
+                return 'Nurofin schedule only (no external calendars connected)';
+              })()}
             </p>
           </div>
           <div className="flex items-center gap-3">

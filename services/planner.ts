@@ -17,10 +17,11 @@ export interface PlannerUser {
   department: string | null;
   profile_picture: string | null;
   google_connected: boolean;
+  outlook_connected?: boolean;
 }
 
 export interface ScheduleEvent {
-  source: 'nurofin' | 'google_calendar' | 'google_error';
+  source: 'nurofin' | 'google_calendar' | 'google_error' | 'outlook_calendar' | 'outlook_error';
   title: string;
   description?: string;
   date?: string;
@@ -42,6 +43,7 @@ export interface ScheduleResponse {
     id: number;
     full_name: string;
     google_connected: boolean;
+  outlook_connected?: boolean;
   };
   schedule: ScheduleEvent[];
 }
@@ -100,6 +102,33 @@ export const plannerService = {
       headers: getHeaders()
     });
     if (!res.ok) throw new Error('Failed to disconnect Google Calendar');
+  },
+
+  
+  getOutlookLoginUrl: async (redirectUri?: string): Promise<string> => {
+    const params = redirectUri ? `?redirect_uri=${encodeURIComponent(redirectUri)}` : '';
+    const res = await fetch(`/api/v1/planner/outlook/login${params}`, { headers: getHeaders() });
+    if (!res.ok) throw new Error('Failed to get Outlook login URL');
+    const json = await res.json();
+    return json.data.auth_url;
+  },
+
+  outlookCallback: async (code: string, redirectUri?: string): Promise<void> => {
+    const params = new URLSearchParams({ code });
+    if (redirectUri) params.append('redirect_uri', redirectUri);
+    const res = await fetch(`/api/v1/planner/outlook/callback?${params.toString()}`, {
+      method: 'POST',
+      headers: getHeaders()
+    });
+    if (!res.ok) throw new Error('Failed to connect Outlook Calendar');
+  },
+
+  disconnectOutlook: async (): Promise<void> => {
+    const res = await fetch('/api/v1/planner/outlook/disconnect', {
+      method: 'POST',
+      headers: getHeaders()
+    });
+    if (!res.ok) throw new Error('Failed to disconnect Outlook Calendar');
   },
 
   checkAvailability: async (userIds: number[], date: string): Promise<BusyBlock[]> => {

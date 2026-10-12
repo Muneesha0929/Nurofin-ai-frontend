@@ -12,6 +12,8 @@ export interface Target {
   score_count?: number;
   my_score?: number;
   reviewer_scores?: {reviewer_id: number, score: number}[];
+  q_start?: string;
+  q_end?: string;
 }
 
 export interface TargetCreate {

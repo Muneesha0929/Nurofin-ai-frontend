@@ -15,7 +15,7 @@ export default function UnifiedTargetsPage() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [allUsersList, setAllUsersList] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMonth, setViewMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [viewMonth, setViewMonth] = useState('all');
   
   // Data for the dashboard
   const [allTargets, setAllTargets] = useState<Record<number, Target[]>>({});
@@ -35,8 +35,9 @@ export default function UnifiedTargetsPage() {
   const [showDelegationModal, setShowDelegationModal] = useState(false);
   const [delegationForm, setDelegationForm] = useState({ grantee_id: '', target_user_id: '' });
 
-  const isCEO = userProfile.role?.toLowerCase() === 'ceo' || userProfile.role?.toLowerCase() === 'super_admin';
-  const canManageTargets = isCEO || userProfile.role?.toLowerCase() === 'team_lead';
+  const isCEO = userProfile.role?.toLowerCase() === 'ceo' || userProfile.role?.toLowerCase() === 'super_admin' || userProfile.role?.toLowerCase() === 'admin' || Number(userProfile.id) === 1;
+  const isTeamLead = userProfile.role?.toLowerCase() === 'team_lead';
+  const canManageTargets = isCEO || isTeamLead;
 
   useEffect(() => {
     if (userProfile.id) {
@@ -63,6 +64,8 @@ export default function UnifiedTargetsPage() {
         title: `[Quarterly] ${q.name}`,
         description: q.goals || '',
         month: q.start_date ? q.start_date.substring(0, 7) : '',
+        q_start: q.start_date ? q.start_date.substring(0, 7) : '',
+        q_end: q.end_date ? q.end_date.substring(0, 7) : '',
         is_global: true,
         is_completed: q.status === 'completed' || q.status === 'closed',
         user_id: 0,
@@ -73,32 +76,60 @@ export default function UnifiedTargetsPage() {
       }));
       
       const combinedMyTargets = [...myData, ...quarterTargets];
+      const globalTargetsFromMyData = myData.filter(t => t.is_global);
+
+      const isUserCeo = (u: UserProfile) => {
+        const r = (u.role || '').toLowerCase();
+        return r === 'ceo' || r === 'super_admin' || Number(u.id) === 1;
+      };
 
       if (canManageTargets) {
-        const filteredUsers = allU.filter(u => u.role?.toLowerCase() !== 'ceo');
-        setUsers(filteredUsers);
+        // CEO sees all users; Team Lead cannot see CEO's things!
+        const displayUsers = isCEO 
+          ? allU 
+          : allU.filter(u => !isUserCeo(u));
+        setUsers(displayUsers);
         
         const targetsMap: Record<number, Target[]> = {};
-        for (const u of filteredUsers) {
+        for (const u of displayUsers) {
+          if (isUserCeo(u)) {
+            // For CEO, everything is 000; he does not have quarterly/global/individual targets or evaluations
+            targetsMap[Number(u.id)] = [];
+            continue;
+          }
           try {
-            const userTargets = await targetService.getUserTargets(Number(u.id));
-            targetsMap[Number(u.id)] = [...userTargets, ...quarterTargets];
+            const userTargets = (Number(u.id) === Number(userProfile.id))
+              ? myData
+              : await targetService.getUserTargets(Number(u.id));
+            const merged = [...userTargets, ...quarterTargets];
+            for (const gt of globalTargetsFromMyData) {
+              if (!merged.some(m => m.id === gt.id)) {
+                merged.push(gt);
+              }
+            }
+            targetsMap[Number(u.id)] = merged;
           } catch(e) {}
         }
         setAllTargets(targetsMap);
       } else {
         const teamLeads = allU.filter(u => u.role?.toLowerCase() === 'team_lead');
-        const visibleUsers = [userProfile, ...teamLeads.filter(tl => tl.id !== userProfile.id)];
+        const visibleUsers = [userProfile, ...teamLeads.filter(tl => tl.id !== userProfile.id && !isUserCeo(tl))];
         setUsers(visibleUsers);
         
         const targetsMap: Record<number, Target[]> = {};
-        targetsMap[Number(userProfile.id)] = combinedMyTargets;
+        targetsMap[Number(userProfile.id)] = isUserCeo(userProfile) ? [] : combinedMyTargets;
         
         for (const tl of teamLeads) {
-          if (tl.id === userProfile.id) continue;
+          if (tl.id === userProfile.id || isUserCeo(tl)) continue;
           try {
             const tlTargets = await targetService.getUserTargets(Number(tl.id));
-            targetsMap[Number(tl.id)] = [...tlTargets, ...quarterTargets];
+            const merged = [...tlTargets, ...quarterTargets];
+            for (const gt of globalTargetsFromMyData) {
+              if (!merged.some(m => m.id === gt.id)) {
+                merged.push(gt);
+              }
+            }
+            targetsMap[Number(tl.id)] = merged;
           } catch(e) {}
         }
         setAllTargets(targetsMap);
@@ -263,6 +294,9 @@ export default function UnifiedTargetsPage() {
       finalTitle = `[Quarterly] ${finalTitle}`;
     }
     const isGlobal = targetType === 'global' || targetType === 'quarterly';
+    const targetUserId = (targetType === 'individual' && targetForm.user_id)
+      ? Number(targetForm.user_id)
+      : Number(userProfile.id);
 
     try {
       setIsAdding(true);
@@ -276,11 +310,11 @@ export default function UnifiedTargetsPage() {
           ...targetForm,
           title: finalTitle,
           is_global: isGlobal,
-          user_id: Number(userProfile.id)
+          user_id: targetUserId
         } as TargetCreate);
       }
       
-      setTargetForm({ title: '', description: '', month: new Date().toISOString().slice(0, 7), is_global: false });
+      setTargetForm({ title: '', description: '', month: new Date().toISOString().slice(0, 7), is_global: false, user_id: Number(userProfile.id) });
       setTargetType('individual');
       setEditingTarget(null);
       setShowTargetModal(false);
@@ -313,15 +347,22 @@ export default function UnifiedTargetsPage() {
       title: title,
       description: target.description,
       month: target.month,
-      is_global: target.is_global
+      is_global: target.is_global,
+      user_id: target.user_id
     });
     
     setShowTargetModal(true);
   };
 
-  const openCreateModal = () => {
+  const openCreateModal = (assigneeId?: number) => {
     setEditingTarget(null);
-    setTargetForm({ title: '', description: '', month: new Date().toISOString().slice(0, 7), is_global: false });
+    setTargetForm({ 
+      title: '', 
+      description: '', 
+      month: new Date().toISOString().slice(0, 7), 
+      is_global: false,
+      user_id: assigneeId || Number(userProfile.id)
+    });
     setTargetType('individual');
     setShowTargetModal(true);
   };
@@ -343,18 +384,33 @@ export default function UnifiedTargetsPage() {
           </div>
           
           <div className="flex items-center flex-wrap justify-end gap-3">
-              <div className="flex items-center gap-2 bg-white dark:bg-[#12131c] border border-slate-200 dark:border-[#1e2030] px-3 py-1.5 rounded-lg shadow-sm">
-                  <span className="text-xs font-bold text-slate-500 uppercase">View Month:</span>
-                  <input 
-                      type="month" 
-                      value={viewMonth}
-                      onChange={e => setViewMonth(e.target.value)}
-                      className="bg-transparent text-sm font-bold text-slate-800 dark:text-white outline-none cursor-pointer"
-                  />
+              <div className="flex items-center gap-1 bg-white dark:bg-[#12131c] border border-slate-200 dark:border-[#1e2030] p-1 rounded-lg shadow-sm">
+                  <button 
+                    type="button"
+                    onClick={() => setViewMonth('all')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${
+                      viewMonth === 'all' 
+                        ? 'bg-blue-600 text-white shadow-xs' 
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#1e2030]'
+                    }`}
+                  >
+                    All Targets
+                  </button>
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 border-l border-slate-200 dark:border-[#1e2030]">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase">Month:</span>
+                    <input 
+                        type="month" 
+                        value={viewMonth === 'all' ? new Date().toISOString().slice(0, 7) : viewMonth}
+                        onChange={e => setViewMonth(e.target.value)}
+                        className={`bg-transparent text-xs font-bold outline-none cursor-pointer ${
+                          viewMonth !== 'all' ? 'text-blue-600 dark:text-blue-400 font-extrabold' : 'text-slate-700 dark:text-slate-300'
+                        }`}
+                    />
+                  </div>
               </div>
 
               <button 
-                  onClick={openCreateModal}
+                  onClick={() => openCreateModal()}
                   className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm transition-colors shadow-sm"
               >
                   <Plus className="w-4 h-4" />
@@ -385,6 +441,7 @@ export default function UnifiedTargetsPage() {
           onToggle={handleToggleComplete}
           onScoreUpdate={handleProgressUpdate}
           onPushTarget={handlePushTarget}
+          onAddTarget={(assigneeId) => openCreateModal(assigneeId)}
         />
       </div>
 
@@ -423,6 +480,29 @@ export default function UnifiedTargetsPage() {
                     />
                   </div>
               </div>
+
+              {targetType === 'individual' && canManageTargets && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">Assign To Employee</label>
+                  <select
+                    className="w-full bg-slate-50 dark:bg-[#181926] border border-slate-200 dark:border-[#2a2d3d] rounded-lg p-3 text-slate-800 dark:text-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-medium text-sm"
+                    value={targetForm.user_id ?? userProfile?.id ?? ''}
+                    onChange={e => setTargetForm({ ...targetForm, user_id: Number(e.target.value) })}
+                    disabled={!!editingTarget}
+                  >
+                    {allUsersList
+                      .filter(u => {
+                        const r = (u.role || '').toLowerCase();
+                        return r !== 'ceo' && r !== 'super_admin' && Number(u.id) !== 1;
+                      })
+                      .map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.name || u.username} ({u.role || 'Member'})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1.5">Title</label>

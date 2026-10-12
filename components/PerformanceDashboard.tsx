@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { UserProfile } from '@/types';
 import { Target } from '@/services/targetService';
-import { CheckSquare, Trash2, Edit, ArrowRight } from 'lucide-react';
+import { CheckSquare, Trash2, Edit, ArrowRight, Plus } from 'lucide-react';
 
 const CircularProgress = ({ percentage, label, color = "blue", size = "normal" }: { percentage: number, label: string, color?: string, size?: "normal" | "small" }) => {
   const radius = size === "small" ? 22 : 28;
@@ -84,9 +84,10 @@ interface Props {
   onToggle?: (target: Target) => void;
   onScoreUpdate?: (target: Target, score: number) => void;
   onPushTarget?: (target: Target) => void;
+  onAddTarget?: (assigneeId: number) => void;
 }
 
-export default function PerformanceDashboard({ viewMonth, users, allTargets, allUsersList, currentUser, onEdit, onDelete, onToggle, onScoreUpdate, onPushTarget }: Props) {
+export default function PerformanceDashboard({ viewMonth, users, allTargets, allUsersList, currentUser, onEdit, onDelete, onToggle, onScoreUpdate, onPushTarget, onAddTarget }: Props) {
   const [selectedEmployee, setSelectedEmployee] = useState<number | null>(null);
 
   const getCleanTitle = (title: string) => title.replace(/^\[Quarterly\]\s*/i, '').replace(/^\[Eval\]\s*/i, '');
@@ -103,11 +104,16 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
   const isCeo = (userId: number) => {
       if (userId === 1) return true;
       const role = getUserRole(userId);
-      return role === 'ceo' || role === 'super_admin';
+      return role === 'ceo' || role === 'super_admin' || role === 'admin';
   };
 
-  const [year, month] = viewMonth.split('-');
-  const monthName = new Date(Number(year), Number(month) - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+  let monthName = "All Time";
+  if (viewMonth && viewMonth !== 'all') {
+    const [year, month] = viewMonth.split('-');
+    if (year && month) {
+      monthName = new Date(Number(year), Number(month) - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+    }
+  }
 
   return (
     <div className="w-full">
@@ -128,8 +134,27 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
           users.map((emp, index) => {
             const allT = allTargets[Number(emp.id)] || [];
             const targets = allT.filter(t => {
+                const isQuarterly = t.title.toLowerCase().startsWith('[quarterly]');
+                if (isQuarterly) {
+                    if (viewMonth === 'all' || !viewMonth) return true;
+                    if (t.q_start && t.q_end) {
+                        return (viewMonth >= t.q_start && viewMonth <= t.q_end) || !t.is_completed;
+                    }
+                    if (t.month) {
+                        const [y, m] = t.month.split('-').map(Number);
+                        if (y && m) {
+                            const startM = Math.floor((m - 1) / 3) * 3 + 1;
+                            const endM = startM + 2;
+                            const qStart = `${y}-${String(startM).padStart(2, '0')}`;
+                            const qEnd = `${y}-${String(endM).padStart(2, '0')}`;
+                            return (viewMonth >= qStart && viewMonth <= qEnd) || !t.is_completed;
+                        }
+                    }
+                    return true;
+                }
+                if (viewMonth === 'all' || !viewMonth) return true;
                 const targetMonth = t.month || "";
-                return targetMonth === viewMonth;
+                return !targetMonth || targetMonth === viewMonth || !t.is_completed;
             });
 
             const themeColor = userColors[index % userColors.length];
@@ -191,31 +216,47 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                 }
             });
 
-            const workCompleted = validWorkTargets > 0 ? (workSum / validWorkTargets) : 0;
-            const ceoEval = validCeoTargets > 0 ? (ceoSum / validCeoTargets) : 0;
-            const peerEval = validPeerTargets > 0 ? (peerSum / validPeerTargets) : 0;
+            const isEmpCeo = isCeo(Number(emp.id));
+
+            let workCompleted = validWorkTargets > 0 ? (workSum / validWorkTargets) : 0;
+            let ceoEval = validCeoTargets > 0 ? (ceoSum / validCeoTargets) : 0;
+            let peerEval = validPeerTargets > 0 ? (peerSum / validPeerTargets) : 0;
             
             let overall = 0;
             if (targets.length === 0) overall = 0;
             else overall = (workCompleted + peerEval + ceoEval) / 3;
 
+            // CEO does not have evaluation performance or individual targets; everything is 000
+            if (isEmpCeo) {
+              workCompleted = 0;
+              ceoEval = 0;
+              peerEval = 0;
+              overall = 0;
+            }
+
             const isExpanded = selectedEmployee === Number(emp.id);
 
             // Filtering
-            const quarterlyTargets = targets.filter(t => isQuarterly(t));
-            const globalTargets = targets.filter(t => t.is_global && !isQuarterly(t) && !isEval(t));
-            const indTargets = targets.filter(t => !t.is_global && !isQuarterly(t) && !isEval(t));
+            const quarterlyTargets = isEmpCeo ? [] : targets.filter(t => isQuarterly(t));
+            const globalTargets = isEmpCeo ? [] : targets.filter(t => t.is_global && !isQuarterly(t) && !isEval(t));
+            const indTargets = isEmpCeo ? [] : targets.filter(t => !t.is_global && !isQuarterly(t) && !isEval(t));
 
-            // Monthly Employee Evaluations
-            const currentMonth = viewMonth;
+            // Monthly Employee Evaluations - CEO does not have evaluation performance
+            const currentMonth = (viewMonth === 'all' || !viewMonth)
+                ? new Date().toISOString().slice(0, 7)
+                : viewMonth;
             const isEmpTeamLead = emp.role?.toLowerCase() === 'team_lead';
             const isSelf = Number(currentUser?.id) === Number(emp.id);
-            const isEmployeeViewer = currentUser?.role?.toLowerCase() !== 'team_lead' && currentUser?.role?.toLowerCase() !== 'ceo' && currentUser?.role?.toLowerCase() !== 'super_admin';
+            const viewerRole = (currentUser?.role || '').toLowerCase();
+            const isViewerManagerOrCeo = viewerRole === 'ceo' || viewerRole === 'super_admin' || viewerRole === 'admin' || viewerRole === 'team_lead' || Number(currentUser?.id) === 1;
+            const isEmployeeViewer = !isViewerManagerOrCeo;
             const isEmployeeViewingTeamLead = isEmployeeViewer && isEmpTeamLead && !isSelf;
 
-            const comps = isEmpTeamLead 
-                ? (isEmployeeViewingTeamLead ? COMPETENCIES.slice(7, 10) : COMPETENCIES) 
-                : COMPETENCIES.slice(0, 7);
+            const comps = isEmpCeo 
+                ? [] 
+                : (isEmpTeamLead 
+                    ? (isEmployeeViewingTeamLead ? COMPETENCIES.slice(7, 10) : COMPETENCIES) 
+                    : COMPETENCIES.slice(0, 7));
             
             const monthlyEvalTargets: Target[] = comps.map((c, idx) => {
                 const existing = targets.find(t => t.title === `[Eval] ${c.title}` && t.month === currentMonth);
@@ -239,7 +280,6 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
               if (list.length === 0) return <div className="text-slate-400 text-sm py-3 italic px-4">{emptyMsg}</div>;
               return list.map(t => {
                 const isWcQuarter = t.id < 0 && !isEval(t);
-                const myEval = t.my_score ?? 0;
                 
                 let tWork = 0, tPeer = 0, tCeo = 0;
                 let hasWork = false, hasPeer = false, hasCeo = false;
@@ -271,8 +311,40 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                 const tOverall = tOverallCount > 0 ? tOverallSum / tOverallCount : 0;
                 
                 const isSelfTarget = Number(currentUser?.id) === Number(emp.id);
-                const showScoreInput = !isWcQuarter && (!isEvalSection || !isSelfTarget);
-                const scoreLabel = isSelfTarget ? "My Progress %" : "Add Score %";
+                const isViewerCeo = viewerRole === 'ceo' || viewerRole === 'super_admin' || viewerRole === 'admin' || Number(currentUser?.id) === 1;
+                const isViewerLead = viewerRole === 'team_lead' || viewerRole === 'lead';
+
+                let showScoreInput = false;
+                let scoreLabel = "";
+                let initialScoreValue = 0;
+
+                if (isSelfTarget) {
+                  // User can only update work progress on their own targets, not score themselves on competencies
+                  if (!isEvalSection) {
+                    showScoreInput = !isWcQuarter;
+                    scoreLabel = "My Progress %";
+                    initialScoreValue = tWork || t.my_score || 0;
+                  }
+                } else {
+                  // CEO or Team Lead can score other employees
+                  if (isViewerCeo) {
+                    showScoreInput = !isWcQuarter;
+                    scoreLabel = isEvalSection ? "CEO Eval %" : "CEO Score %";
+                    initialScoreValue = tCeo || 0;
+                  } else if (isViewerLead) {
+                    showScoreInput = !isWcQuarter;
+                    scoreLabel = isEvalSection ? "Lead Eval %" : "Lead Score %";
+                    initialScoreValue = tPeer || 0;
+                  } else {
+                    // Regular peers can only evaluate competency feedback
+                    if (isEvalSection) {
+                      showScoreInput = true;
+                      scoreLabel = "Peer Eval %";
+                      initialScoreValue = tPeer || 0;
+                    }
+                  }
+                }
+
                 const circleSize = showScoreInput ? "small" : "normal";
 
                 return (
@@ -291,9 +363,23 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                         </button>
                     )}
                     <div className="flex flex-col">
-                        <span className={t.is_completed && !isEvalSection ? 'line-through text-slate-400 text-sm font-medium' : 'text-slate-700 dark:text-slate-200 text-sm font-bold leading-tight'}>
-                          {getCleanTitle(t.title)}
-                        </span>
+                        <div className="flex items-center flex-wrap gap-1.5">
+                          <span className={t.is_completed && !isEvalSection ? 'line-through text-slate-400 text-sm font-medium' : 'text-slate-700 dark:text-slate-200 text-sm font-bold leading-tight'}>
+                            {getCleanTitle(t.title)}
+                          </span>
+                          {!isEvalSection && t.month && (
+                            <span className="text-[10px] text-slate-400 font-medium">({t.month})</span>
+                          )}
+                          {!isEvalSection && (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                              t.is_completed 
+                                ? 'bg-slate-100 dark:bg-slate-800 text-slate-500' 
+                                : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'
+                            }`}>
+                              {t.is_completed ? 'Completed' : 'Active'}
+                            </span>
+                          )}
+                        </div>
                         {(() => {
                             if (!t.description) return null;
                             const match = t.description.match(/\[Pushed from (\d{4}-\d{2})\]/);
@@ -326,7 +412,8 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                                 type="number" 
                                 min="0" 
                                 max="100" 
-                                defaultValue={myEval} 
+                                key={`${t.id}-${initialScoreValue}`}
+                                defaultValue={initialScoreValue} 
                                 onBlur={(e) => { e.stopPropagation(); onScoreUpdate?.(t, Number(e.target.value)); }}
                                 className="w-16 bg-white dark:bg-[#12131c] border border-slate-300 dark:border-slate-600 rounded px-2 py-1 text-sm outline-none focus:border-blue-500 text-slate-800 dark:text-slate-200 font-bold text-center"
                                 title="Enter percentage score and click away"
@@ -399,8 +486,21 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                       <h3 className="font-bold text-lg text-slate-800 dark:text-white flex items-center gap-2">
                         Evaluate Targets <span className="text-slate-400 font-normal">&mdash; {emp.name || emp.username}</span>
                       </h3>
+                      {onAddTarget && !isEmpCeo && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onAddTarget(Number(emp.id)); }}
+                          className="flex items-center gap-1.5 text-xs font-bold bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 px-3 py-1.5 rounded-lg transition-colors border border-blue-200 dark:border-blue-800"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Add Target
+                        </button>
+                      )}
                     </div>
 
+                    {isEmpCeo ? (
+                      <div className="bg-white dark:bg-[#12131c] rounded-2xl border border-slate-200 dark:border-[#1e2030] p-8 text-center text-slate-500 font-medium">
+                        No targets or evaluation criteria assigned for CEO account. Everything is set to 0.
+                      </div>
+                    ) : (
                     <div className="flex flex-col gap-8">
 
                       {/* Employee Feedback Section */}
@@ -456,6 +556,7 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                       )}
 
                     </div>
+                  )}
                   </div>
                 )}
               </div>
