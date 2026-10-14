@@ -2,11 +2,12 @@
 
 import React, { Suspense, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Building2, Plus, ChevronRight, ChevronLeft, Pencil, Trash2, X, Users, Target, Calendar, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
+import { HoldToDelete } from '@/components/HoldToDelete';
 import { cn } from '@/utils/cn';
 import { usersService } from '@/services/users';
 import { ProgressBar } from '@/components/QuarterGoalHero';
@@ -85,11 +86,24 @@ function DepartmentList() {
   const [data, setData] = useState<QuarterOverview | null>(null);
   const [error, setError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const params = useSearchParams();
+  const router = useRouter();
+  // Set after a delete (here or from a department page): offers Undo for 15 seconds.
+  const [undo, setUndo] = useState<{ id: number; name: string } | null>(null);
 
   const load = useCallback(() => {
     api.overview().then(setData).catch(e => setError(e.message));
   }, []);
   useEffect(load, [load]);
+  useEffect(() => {
+    const id = Number(params.get('undo'));
+    if (id) { setUndo({ id, name: params.get('name') || 'Department' }); router.replace('/departments'); }
+  }, [params, router]);
+
+  const remove = async (d: { id: number; name: string }) => {
+    setError('');
+    try { await api.deleteDepartment(d.id); setUndo({ id: d.id, name: d.name }); load(); } catch (e: any) { setError(e.message); }
+  };
 
   return (
     <>
@@ -108,6 +122,7 @@ function DepartmentList() {
         )}
       </div>
 
+      {undo && <UndoBar key={undo.id} item={undo} onDone={() => setUndo(null)} onUndone={load} onError={setError} />}
       {error && <ErrorNote text={error} />}
       {!data && !error && <div className="text-[13px] text-text-secondary animate-pulse">Loading departments…</div>}
 
@@ -124,7 +139,16 @@ function DepartmentList() {
 
       {data && data.departments.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {data.departments.map(d => <DeptCard key={d.id} d={d} quarter={data.quarter} />)}
+          {data.departments.map(d => (
+            <div key={d.id} className="relative group/card">
+              <DeptCard d={d} quarter={data.quarter} />
+              {director && (
+                <div className="absolute bottom-3 right-3 opacity-0 group-hover/card:opacity-100 focus-within:opacity-100 transition-opacity">
+                  <HoldToDelete compact label={`Delete ${d.name}`} onConfirm={() => remove(d)} />
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
@@ -143,7 +167,6 @@ function DepartmentForm({ dept, onClose, onSaved, onDeleted }: { dept?: TargetDe
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const visible = users.filter(u => u.id !== hodId && u.name.toLowerCase().includes(search.toLowerCase()));
 
@@ -206,9 +229,7 @@ function DepartmentForm({ dept, onClose, onSaved, onDeleted }: { dept?: TargetDe
         <div className="p-5 border-t border-border-subtle flex items-center gap-2">
           <Btn type="submit" kind="primary" disabled={busy}>{busy ? 'Saving…' : dept ? 'Save changes' : 'Create department'}</Btn>
           <Btn type="button" kind="ghost" onClick={onClose}>Cancel</Btn>
-          {dept && (confirmDelete
-            ? <span className="ml-auto flex items-center gap-1 text-[12px]">Delete this department? <Btn type="button" kind="danger" onClick={remove} disabled={busy}>Delete</Btn><Btn type="button" kind="ghost" onClick={() => setConfirmDelete(false)}>Keep</Btn></span>
-            : <Btn type="button" kind="danger" className="ml-auto" onClick={() => setConfirmDelete(true)}><Trash2 size={13} /> Delete</Btn>)}
+          {dept && <span className="ml-auto"><HoldToDelete label="Hold to delete" onConfirm={remove} /></span>}
         </div>
       </form>
     </div>
@@ -223,8 +244,12 @@ function DepartmentView({ id }: { id: number }) {
   const [error, setError] = useState('');
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [editOpen, setEditOpen] = useState(false);
-  const [gone, setGone] = useState(false);
   const [panelId, setPanelId] = useState<number | null>(null);
+  const router = useRouter();
+  const deleted = () => router.push(`/departments?undo=${id}&name=${encodeURIComponent(data?.name || '')}`);
+  const removeHere = async () => {
+    try { await api.deleteDepartment(id); deleted(); } catch (e: any) { setError(e.message); }
+  };
 
   const load = useCallback(() => {
     api.getDepartment(id, fy).then(d => {
@@ -234,7 +259,6 @@ function DepartmentView({ id }: { id: number }) {
   }, [id, fy]);
   useEffect(load, [load]);
 
-  if (gone) return <div className="text-[13px] text-text-secondary">Department deleted. <Link className="text-accent-blue font-semibold" href="/departments">Back to departments</Link></div>;
   if (error) return <><BackLink /><ErrorNote text={error} /></>;
   if (!data) return <div className="text-[13px] text-text-secondary animate-pulse">Loading department…</div>;
 
@@ -270,6 +294,7 @@ function DepartmentView({ id }: { id: number }) {
             <div className="flex gap-2">
               <Link href="/departments?view=targets" className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-accent-blue text-white hover:bg-accent-blue-hover"><Target size={13} /> Set quarter targets</Link>
               <Btn onClick={() => setEditOpen(true)}><Pencil size={13} /> Edit department</Btn>
+              <HoldToDelete label="Hold to delete" onConfirm={removeHere} />
             </div>
           )}
           {cur && (
@@ -300,7 +325,7 @@ function DepartmentView({ id }: { id: number }) {
       </div>
 
       {editOpen && (
-        <DepartmentForm dept={data} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); load(); }} onDeleted={() => setGone(true)} />
+        <DepartmentForm dept={data} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); load(); }} onDeleted={deleted} />
       )}
       {panelId !== null && <ObjectivePanel id={panelId} onClose={() => setPanelId(null)} onChanged={load} onOpen={setPanelId} />}
     </OpenObjective.Provider>
@@ -700,5 +725,31 @@ function QuarterTargetsView() {
         </div>
       </form>
     </>
+  );
+}
+
+/* ============================================================ undo after delete */
+
+const UNDO_SECONDS = 15;
+
+function UndoBar({ item, onDone, onUndone, onError }: { item: { id: number; name: string }; onDone: () => void; onUndone: () => void; onError: (m: string) => void }) {
+  const [left, setLeft] = useState(UNDO_SECONDS);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (left <= 0) { onDone(); return; }
+    const t = setTimeout(() => setLeft(l => l - 1), 1000);
+    return () => clearTimeout(t);
+  }, [left, onDone]);
+  const undo = async () => {
+    setBusy(true);
+    try { await api.restoreDepartment(item.id); onUndone(); onDone(); } catch (e: any) { onError(e.message); setBusy(false); }
+  };
+  return (
+    <div role="status" className="flex items-center gap-3 rounded-xl bg-text-primary text-background-secondary px-4 py-3 shadow-lg">
+      <Trash2 size={15} className="shrink-0" />
+      <span className="flex-1 text-[13.5px]"><b>{item.name}</b> deleted.</span>
+      <span className="text-[12px] opacity-70 tabular-nums">{left}s</span>
+      <button onClick={undo} disabled={busy} className="px-3 py-1 rounded-lg bg-background-secondary text-text-primary text-[12.5px] font-bold disabled:opacity-60">{busy ? 'Restoring…' : 'Undo'}</button>
+    </div>
   );
 }

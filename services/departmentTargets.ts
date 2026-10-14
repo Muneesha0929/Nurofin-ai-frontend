@@ -151,6 +151,7 @@ export const departmentTargetsService = {
   updateDepartment: (id: number, data: { name?: string; hod_id?: number | null; member_ids?: number[] }) =>
     call<TargetDepartment>(`/departments/${id}`, json('PUT', data)),
   deleteDepartment: (id: number) => call<null>(`/departments/${id}`, json('DELETE')),
+  restoreDepartment: (id: number) => call<TargetDepartment>(`/departments/${id}/restore`, json('POST')),
 
   updateQuarter: (id: number, fy: number, q: number, data: { message?: string; outcome?: Outcome | null; outcome_note?: string }) =>
     call<TargetFields>(`/departments/${id}/quarters/${fy}/${q}`, json('PUT', data)),
