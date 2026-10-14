@@ -9,6 +9,7 @@ import { NewTargetBanners, QuarterHero } from '@/components/QuarterGoalHero';
 import { Greeting } from '@/components/dashboard/Greeting';
 import { Entry, EntryRow, MyWork, QuickNotes, fromObjective, fromTask, isoDay, today } from '@/components/dashboard/Widgets';
 import { DeptCard, Panel, QuarterPills } from '@/components/targets/ui';
+import { CompanyTargets } from '@/components/targets/CompanyTargets';
 import { ObjectivePanel, TaskPanel } from '@/components/SidePanel';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { workcenterService, WCTask } from '@/services/workcenter';
@@ -106,6 +107,8 @@ export default function DashboardPage() {
           ))}
         </div>
       </section>
+
+      {overview && <CompanyTargets data={overview} onChange={loadOverview} />}
 
       {overview && (
         <section>

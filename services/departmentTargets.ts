@@ -65,9 +65,28 @@ export interface OverviewDepartment extends TargetDepartment, TargetFields, Quar
   new_for_me: boolean;
 }
 
+export type WidgetKind = 'number' | 'money' | 'percent' | 'milestone';
+
+export interface CompanyWidget {
+  id: number;
+  title: string;
+  kind: WidgetKind;
+  unit: string | null;
+  base: number;
+  current: number;
+  target: number;
+  lower_is_better: boolean;
+  note: string | null;
+  progress: number;
+  department: { id: number; name: string | null } | null;
+}
+
+export type WidgetInput = Omit<CompanyWidget, 'id' | 'progress' | 'department'> & { department_id: number | null };
+
 export interface QuarterOverview {
   quarter: QuarterInfo;
   headline: string | null;
+  widgets: CompanyWidget[];
   progress: number | null;
   totals: { objectives: number; items: number; done: number; overdue: number };
   departments: OverviewDepartment[];
@@ -151,6 +170,11 @@ export const departmentTargetsService = {
   updateDepartment: (id: number, data: { name?: string; hod_id?: number | null; member_ids?: number[] }) =>
     call<TargetDepartment>(`/departments/${id}`, json('PUT', data)),
   deleteDepartment: (id: number) => call<null>(`/departments/${id}`, json('DELETE')),
+  createWidget: (fy: number, q: number, w: WidgetInput) => call<CompanyWidget>('/widgets', json('POST', { fiscal_year: fy, quarter_number: q, ...w })),
+  updateWidget: (id: number, w: Partial<WidgetInput>) => call<CompanyWidget>(`/widgets/${id}`, json('PUT', w)),
+  deleteWidget: (id: number) => call<null>(`/widgets/${id}`, json('DELETE')),
+  reorderWidgets: (ids: number[]) => call<null>('/widgets/order', json('PUT', { ids })),
+  selfCheck: () => call<any>('/self-check'),
   restoreDepartment: (id: number) => call<TargetDepartment>(`/departments/${id}/restore`, json('POST')),
 
   updateQuarter: (id: number, fy: number, q: number, data: { message?: string; outcome?: Outcome | null; outcome_note?: string }) =>

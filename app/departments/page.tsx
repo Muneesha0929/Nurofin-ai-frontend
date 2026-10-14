@@ -118,6 +118,7 @@ function DepartmentList() {
           <div className="flex gap-2">
             <Link href="/departments?view=targets" className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-accent-blue text-white hover:bg-accent-blue-hover"><Target size={14} /> Set quarter targets</Link>
             <Btn onClick={() => setFormOpen(true)}><Plus size={14} /> New department</Btn>
+            <SetupCheck />
           </div>
         )}
       </div>
@@ -751,5 +752,28 @@ function UndoBar({ item, onDone, onUndone, onError }: { item: { id: number; name
       <span className="text-[12px] opacity-70 tabular-nums">{left}s</span>
       <button onClick={undo} disabled={busy} className="px-3 py-1 rounded-lg bg-background-secondary text-text-primary text-[12.5px] font-bold disabled:opacity-60">{busy ? 'Restoring…' : 'Undo'}</button>
     </div>
+  );
+}
+
+/* ============================================================ setup check (Director) */
+
+/** Runs the backend self-check: every table matches the code and a test write succeeds (and is rolled back). */
+function SetupCheck() {
+  const [state, setState] = useState<{ busy: boolean; text?: string; ok?: boolean }>({ busy: false });
+  const run = async () => {
+    setState({ busy: true });
+    try {
+      const r = await api.selfCheck();
+      if (r.ok) return setState({ busy: false, ok: true, text: 'Everything can be saved.' });
+      const bad = Object.entries(r.tables || {}).filter(([, t]: any) => !t.ok).map(([n, t]: any) => `${n}: ${t.problem || [...(t.missing_columns || []), ...(t.unknown_required_columns || [])].join(', ')}`);
+      const w = r.write_test && !r.write_test.ok ? `Saving a ${r.write_test.failed_at} failed: ${r.write_test.error}` : '';
+      setState({ busy: false, ok: false, text: [...bad, w].filter(Boolean).join(' · ') });
+    } catch (e: any) { setState({ busy: false, ok: false, text: e.message }); }
+  };
+  return (
+    <span className="flex items-center gap-2">
+      <Btn kind="ghost" onClick={run} disabled={state.busy}>{state.busy ? 'Checking…' : 'Check setup'}</Btn>
+      {state.text && <span className={cn('text-[12px] font-semibold max-w-[420px]', state.ok ? 'text-accent-green' : 'text-accent-red')}>{state.text}</span>}
+    </span>
   );
 }
