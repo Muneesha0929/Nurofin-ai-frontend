@@ -62,9 +62,9 @@ export function Greeting({ name }: { name?: string }) {
     <div className="flex flex-wrap items-end justify-between gap-2 normal-case min-h-[52px]">
       <div>
         <div className="text-2xl font-extrabold text-text-primary">{g ? `${g.hello}, ${name?.split(' ')[0] || 'there'}` : ' '}</div>
-        <div className="text-[13.5px] text-text-muted mt-1">{g?.line}</div>
+        <div className="text-[13.5px] text-text-secondary mt-1">{g?.line}</div>
       </div>
-      <div className="text-[12.5px] text-text-muted">{g?.date}</div>
+      <div className="text-[12.5px] text-text-secondary">{g?.date}</div>
     </div>
   );
 }

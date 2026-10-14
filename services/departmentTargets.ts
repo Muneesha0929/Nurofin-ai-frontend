@@ -31,8 +31,11 @@ export interface ObjectiveNode {
   status: ObjectiveStatus;
   progress: number;
   overdue: boolean;
+  health?: Health;
   children: ObjectiveNode[];
 }
+
+export type Health = 'on' | 'risk' | 'off' | 'done';
 
 export interface QuarterStats {
   progress: number | null;
@@ -40,6 +43,7 @@ export interface QuarterStats {
   items: number;
   done: number;
   overdue: number;
+  health: Record<Health, number>;
 }
 
 export interface TargetFields {

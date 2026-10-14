@@ -23,6 +23,7 @@ import {
   CalendarDays,
   Target,
   Building2,
+  CalendarClock,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
@@ -44,6 +45,7 @@ export const getNavSections = (isAdmin: boolean, userProfile: any): NavSection[]
     items: [
       { label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
       { label: 'Departments', href: '/departments', icon: Building2 },
+      { label: 'Deadlines', href: '/deadlines', icon: CalendarClock },
       { label: 'Projects', href: '/projects', icon: Briefcase },
       { label: 'Task Center', href: '/workcenter', icon: CheckSquare },
       { label: 'Targets & Performance', href: '/targets', icon: Target },
