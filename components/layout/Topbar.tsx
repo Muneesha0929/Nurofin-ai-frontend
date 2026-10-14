@@ -56,6 +56,7 @@ export default function Topbar() {
   // Format Pathname to Page Header Title
   const getPageTitle = () => {
     if (pathname === '/dashboard') return 'Executive Dashboard';
+    if (pathname === '/departments') return 'Departments & Quarter Targets';
     if (pathname === '/projects') return 'Projects & Initiatives';
     if (pathname === '/tasks' || pathname === '/workcenter') return 'Task Center / Execution Hub';
     if (pathname === '/planner') return 'Executive Planner';

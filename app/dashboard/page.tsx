@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { DailyCheckinModal } from '@/components/DailyCheckinModal';
 import { FinanceAlertsWidget } from '@/components/FinanceAlertsWidget';
+import { QuarterGoalHero } from '@/components/QuarterGoalHero';
 import { financeService } from '@/services/finance';
 import { plannerService } from '@/services/planner';
 
@@ -222,6 +223,8 @@ export default function DashboardPage() {
           <div className="text-[13px] text-text-muted mt-1">Here&apos;s what&apos;s happening with {isCEO ? "the team's" : "your"} work today.</div>
         </div>
       </div>
+
+      <QuarterGoalHero />
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {stats.map((s) => (

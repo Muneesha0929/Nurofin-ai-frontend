@@ -21,7 +21,8 @@ import {
   ChevronRight,
   MessageSquare,
   CalendarDays,
-  Target
+  Target,
+  Building2,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
@@ -42,6 +43,7 @@ export const getNavSections = (isAdmin: boolean, userProfile: any): NavSection[]
     title: 'Nuro Core',
     items: [
       { label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
+      { label: 'Departments', href: '/departments', icon: Building2 },
       { label: 'Projects', href: '/projects', icon: Briefcase },
       { label: 'Task Center', href: '/workcenter', icon: CheckSquare },
       { label: 'Targets & Performance', href: '/targets', icon: Target },
