@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -10,6 +10,10 @@ import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
 import { usersService } from '@/services/users';
 import { ProgressBar } from '@/components/QuarterGoalHero';
+import { ObjectivePanel } from '@/components/SidePanel';
+
+// Opens the objective side panel from anywhere inside a department page.
+const OpenObjective = createContext<(id: number) => void>(() => {});
 import {
   departmentTargetsService as api, DepartmentDetail, DepartmentQuarter, ObjectiveNode, OverviewDepartment,
   Outcome, OUTCOME_LABEL, PersonBrief, QuarterOverview, TargetDepartment,
@@ -240,6 +244,7 @@ function DepartmentView({ id }: { id: number }) {
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [editOpen, setEditOpen] = useState(false);
   const [gone, setGone] = useState(false);
+  const [panelId, setPanelId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     api.getDepartment(id, fy).then(d => {
@@ -257,7 +262,7 @@ function DepartmentView({ id }: { id: number }) {
   const toggle = (q: number) => { const n = new Set(open); n.has(q) ? n.delete(q) : n.add(q); setOpen(n); };
 
   return (
-    <>
+    <OpenObjective.Provider value={setPanelId}>
       <BackLink />
       <div className="bg-surface-card border border-border-subtle rounded-2xl p-5 md:p-6 flex flex-col md:flex-row gap-5 md:items-start">
         <div className="flex-1 min-w-0">
@@ -312,7 +317,8 @@ function DepartmentView({ id }: { id: number }) {
       {editOpen && (
         <DepartmentForm dept={data} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); load(); }} onDeleted={() => setGone(true)} />
       )}
-    </>
+      {panelId !== null && <ObjectivePanel id={panelId} onClose={() => setPanelId(null)} onChanged={load} onOpen={setPanelId} />}
+    </OpenObjective.Provider>
   );
 }
 
@@ -467,6 +473,7 @@ function ObjectiveCard({ o, n, dept, q, people, reload }: { o: ObjectiveNode; n:
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
   const { can_plan } = dept.permissions;
+  const openPanel = useContext(OpenObjective);
 
   if (editing) {
     return <ObjectiveForm people={people} initial={o} q={q} onCancel={() => setEditing(false)}
@@ -481,7 +488,7 @@ function ObjectiveCard({ o, n, dept, q, people, reload }: { o: ObjectiveNode; n:
         </button>
         <span className="text-[17px] font-extrabold text-accent-blue w-5 text-center">{n}</span>
         <div className="flex-1 min-w-0">
-          <div className="text-[13.5px] font-bold">{o.title}</div>
+          <button onClick={() => openPanel(o.id)} className="text-[13.5px] font-bold text-left hover:text-accent-blue">{o.title}</button>
           <div className="text-[12px] text-text-muted flex flex-wrap gap-x-2">
             <span>{o.owner ? o.owner.name : 'Unassigned'}</span>
             {o.deadline && <span className={cn(o.overdue && 'text-accent-red font-semibold')}>· due {fmtDate(o.deadline)}</span>}
@@ -509,6 +516,7 @@ function ObjectiveCard({ o, n, dept, q, people, reload }: { o: ObjectiveNode; n:
 
 function SubRow({ c, n, dept, q, people, reload }: { c: ObjectiveNode; n: string; dept: DepartmentDetail; q: DepartmentQuarter; people: PersonBrief[]; reload: () => void }) {
   const [editing, setEditing] = useState(false);
+  const openPanel = useContext(OpenObjective);
   if (editing) {
     return <div className="p-3 border-t border-border-subtle first:border-t-0 bg-background-primary">
       <ObjectiveForm people={people} initial={c} q={q} sub onCancel={() => setEditing(false)} onSubmit={async v => { await api.updateObjective(c.id, v); setEditing(false); reload(); }} />
@@ -518,7 +526,7 @@ function SubRow({ c, n, dept, q, people, reload }: { c: ObjectiveNode; n: string
     <div className="flex items-center gap-3 px-4 py-2.5 border-t border-border-subtle first:border-t-0 pl-12 text-[13px]">
       <span className="text-[11.5px] text-text-muted font-mono w-8">{n}</span>
       <div className="flex-1 min-w-0">
-        <div className="font-medium">{c.title}</div>
+        <button onClick={() => openPanel(c.id)} className="font-medium text-left hover:text-accent-blue">{c.title}</button>
         <div className="text-[11.5px] text-text-muted flex flex-wrap gap-x-2">
           <span className="inline-flex items-center gap-1"><Avatar p={c.owner} size={16} /> {c.owner ? c.owner.name : 'Unassigned'}</span>
           {c.deadline && <span className={cn('inline-flex items-center gap-1', c.overdue && 'text-accent-red font-semibold')}><Calendar size={11} /> {fmtDate(c.deadline)}</span>}

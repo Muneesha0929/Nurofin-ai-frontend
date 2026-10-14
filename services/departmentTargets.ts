@@ -84,6 +84,36 @@ export interface DepartmentDetail extends TargetDepartment {
   permissions: { is_director: boolean; is_hod: boolean; can_plan: boolean };
 }
 
+export interface ObjectiveUpdateEntry {
+  id: number;
+  user: PersonBrief | null;
+  text: string;
+  created_at: string | null;
+}
+
+export interface ObjectiveDetail extends ObjectiveNode {
+  level: 'objective' | 'sub_objective';
+  department: { id: number; name: string; hod: PersonBrief | null };
+  quarter: QuarterInfo;
+  director_message: string | null;
+  parent: { id: number; title: string } | null;
+  updates: ObjectiveUpdateEntry[];
+  permissions: { can_plan: boolean; can_update_progress: boolean; can_post: boolean };
+}
+
+export interface DeadlineItem {
+  id: number;
+  title: string;
+  deadline: string;
+  level: 'objective' | 'sub_objective';
+  department: { id: number; name: string | null };
+  owner: PersonBrief | null;
+  progress: number;
+  status: ObjectiveStatus;
+  overdue: boolean;
+  mine: boolean;
+}
+
 const BASE = '/api/v1/department-targets';
 
 const headers = () => {
@@ -128,6 +158,10 @@ export const departmentTargetsService = {
   updateObjective: (id: number, data: Partial<{ title: string; description: string; owner_id: number | null; deadline: string | null; status: ObjectiveStatus; progress: number }>) =>
     call<{ id: number }>(`/objectives/${id}`, json('PUT', data)),
   deleteObjective: (id: number) => call<null>(`/objectives/${id}`, json('DELETE')),
+  getObjective: (id: number) => call<ObjectiveDetail>(`/objectives/${id}`),
+  postUpdate: (id: number, text: string) => call<{ id: number }>(`/objectives/${id}/updates`, json('POST', { text })),
+  deadlines: (start: string, end: string, everyone = false) =>
+    call<DeadlineItem[]>(`/deadlines?start=${start}&end=${end}${everyone ? '&everyone=true' : ''}`),
 };
 
 export const OUTCOME_LABEL: Record<Outcome, string> = { achieved: 'Achieved', met_partly: 'Met partly', not_met: 'Not met' };
