@@ -54,7 +54,7 @@ export function QuarterHero({ data, onChange }: { data: QuarterOverview; onChang
   };
 
   return (
-    <Panel className="p-6 md:p-7 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-7 items-center normal-case">
+    <Panel className="p-6 md:p-7 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-7 items-center normal-case h-full">
       <div className="min-w-0">
         <div className="text-[11.5px] font-bold uppercase tracking-[0.08em] text-text-secondary">{quarter.label} target · {quarter.range}</div>
 
@@ -88,7 +88,7 @@ export function QuarterHero({ data, onChange }: { data: QuarterOverview; onChang
 
         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-text-secondary">
           <span><b className="text-text-primary">{left}</b> days left</span>
-          <span><b className="text-text-primary">{departments.length}</b> departments</span>
+          <span><b className="text-text-primary">{data.department_count ?? departments.length}</b> departments</span>
           <span><b className="text-text-primary">{totals.objectives}</b> {totals.objectives === 1 ? 'objective' : 'objectives'}</span>
           <span><b className="text-text-primary">{totals.done}/{totals.items}</b> items done</span>
           {totals.overdue > 0 && <span className="text-accent-red font-semibold">{totals.overdue} overdue</span>}

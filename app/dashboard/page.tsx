@@ -10,6 +10,7 @@ import { Greeting } from '@/components/dashboard/Greeting';
 import { Entry, EntryRow, MyWork, QuickNotes, fromObjective, fromTask, isoDay, today } from '@/components/dashboard/Widgets';
 import { DeptCard, Panel, QuarterPills } from '@/components/targets/ui';
 import { CompanyTargets } from '@/components/targets/CompanyTargets';
+import { MonthlyTargets } from '@/components/targets/MonthlyTargets';
 import { ObjectivePanel, TaskPanel } from '@/components/SidePanel';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { workcenterService, WCTask } from '@/services/workcenter';
@@ -94,7 +95,12 @@ export default function DashboardPage() {
       </div>
 
       {overview && <NewTargetBanners data={overview} />}
-      {overview && <QuarterHero data={overview} onChange={headline => setOverview({ ...overview, headline })} />}
+      {overview && (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-stretch">
+          <div className="xl:col-span-2"><QuarterHero data={overview} onChange={headline => setOverview({ ...overview, headline })} /></div>
+          <MonthlyTargets data={overview} onChange={loadOverview} />
+        </div>
+      )}
 
       <section>
         <SectionHead title="From the current dashboard" />
@@ -119,7 +125,7 @@ export default function DashboardPage() {
             </div>
           ) : (
             <Panel className="p-8 text-center text-[13.5px] text-text-secondary">
-              {isDirector ? <>No departments yet. <Link href="/departments" className="text-accent-blue font-semibold">Create the first one</Link>.</> : 'The Director has not created any departments yet.'}
+              {isDirector ? <>No departments yet. <Link href="/departments" className="text-accent-blue font-semibold">Create the first one</Link>.</> : 'You are not part of a department yet. The Director adds people to departments.'}
             </Panel>
           )}
         </section>

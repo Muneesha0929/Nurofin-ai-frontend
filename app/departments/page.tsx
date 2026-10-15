@@ -130,9 +130,9 @@ function DepartmentList() {
       {data && data.departments.length === 0 && (
         <div className="bg-background-secondary border border-border-subtle rounded-2xl p-10 flex flex-col items-center text-center gap-3">
           <span className="w-12 h-12 rounded-2xl bg-accent-blue/10 text-accent-blue flex items-center justify-center"><Building2 size={22} /></span>
-          <div className="text-lg font-extrabold">No departments yet</div>
+          <div className="text-lg font-extrabold">{director ? 'No departments yet' : 'No departments to show'}</div>
           <div className="text-[13px] text-text-secondary max-w-md">
-            {director ? 'Create the first department. A name is enough to start; you can add the HOD and members later.' : 'The Director has not created any departments yet.'}
+            {director ? 'Create the first department. A name is enough to start; you can add the HOD and members later.' : 'You are not part of a department yet. The Director adds people to departments.'}
           </div>
           {director && <Btn kind="primary" onClick={() => setFormOpen(true)}><Plus size={14} /> New department</Btn>}
         </div>

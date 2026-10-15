@@ -83,10 +83,29 @@ export interface CompanyWidget {
 
 export type WidgetInput = Omit<CompanyWidget, 'id' | 'progress' | 'department'> & { department_id: number | null };
 
+export interface MonthlyTarget {
+  id: number;
+  title: string;
+  kind: WidgetKind;
+  unit: string | null;
+  target: number;
+  current: number;
+  due_date: string;
+  note: string | null;
+  progress: number;
+  overdue: boolean;
+  department: { id: number; name: string | null } | null;
+  can_update: boolean;
+}
+
+export type MonthlyTargetInput = { title: string; kind: WidgetKind; unit: string | null; target: number; current: number; due_date: string; department_id: number | null; note: string | null };
+
 export interface QuarterOverview {
   quarter: QuarterInfo;
   headline: string | null;
   widgets: CompanyWidget[];
+  monthly_targets: MonthlyTarget[];
+  department_count: number;
   progress: number | null;
   totals: { objectives: number; items: number; done: number; overdue: number };
   departments: OverviewDepartment[];
@@ -175,6 +194,9 @@ export const departmentTargetsService = {
   deleteWidget: (id: number) => call<null>(`/widgets/${id}`, json('DELETE')),
   reorderWidgets: (ids: number[]) => call<null>('/widgets/order', json('PUT', { ids })),
   selfCheck: () => call<any>('/self-check'),
+  createMonthly: (m: MonthlyTargetInput) => call<MonthlyTarget>('/monthly-targets', json('POST', m)),
+  updateMonthly: (id: number, m: Partial<MonthlyTargetInput>) => call<MonthlyTarget>(`/monthly-targets/${id}`, json('PUT', m)),
+  deleteMonthly: (id: number) => call<null>(`/monthly-targets/${id}`, json('DELETE')),
   restoreDepartment: (id: number) => call<TargetDepartment>(`/departments/${id}/restore`, json('POST')),
 
   updateQuarter: (id: number, fy: number, q: number, data: { message?: string; outcome?: Outcome | null; outcome_note?: string }) =>
