@@ -1,8 +1,9 @@
 'use client';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { ObjectiveSelect, TaskObjectiveBadge, currentObjectiveOf, syncTaskObjective, useLinkableObjectives } from '@/components/targets/TaskObjectiveLink';
+import { departmentTargetsService } from '@/services/departmentTargets';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { cn } from '@/utils/cn';
 import { useStore } from '@/lib/store';
 import { usersService } from '@/services/users';
@@ -180,6 +181,11 @@ export default function TaskCenterPage() {
   const [insights, setInsights] = useState<WCInsights | null>(null);
   const [quarters, setQuarters] = useState<WCQuarter[]>([]);
   const linkable = useLinkableObjectives();
+  const loadDataRef = useRef<(() => void) | null>(null);
+  // Make sure the Task Center has a tab for the quarter we are in (e.g. "FY27 - Q3"); reload if one was added.
+  useEffect(() => {
+    departmentTargetsService.ensureTaskQuarter().then(r => { if (r.created) loadDataRef.current?.(); }).catch(() => {});
+  }, []);
   const [projects, setProjects] = useState<Project[]>([]);
   const [allUsers, setAllUsers] = useState<UserType[]>([]);
 
@@ -270,6 +276,7 @@ export default function TaskCenterPage() {
       setLoading(false);
     }
   }, [selectedQuarterId, searchQuery, statusFilter, priorityFilter]);
+  loadDataRef.current = loadData;
 
   useEffect(() => {
     loadData();
@@ -2805,7 +2812,12 @@ function CreateEditTaskDialog({
               </select>
             </div>
           </div>
-          <ObjectiveSelect objectives={objectives} quarterShort={objectivesQuarter} value={objectiveId} onChange={setObjectiveId}
+          <ObjectiveSelect objectives={objectives} quarterShort={objectivesQuarter} value={objectiveId}
+            onChange={v => {
+              setObjectiveId(v);
+              const tq = objectives.find(o => String(o.id) === v)?.task_quarter_id;
+              if (tq) setForm(f => ({ ...f, quarter_id: String(tq) }));
+            }}
             className="w-full h-9 bg-background-secondary border border-border-subtle rounded-md px-2 text-[11px] text-text-primary outline-none normal-case" />
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">

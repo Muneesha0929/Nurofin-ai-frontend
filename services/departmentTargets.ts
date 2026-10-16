@@ -53,6 +53,7 @@ export interface LinkableObjective {
   level: 'objective' | 'sub_objective';
   parent_title: string | null;
   department: { id: number; name: string };
+  task_quarter_id: number | null;   // the Task Center quarter tab this objective's tasks belong to
 }
 
 export interface TaskLinkInfo {
@@ -225,6 +226,7 @@ export const departmentTargetsService = {
   linkableObjectives: () => call<{ quarter: QuarterInfo; objectives: LinkableObjective[] }>('/linkable-objectives'),
   taskLinks: (taskIds: number[]) => taskIds.length ? call<Record<string, TaskLinkInfo>>(`/task-links?task_ids=${taskIds.join(',')}`) : Promise.resolve({} as Record<string, TaskLinkInfo>),
   linkTask: (objectiveId: number, taskId: number) => call<{ objective_id: number; task_id: number }>(`/objectives/${objectiveId}/tasks`, json('POST', { task_id: taskId })),
+  ensureTaskQuarter: () => call<{ id: number | null; created: boolean; label: string }>('/task-quarters/current', json('POST')),
   unlinkTask: (taskId: number) => call<null>(`/tasks/${taskId}/link`, json('DELETE')),
   createMonthly: (m: MonthlyTargetInput) => call<MonthlyTarget>('/monthly-targets', json('POST', m)),
   updateMonthly: (id: number, m: Partial<MonthlyTargetInput>) => call<MonthlyTarget>(`/monthly-targets/${id}`, json('PUT', m)),
