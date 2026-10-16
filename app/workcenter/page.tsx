@@ -1,5 +1,6 @@
 'use client';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
+import { ObjectiveSelect, TaskObjectiveBadge, currentObjectiveOf, syncTaskObjective, useLinkableObjectives } from '@/components/targets/TaskObjectiveLink';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { cn } from '@/utils/cn';
@@ -178,6 +179,7 @@ export default function TaskCenterPage() {
   const [summary, setSummary] = useState<WCSummary | null>(null);
   const [insights, setInsights] = useState<WCInsights | null>(null);
   const [quarters, setQuarters] = useState<WCQuarter[]>([]);
+  const linkable = useLinkableObjectives();
   const [projects, setProjects] = useState<Project[]>([]);
   const [allUsers, setAllUsers] = useState<UserType[]>([]);
 
@@ -293,9 +295,13 @@ export default function TaskCenterPage() {
   const handleCreateTask = async (payload: any) => {
     const mainTaskPayload = { ...payload };
     const subtasksToCreate = mainTaskPayload.subtasks || [];
+    const objectiveId = mainTaskPayload.cos_objective_id || '';
     delete mainTaskPayload.subtasks;
+    delete mainTaskPayload.cos_objective_id;
+    delete mainTaskPayload.cos_objective_prev;
 
     const mainTask = await workcenterService.createTask(mainTaskPayload);
+    await syncTaskObjective(mainTask?.id, objectiveId, '').catch(console.error);
 
     if (subtasksToCreate.length > 0 && mainTask && mainTask.id) {
       const subtaskPromises = subtasksToCreate.map((st: any) => {
@@ -313,7 +319,9 @@ export default function TaskCenterPage() {
 
   const handleEditTask = async (payload: any) => {
     if (!editingTask) return;
-    await workcenterService.updateTask(editingTask.id, payload);
+    const { cos_objective_id = '', cos_objective_prev = '', ...rest } = payload;
+    await workcenterService.updateTask(editingTask.id, rest);
+    await syncTaskObjective(editingTask.id, cos_objective_id, cos_objective_prev).catch(console.error);
     await loadData();
   };
 
@@ -1267,6 +1275,8 @@ export default function TaskCenterPage() {
         quarters={quarters}
         selectedQuarterId={selectedQuarterId}
         defaultStatus={defaultNewTaskStatus}
+        objectives={linkable.objectives}
+        objectivesQuarter={linkable.quarterShort}
       />
 
 
@@ -2263,7 +2273,10 @@ function TaskDetailDialog({
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto font-sans text-left">
         <DialogHeader>
           <div className="flex justify-between items-start pr-6">
-            <DialogTitle className="text-sm font-bold">{task.title}</DialogTitle>
+            <div>
+              <DialogTitle className="text-sm font-bold">{task.title}</DialogTitle>
+              <TaskObjectiveBadge taskId={task.id} />
+            </div>
             {task.parent_id && onSelectTask && (
               <button
                 onClick={() => onSelectTask({ id: task.parent_id! })}
@@ -2543,7 +2556,11 @@ function CreateEditTaskDialog({
   quarters,
   selectedQuarterId,
   defaultStatus,
+  objectives = [],
+  objectivesQuarter = '',
 }: {
+  objectives?: import('@/services/departmentTargets').LinkableObjective[];
+  objectivesQuarter?: string;
   open: boolean;
   onClose: () => void;
   task: WCTask | null;
@@ -2583,6 +2600,14 @@ function CreateEditTaskDialog({
     parent_id: '',
   });
   const [saving, setSaving] = useState(false);
+  // optional link to a quarter objective (stored by the department-targets API, not on the task)
+  const [objectiveId, setObjectiveId] = useState('');
+  const [objectivePrev, setObjectivePrev] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    setObjectiveId(''); setObjectivePrev('');
+    if (task) currentObjectiveOf(task.id).then(v => { setObjectiveId(v); setObjectivePrev(v); });
+  }, [open, task]);
 
   useEffect(() => {
     if (open) {
@@ -2704,6 +2729,8 @@ function CreateEditTaskDialog({
       description: form.description || '',
       start_date: form.start_date || '',
       deadline: form.deadline || '',
+      cos_objective_id: objectiveId,
+      cos_objective_prev: objectivePrev,
       subtasks: subtasks.map(st => ({
         ...st,
         assigned_to_id: st.assigned_to_id ? Number(st.assigned_to_id) : 0,
@@ -2778,6 +2805,8 @@ function CreateEditTaskDialog({
               </select>
             </div>
           </div>
+          <ObjectiveSelect objectives={objectives} quarterShort={objectivesQuarter} value={objectiveId} onChange={setObjectiveId}
+            className="w-full h-9 bg-background-secondary border border-border-subtle rounded-md px-2 text-[11px] text-text-primary outline-none normal-case" />
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold text-text-secondary uppercase">Start Date</label>

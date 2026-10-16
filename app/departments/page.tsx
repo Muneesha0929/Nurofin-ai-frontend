@@ -12,6 +12,7 @@ import { cn } from '@/utils/cn';
 import { usersService } from '@/services/users';
 import { ProgressBar } from '@/components/QuarterGoalHero';
 import { ObjectivePanel } from '@/components/SidePanel';
+import { ObjectiveTasks } from '@/components/targets/ObjectiveTasks';
 import { DeptCard, Panel, QuarterPills } from '@/components/targets/ui';
 
 // Opens the objective side panel from anywhere inside a department page.
@@ -512,6 +513,10 @@ function ObjectiveCard({ o, n, dept, q, people, reload }: { o: ObjectiveNode; n:
       {open && (
         <div className="border-t border-border-subtle">
           {o.children.map((c, j) => <SubRow key={c.id} c={c} n={`${n}.${j + 1}`} dept={dept} q={q} people={people} reload={reload} />)}
+          <div className="px-4 py-1.5 border-t border-border-subtle first:border-t-0 pl-12">
+            {o.tasks.length > 0 && <div className="text-[10.5px] font-bold uppercase tracking-[0.06em] text-text-secondary pt-1">Tasks directly on this objective</div>}
+            <ObjectiveTasks objectiveId={o.id} tasks={o.tasks} people={people} onChanged={reload} />
+          </div>
           {can_plan && (adding
             ? <div className="p-3 border-t border-border-subtle bg-background-primary">
                 <ObjectiveForm people={people} q={q} sub onCancel={() => setAdding(false)}
@@ -534,7 +539,8 @@ function SubRow({ c, n, dept, q, people, reload }: { c: ObjectiveNode; n: string
     </div>;
   }
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 border-t border-border-subtle first:border-t-0 pl-12 text-[13px]">
+    <div className="border-t border-border-subtle first:border-t-0">
+    <div className="flex items-center gap-3 px-4 py-2.5 pl-12 text-[13px]">
       <span className="text-[11.5px] text-text-secondary font-mono w-8">{n}</span>
       <div className="flex-1 min-w-0">
         <button onClick={() => openPanel(c.id)} className="font-medium text-left hover:text-accent-blue">{c.title}</button>
@@ -546,6 +552,10 @@ function SubRow({ c, n, dept, q, people, reload }: { c: ObjectiveNode; n: string
       <ItemProgress item={c} dept={dept} reload={reload} />
       {dept.permissions.can_plan && <RowActions onEdit={() => setEditing(true)} onDelete={async () => { await api.deleteObjective(c.id); reload(); }} />}
     </div>
+    <div className="pl-[92px] pr-4 pb-1.5 -mt-1">
+      <ObjectiveTasks objectiveId={c.id} tasks={c.tasks} people={people} onChanged={reload} />
+    </div>
+    </div>
   );
 }
 
@@ -553,7 +563,8 @@ function SubRow({ c, n, dept, q, people, reload }: { c: ObjectiveNode; n: string
 function ItemProgress({ item, dept, reload }: { item: ObjectiveNode; dept: DepartmentDetail; reload: () => void }) {
   const { userProfile } = useStore();
   const mine = item.owner && String(item.owner.id) === String(userProfile?.id);
-  const editable = !item.children.length && (dept.permissions.can_plan || mine);
+  const fromTasks = item.progress_from === 'tasks';
+  const editable = !item.children.length && !fromTasks && (dept.permissions.can_plan || mine);
   const [error, setError] = useState('');
   const chip = item.status === 'done' ? <Chip tone="green"><CheckCircle2 size={11} /> Done</Chip>
     : item.overdue ? <Chip tone="red">Overdue</Chip>
@@ -562,6 +573,7 @@ function ItemProgress({ item, dept, reload }: { item: ObjectiveNode; dept: Depar
   return (
     <div className="flex items-center gap-2 shrink-0">
       <span className="hidden sm:flex items-center gap-2 w-28"><ProgressBar value={item.progress} className="flex-1" /><span className="text-[11.5px] font-bold w-8 text-right">{Math.round(item.progress)}%</span></span>
+      {fromTasks && <Chip tone={item.status === 'done' ? 'green' : 'muted'}>{item.tasks.filter(t => t.done).length}/{item.tasks.length} tasks</Chip>}
       {editable && item.overdue && <Chip tone="red">Overdue</Chip>}
       {editable ? (
         <select aria-label="Update progress" value={Math.round(item.progress / 10) * 10} title={error || 'Update progress'}

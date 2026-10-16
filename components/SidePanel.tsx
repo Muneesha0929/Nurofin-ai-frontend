@@ -8,6 +8,8 @@ import { departmentTargetsService as api, ObjectiveDetail, PersonBrief } from '@
 import { workcenterService, WCTask } from '@/services/workcenter';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { ProgressBar } from '@/components/QuarterGoalHero';
+import { ObjectiveTasks } from '@/components/targets/ObjectiveTasks';
+import { TaskObjectiveBadge } from '@/components/targets/TaskObjectiveLink';
 
 export const fmtDay = (iso?: string | null) =>
   iso ? new Date(iso.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
@@ -118,7 +120,7 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
         ) : (
           <>
             <ProgressBar value={o.progress} className="h-2" />
-            <div className="text-[11.5px] text-text-secondary mt-1.5">{o.children.length ? `Rolls up from ${o.children.length} sub-objectives.` : 'The person in charge and the HOD update progress.'}</div>
+            <div className="text-[11.5px] text-text-secondary mt-1.5">{o.children.length || o.tasks.length ? 'Rolls up from the sub-objectives and tasks under it.' : 'The person in charge and the HOD update progress.'}</div>
           </>
         )}
       </div>
@@ -137,6 +139,13 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
           </div>
         </div>
       )}
+
+      <div>
+        <Label>Tasks from the Task center{o.tasks.length ? ` · ${o.tasks.filter(t => t.done).length} of ${o.tasks.length} done` : ''}</Label>
+        <ObjectiveTasks objectiveId={o.id} tasks={o.tasks}
+          people={[o.department.hod, ...(o.department.members || [])].filter((p, i, a): p is PersonBrief => !!p && a.findIndex(x => x?.id === p.id) === i)}
+          onChanged={() => { load(); onChanged?.(); }} />
+      </div>
 
       <div>
         <Label>Updates</Label>
@@ -196,6 +205,7 @@ export function TaskPanel({ task, canChange, onClose, onChanged }: { task: WCTas
         <div><Label>Deadline</Label><span className={cn('inline-flex items-center gap-1', overdue && 'text-accent-red font-semibold')}><Calendar size={12} />{fmtDay(t.deadline) || '—'}</span></div>
         <div><Label>Status</Label><StatusChip status={t.status} overdue={overdue} /></div>
       </div>
+      <TaskObjectiveBadge taskId={t.id} />
       {t.description && <div><Label>Description</Label><p className="text-[13.5px] leading-relaxed whitespace-pre-line">{t.description}</p></div>}
       {canChange && (
         <div>

@@ -32,7 +32,35 @@ export interface ObjectiveNode {
   progress: number;
   overdue: boolean;
   health?: Health;
+  progress_from?: 'tasks' | 'children' | 'manual';
+  tasks: LinkedTask[];
   children: ObjectiveNode[];
+}
+
+export interface LinkedTask {
+  id: number;
+  title: string;
+  status: string;
+  done: boolean;
+  deadline: string | null;
+  overdue: boolean;
+  assignee: PersonBrief | null;
+}
+
+export interface LinkableObjective {
+  id: number;
+  title: string;
+  level: 'objective' | 'sub_objective';
+  parent_title: string | null;
+  department: { id: number; name: string };
+}
+
+export interface TaskLinkInfo {
+  objective_id: number;
+  title: string;
+  level: 'objective' | 'sub_objective';
+  department: { id: number; name: string };
+  quarter: string;
 }
 
 export type Health = 'on' | 'risk' | 'off' | 'done';
@@ -135,7 +163,7 @@ export interface ObjectiveUpdateEntry {
 
 export interface ObjectiveDetail extends ObjectiveNode {
   level: 'objective' | 'sub_objective';
-  department: { id: number; name: string; hod: PersonBrief | null };
+  department: { id: number; name: string; hod: PersonBrief | null; members?: PersonBrief[] };
   quarter: QuarterInfo;
   director_message: string | null;
   parent: { id: number; title: string } | null;
@@ -194,6 +222,10 @@ export const departmentTargetsService = {
   deleteWidget: (id: number) => call<null>(`/widgets/${id}`, json('DELETE')),
   reorderWidgets: (ids: number[]) => call<null>('/widgets/order', json('PUT', { ids })),
   selfCheck: () => call<any>('/self-check'),
+  linkableObjectives: () => call<{ quarter: QuarterInfo; objectives: LinkableObjective[] }>('/linkable-objectives'),
+  taskLinks: (taskIds: number[]) => taskIds.length ? call<Record<string, TaskLinkInfo>>(`/task-links?task_ids=${taskIds.join(',')}`) : Promise.resolve({} as Record<string, TaskLinkInfo>),
+  linkTask: (objectiveId: number, taskId: number) => call<{ objective_id: number; task_id: number }>(`/objectives/${objectiveId}/tasks`, json('POST', { task_id: taskId })),
+  unlinkTask: (taskId: number) => call<null>(`/tasks/${taskId}/link`, json('DELETE')),
   createMonthly: (m: MonthlyTargetInput) => call<MonthlyTarget>('/monthly-targets', json('POST', m)),
   updateMonthly: (id: number, m: Partial<MonthlyTargetInput>) => call<MonthlyTarget>(`/monthly-targets/${id}`, json('PUT', m)),
   deleteMonthly: (id: number) => call<null>(`/monthly-targets/${id}`, json('DELETE')),
