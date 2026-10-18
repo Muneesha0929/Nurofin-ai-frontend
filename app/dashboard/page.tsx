@@ -11,6 +11,7 @@ import { Entry, EntryRow, MyWork, QuickNotes, fromObjective, fromTask, isoDay, t
 import { DeptCard, Panel, QuarterPills } from '@/components/targets/ui';
 import { CompanyTargets } from '@/components/targets/CompanyTargets';
 import { MonthlyTargets } from '@/components/targets/MonthlyTargets';
+import { RunwayCard } from '@/components/runway/RunwayCard';
 import { ObjectivePanel, TaskPanel } from '@/components/SidePanel';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { workcenterService, WCTask } from '@/services/workcenter';
@@ -101,6 +102,8 @@ export default function DashboardPage() {
           <MonthlyTargets data={overview} onChange={loadOverview} />
         </div>
       )}
+
+      {(userProfile?.role || '').toLowerCase() === 'ceo' && <RunwayCard />}
 
       <section>
         <SectionHead title="From the current dashboard" />

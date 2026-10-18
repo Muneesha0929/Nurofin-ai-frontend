@@ -24,6 +24,7 @@ import {
   Target,
   Building2,
   CalendarClock,
+  TrendingUp,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
@@ -45,6 +46,8 @@ export const getNavSections = (isAdmin: boolean, userProfile: any): NavSection[]
     items: [
       { label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
       { label: 'Departments', href: '/departments', icon: Building2 },
+      // Runway holds salaries and capital: shown to the CEO only (the API refuses everyone else too).
+      ...((userProfile?.role || '').toLowerCase() === 'ceo' ? [{ label: 'Runway', href: '/runway', icon: TrendingUp }] : []),
       { label: 'Deadlines', href: '/deadlines', icon: CalendarClock },
       { label: 'Projects', href: '/projects', icon: Briefcase },
       { label: 'Task Center', href: '/workcenter', icon: CheckSquare },
