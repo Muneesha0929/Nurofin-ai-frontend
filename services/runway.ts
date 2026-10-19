@@ -85,6 +85,23 @@ const headers = () => {
   return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 };
 
+export interface ImportProblem { row: number | null; column: string | null; message: string }
+export interface ImportPreview {
+  kind: 'monthly' | 'figures' | null;
+  errors: ImportProblem[];
+  warnings: string[];
+  categories: string[];
+  expenses: { row: number; name: string; category: string; how: How; start_month: string | null; end_month: string | null }[];
+  products: { row: number; name: string; cost_label: string | null; start_month: string }[];
+  summary?: {
+    new_categories: number; new_expenses: number; new_products: number;
+    new_values: number; changed_values: number; unchanged_values: number;
+    by_target: Record<'expense' | 'product_month' | 'capital' | 'figure', number>;
+    first_month: string | null; last_month: string | null;
+    changes: { row: number; name: string; month: string; day: string | null; old: number; new: number; target: string }[];
+  };
+}
+
 export class RunwayError extends Error { constructor(message: string, public status: number) { super(message); } }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -127,5 +144,17 @@ export const runwayService = {
   deleteCapital: (id: number) => call<Runway>(`/capital/${id}`, json('DELETE')),
   setBank: (day: string, amount: number) => call<Runway>('/bank', json('PUT', { day, amount })),
   updateSettings: (s: Partial<RunwaySettings>) => call<Runway>('/settings', json('PUT', s)),
+  /** Saves the pre-filled CSV template to the computer. */
+  downloadTemplate: async (kind: 'monthly' | 'figures') => {
+    const res = await fetch(`${BASE}/template/${kind}`, { headers: headers() });
+    if (!res.ok) throw new RunwayError('Could not download the template.', res.status);
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url; a.download = kind === 'monthly' ? 'runway-monthly-history.csv' : 'runway-product-figures.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+  previewImport: (csv: string) => call<ImportPreview>('/import/preview', json('POST', { csv })),
+  applyImport: (csv: string, replace: boolean) => call<Runway & { imported: { added: number; changed: number; kept: number; categories: number; expenses: number; products: number } }>('/import/apply', json('POST', { csv, replace })),
   restore: (kind: 'expense' | 'product' | 'figure' | 'capital' | 'category', id: number) => call<Runway>(`/restore/${kind}/${id}`, json('POST')),
 };

@@ -13,6 +13,7 @@ import { cn } from '@/utils/cn';
 import { runwayService, Runway, RunwayError } from '@/services/runway';
 import { Btn, ToastHost } from '@/components/runway/ui';
 import { CapitalView, Expenses, Income, Open, Overview } from '@/components/runway/views';
+import { ImportSheet } from '@/components/runway/ImportSheet';
 import { BankSheet, CapitalSheet, CategoriesSheet, ExpenseSheet, FigureSheet, HowSheet, MonthTotalSheet, ProductSheet } from '@/components/runway/sheets';
 
 const TABS = [['overview', 'Overview'], ['expenses', 'Expenses'], ['income', 'Income'], ['capital', 'Capital']] as const;
@@ -92,6 +93,7 @@ function RunwayInner() {
                 ...(figureProducts.length ? [{ t: figureProducts.length === 1 ? `${figureProducts[0].name} figure` : 'Product figure', s: 'Revenue so far this month', o: { kind: 'figure', productId: figureProducts.length === 1 ? figureProducts[0].id : null, figureId: null } as Open }] : []),
                 { t: 'Money put in', s: 'Capital added to the company', o: { kind: 'capital', id: null } as Open },
                 { t: 'Product', s: 'Something new the company earns from', o: { kind: 'product', product: null } as Open },
+                { t: 'Import from a spreadsheet', s: 'Many months at once, from a CSV file', o: { kind: 'import' } as Open },
               ].map(x => (
                 <button key={x.t} role="menuitem" type="button" onClick={() => props.open(x.o)} className="flex flex-col items-start w-full px-3 py-2.5 rounded-[9px] text-left hover:bg-[#F0F2F5]">
                   <span className="text-[14.5px]">{x.t}</span><small className="text-[12.5px] text-[#8A94A3]">{x.s}</small>
@@ -115,6 +117,7 @@ function RunwayInner() {
       {sheet?.kind === 'capital' && <CapitalSheet rw={rw} entry={sheet.id ? rw.data.capital.find(c => c.id === sheet.id) || null : null} apply={setRw} onClose={close} />}
       {sheet?.kind === 'bank' && <BankSheet rw={rw} apply={setRw} onClose={close} />}
       {sheet?.kind === 'how' && <HowSheet rw={rw} apply={setRw} onClose={close} />}
+      {sheet?.kind === 'import' && <ImportSheet rw={rw} apply={setRw} onClose={close} />}
     </Shell>
   );
 }

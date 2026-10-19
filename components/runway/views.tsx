@@ -2,7 +2,7 @@
 
 // The four Runway screens, laid out as in the approved design (design/runway.html).
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight, Clock, Landmark, Pencil, Plus } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight, Clock, Landmark, Pencil, Plus, Upload } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { runwayService as api, Expense, Product, Runway } from '@/services/runway';
 import { Banner, Btn, C, Card, IconBtn, Pill, useToast } from './ui';
@@ -16,7 +16,8 @@ export type Open =
   | { kind: 'month'; productId: number; month: string }
   | { kind: 'capital'; id: number | null }
   | { kind: 'bank' }
-  | { kind: 'how' };
+  | { kind: 'how' }
+  | { kind: 'import' };
 interface ViewProps { rw: Runway; apply: (r: Runway) => void; open: (o: Open) => void; go: (tab: string, month?: string) => void }
 
 // ================================================================= OVERVIEW
@@ -245,7 +246,7 @@ export function Expenses({ rw, apply, open, month, setMonth }: ViewProps & { mon
           </select>
           <IconBtn label="Next month" onClick={() => setMonth(addM(month, 1))} disabled={month >= months[months.length - 1]} className="disabled:opacity-30"><ChevronRight className="w-[18px] h-[18px]" /></IconBtn>
         </div>
-        <div className="flex gap-2"><Btn onClick={() => open({ kind: 'categories' })}>Categories</Btn><Btn onClick={() => open({ kind: 'expense', expense: null })}><Plus className="w-[18px] h-[18px]" />Expense</Btn></div>
+        <div className="flex flex-wrap gap-2"><Btn onClick={() => open({ kind: 'import' })}><Upload className="w-[17px] h-[17px]" />Import</Btn><Btn onClick={() => open({ kind: 'categories' })}>Categories</Btn><Btn onClick={() => open({ kind: 'expense', expense: null })}><Plus className="w-[18px] h-[18px]" />Expense</Btn></div>
       </div>
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 mt-[18px] mb-[22px]">
         <span className="text-[28px] sm:text-[34px] font-semibold tracking-[-.025em] tabular-nums">{rs(total)}</span>
@@ -263,6 +264,7 @@ export function Expenses({ rw, apply, open, month, setMonth }: ViewProps & { mon
           <p className="text-[#526070] max-w-[46ch] mx-auto mb-4">Add what the company spent this month, or copy last month’s list and adjust it.</p>
           <div className="flex gap-2 justify-center flex-wrap">
             {month > start && <Btn onClick={() => fill(false)}>Copy {mName(prev)}</Btn>}
+            <Btn onClick={() => open({ kind: 'import' })}><Upload className="w-[17px] h-[17px]" />Import a spreadsheet</Btn>
             <Btn kind="primary" onClick={() => open({ kind: 'expense', expense: null })}><Plus className="w-[18px] h-[18px]" />Add expense</Btn>
           </div>
         </div>
@@ -324,7 +326,7 @@ export function Income({ rw, open }: ViewProps) {
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[20px] font-semibold tracking-[-.015em]">Income</h2>
-        <Btn onClick={() => open({ kind: 'product', product: null })}><Plus className="w-[18px] h-[18px]" />Product</Btn>
+        <div className="flex gap-2"><Btn onClick={() => open({ kind: 'import' })}><Upload className="w-[17px] h-[17px]" />Import</Btn><Btn onClick={() => open({ kind: 'product', product: null })}><Plus className="w-[18px] h-[18px]" />Product</Btn></div>
       </div>
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 mt-[18px] mb-[22px]">
         <span className="text-[28px] sm:text-[34px] font-semibold tracking-[-.025em] tabular-nums">{L(total)}</span>
