@@ -20,8 +20,8 @@ export function RunwayCard() {
         <span className="w-2 h-2 rounded-full" style={{ background: TONE_COLOR[st.tone] }} />Runway
       </span>
       <span className="text-[15px] font-semibold text-text-primary min-w-0 flex-1">{st.short}</span>
-      <span className="text-[13px] text-text-secondary shrink-0 tabular-nums">{L(g.cash_now)} in the bank</span>
-      {updates > 0 && <span className="text-[12.5px] font-medium px-2.5 py-0.5 rounded-full bg-[#FFF6E5] text-[#9A6200] shrink-0">{updates} to update</span>}
+      {st.tone !== 'setup' && <span className="text-[13px] text-text-secondary shrink-0 tabular-nums">{L(g.cash_now)} in the bank</span>}
+      {st.tone !== 'setup' && updates > 0 && <span className="text-[12.5px] font-medium px-2.5 py-0.5 rounded-full bg-[#FFF6E5] text-[#9A6200] shrink-0">{updates} to update</span>}
       <ChevronRight className="w-4 h-4 text-text-secondary group-hover:translate-x-0.5 transition-transform shrink-0" />
     </Link>
   );

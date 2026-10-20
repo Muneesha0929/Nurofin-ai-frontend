@@ -29,7 +29,7 @@ export function L(n: number) {
 }
 export const parseRs = (v: string) => { const t = String(v ?? '').replace(/[,₹\s]/g, ''); return t === '' ? NaN : +t; };
 
-export type Tone = 'good' | 'watch' | 'risk';
+export type Tone = 'good' | 'watch' | 'risk' | 'setup';
 export interface Story { tone: Tone; status: string; headline: string; sub: string; short: string; basis: string }
 
 /**
@@ -40,6 +40,12 @@ export function story(s: RunwaySummary | Glance): Story {
   const E = s.expected, C = s.slower;
   const slower = C.out ? `Even if income grows more slowly, there is enough until ${mLong(C.out)}.` : 'Even if income grows more slowly, the money does not run out.';
   const basis = `This is a forecast from your figures up to ${s.last_figure_day ? dShort(s.last_figure_day) : mName(addM(s.current_month, -1))}. It updates every time you add one.`;
+  if (s.now.cost === 0 && s.cash_now === 0) {
+    return { tone: 'setup', status: 'Getting started', basis: '',
+      headline: 'Add your figures to see where the money stands.',
+      sub: 'Runway needs what the company spends, what it earns and the money put in.',
+      short: 'Not set up yet: add the figures to see the forecast.' };
+  }
   if (s.state === 'self_funding') {
     return { tone: 'good', status: 'On track', headline: 'The company now pays for itself.', basis,
       sub: 'Income is more than everything the company spends, so every month from here adds to the bank.',
@@ -73,4 +79,4 @@ export function story(s: RunwaySummary | Glance): Story {
     short: `Break-even within reach: ${mLong(E.be)}.` };
 }
 
-export const TONE_COLOR: Record<Tone, string> = { good: '#12A26B', watch: '#D98A00', risk: '#D64545' };
+export const TONE_COLOR: Record<Tone, string> = { good: '#12A26B', watch: '#D98A00', risk: '#D64545', setup: '#8A94A3' };
