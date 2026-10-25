@@ -56,6 +56,19 @@ export interface LinkableObjective {
   task_quarter_id: number | null;   // the Task Center quarter tab this objective's tasks belong to
 }
 
+export interface BoardDepartment extends TargetDepartment, QuarterStats {
+  message: string | null;
+  objectives_tree: ObjectiveNode[];
+  can_plan: boolean;
+}
+
+export interface ObjectivesBoard {
+  quarter: QuarterInfo;
+  departments: BoardDepartment[];
+  me: number;
+  is_director: boolean;
+}
+
 export interface TaskLinkInfo {
   objective_id: number;
   title: string;
@@ -226,6 +239,7 @@ export const departmentTargetsService = {
   linkableObjectives: () => call<{ quarter: QuarterInfo; objectives: LinkableObjective[] }>('/linkable-objectives'),
   taskLinks: (taskIds: number[]) => taskIds.length ? call<Record<string, TaskLinkInfo>>(`/task-links?task_ids=${taskIds.join(',')}`) : Promise.resolve({} as Record<string, TaskLinkInfo>),
   linkTask: (objectiveId: number, taskId: number) => call<{ objective_id: number; task_id: number }>(`/objectives/${objectiveId}/tasks`, json('POST', { task_id: taskId })),
+  board: (fy?: number, q?: number) => call<ObjectivesBoard>(`/board${fy && q ? `?fiscal_year=${fy}&quarter=${q}` : ''}`),
   ensureTaskQuarter: () => call<{ id: number | null; created: boolean; label: string }>('/task-quarters/current', json('POST')),
   unlinkTask: (taskId: number) => call<null>(`/tasks/${taskId}/link`, json('DELETE')),
   createMonthly: (m: MonthlyTargetInput) => call<MonthlyTarget>('/monthly-targets', json('POST', m)),

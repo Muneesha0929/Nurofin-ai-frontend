@@ -2,6 +2,7 @@
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { ObjectiveSelect, TaskObjectiveBadge, currentObjectiveOf, syncTaskObjective, useLinkableObjectives } from '@/components/targets/TaskObjectiveLink';
 import { departmentTargetsService } from '@/services/departmentTargets';
+import { ObjectivesBoard } from '@/components/targets/ObjectivesBoard';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { cn } from '@/utils/cn';
@@ -84,6 +85,7 @@ import {
   Phone,
   Github,
   Linkedin,
+  Target as TargetIcon,
 } from 'lucide-react';
 
 /* ─── Constants ───────────────────────────────────────────────────────────── */
@@ -195,7 +197,7 @@ export default function TaskCenterPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
   const [viewMode, setViewMode] = useState<'kanban' | 'timeline' | 'calendar' | 'gantt' | 'table' | 'workload' | 'analytics'>('kanban');
-  const [activeTab, setActiveTab] = useState<'workspace' | 'dashboard'>('workspace');
+  const [activeTab, setActiveTab] = useState<'workspace' | 'objectives' | 'dashboard'>('workspace');
   const [defaultNewTaskStatus, setDefaultNewTaskStatus] = useState<string>('todo');
 
 
@@ -689,6 +691,15 @@ export default function TaskCenterPage() {
             <LayoutGrid className="w-3.5 h-3.5" /> Task Board
           </button>
           <button
+            onClick={() => setActiveTab('objectives')}
+            className={cn(
+              "px-4 py-2 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1.5",
+              activeTab === 'objectives' ? "bg-accent-blue text-white shadow-sm" : "text-text-secondary hover:text-text-primary"
+            )}
+          >
+            <TargetIcon className="w-3.5 h-3.5" /> {linkable.quarterShort || 'Q3'} Objectives
+          </button>
+          <button
             onClick={() => setActiveTab('dashboard')}
             className={cn(
               "px-4 py-2 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1.5",
@@ -700,7 +711,9 @@ export default function TaskCenterPage() {
         </div>
       </div>
 
-      {activeTab === 'workspace' ? (
+      {activeTab === 'objectives' ? (
+        <ObjectivesBoard />
+      ) : activeTab === 'workspace' ? (
         <div className="space-y-6">
           {/* SECTION 2: Quarter Management */}
           <div className="flex flex-col gap-4">
