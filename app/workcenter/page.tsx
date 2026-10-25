@@ -668,7 +668,7 @@ export default function TaskCenterPage() {
   }
 
   return (
-    <div className="space-y-6 min-w-[1700px] font-sans text-text-primary pb-12 animate-fade-in">
+    <div className="space-y-6 w-full min-w-0 font-sans text-text-primary pb-12 animate-fade-in">
       
       {/* Top Header Switcher */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border-subtle/55">
@@ -1580,18 +1580,18 @@ function GroupedTaskFeed({
               <div className="divide-y divide-border-subtle/50 bg-background-primary overflow-x-auto scrollbar-thin">
                 {/* Column Headers Row */}
                 {colTasks.length > 0 && (
-                  <div className="hidden lg:flex items-center p-3.5 bg-background-secondary/40 border-b border-border-subtle text-[10px] font-extrabold text-text-muted uppercase tracking-wider select-none gap-4 min-w-[1280px]">
-                    <div className="flex-1 min-w-[120px] pr-4">Task & Project</div>
-                    <div className="w-20 flex-shrink-0">Start Date</div>
-                    <div className="w-20 flex-shrink-0">End Date</div>
-                    <div className="w-24 flex-shrink-0">Completion Date</div>
-                    <div className="w-20 flex-shrink-0">Overdue Days</div>
-                    <div className="w-20 flex-shrink-0">Assignee</div>
-                    <div className="w-24 flex-shrink-0">Transferred Info</div>
-                    <div className="w-24 flex-shrink-0">Subtasks Progress</div>
+                  <div className="hidden lg:flex items-center p-3.5 bg-background-secondary/40 border-b border-border-subtle text-[9px] 2xl:text-[10px] font-extrabold text-text-muted uppercase tracking-normal 2xl:tracking-wider select-none box-content gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[920px] min-[1366px]:min-w-[1030px] 2xl:min-w-[1280px]">
+                    <div className="flex-1 min-w-[96px] min-[1366px]:min-w-[120px] pr-2 min-[1366px]:pr-4">Task & Project</div>
+                    <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Start Date</div>
+                    <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">End Date</div>
+                    <div className="w-[68px] min-[1366px]:w-[76px] 2xl:w-24 flex-shrink-0">Completion Date</div>
+                    <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Overdue Days</div>
+                    <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Assignee</div>
+                    <div className="w-[68px] min-[1366px]:w-[76px] 2xl:w-24 flex-shrink-0">Transferred Info</div>
+                    <div className="w-[68px] min-[1366px]:w-[76px] 2xl:w-24 flex-shrink-0">Subtasks Progress</div>
                     <div className="w-14 flex-shrink-0">Priority</div>
-                    <div className="w-24 flex-shrink-0">View Subtask</div>
-                    <div className="w-24 flex-shrink-0">Add Subtask</div>
+                    <div className="w-16 2xl:w-24 flex-shrink-0">View Subtask</div>
+                    <div className="w-16 2xl:w-24 flex-shrink-0">Add Subtask</div>
                     <div className="w-24 flex-shrink-0">Status</div>
                     <div className="w-16 flex-shrink-0 text-right pr-2">Actions</div>
                   </div>
@@ -1612,10 +1612,10 @@ function GroupedTaskFeed({
                     >
                       {/* Main Task Metadata Row */}
                       {/* Desktop Aligned Row */}
-                      <div className="hidden lg:flex items-center w-full gap-4 min-w-[1280px]">
+                      <div className="hidden lg:flex items-center w-full gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[920px] min-[1366px]:min-w-[1030px] 2xl:min-w-[1280px]">
                         {/* 1. Title & Project */}
-                        <div className="flex-1 min-w-[120px] pr-4">
-                          <h4 className="text-xs font-bold text-text-primary hover:text-accent-blue transition-colors leading-normal truncate">
+                        <div className="flex-1 min-w-[96px] min-[1366px]:min-w-[120px] pr-2 min-[1366px]:pr-4">
+                          <h4 title={task.title} className="text-xs font-bold text-text-primary hover:text-accent-blue transition-colors leading-snug line-clamp-2 break-words">
                             {idx + 1}. {task.title}
                           </h4>
                           <div className="flex flex-wrap gap-2 mt-1.5">
@@ -1635,22 +1635,22 @@ function GroupedTaskFeed({
                         </div>
 
                         {/* 2. Start Date */}
-                        <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
+                        <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
                           {task.start_date ? task.start_date : '—'}
                         </div>
 
                         {/* 3. End Date */}
-                        <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
+                        <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
                           {task.deadline ? task.deadline : '—'}
                         </div>
 
                         {/* 4. Completion Date */}
-                        <div className="w-24 flex-shrink-0 text-[10px] font-bold text-text-secondary">
+                        <div className="w-[68px] min-[1366px]:w-[76px] 2xl:w-24 flex-shrink-0 text-[10px] font-bold text-text-secondary">
                           {task.actual_completion_date ? task.actual_completion_date : '—'}
                         </div>
 
                         {/* 4. Overdue Days */}
-                        <div className="w-20 flex-shrink-0 text-[10px] font-bold">
+                        <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0 text-[10px] font-bold">
                           {(() => {
                             if (task.status === 'completed' || task.status === 'done' || !task.deadline) return <span className="text-text-muted">—</span>;
                             const today = new Date();
@@ -1668,7 +1668,7 @@ function GroupedTaskFeed({
                         </div>
 
                         {/* 5. Assignee */}
-                        <div className="w-20 flex-shrink-0">
+                        <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">
                           {task.assigned_to_name ? (
                             <div className="flex items-center gap-1.5" title={`Assigned to ${task.assigned_to_name}`}>
                               {task.assigned_to_avatar ? (
@@ -1684,7 +1684,7 @@ function GroupedTaskFeed({
                         </div>
 
                         {/* 6. Transferred Info */}
-                        <div className="w-24 flex-shrink-0 text-[10px] text-text-secondary font-bold truncate">
+                        <div className="w-[68px] min-[1366px]:w-[76px] 2xl:w-24 flex-shrink-0 text-[10px] text-text-secondary font-bold truncate">
                           {task.transfer_date && task.transfer_to_name ? (
                             <div className="flex flex-col min-w-0" title={`Transferred to ${task.transfer_to_name} on ${task.transfer_date}`}>
                               <span className="text-accent-blue text-[9px] bg-accent-blue/5 border border-accent-blue/10 px-1.5 py-0.5 rounded-md inline-block max-w-max truncate">
@@ -1700,7 +1700,7 @@ function GroupedTaskFeed({
                         </div>
 
                         {/* 7. Subtasks Progress */}
-                        <div className="w-24 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                        <div className="w-[68px] min-[1366px]:w-[76px] 2xl:w-24 flex-shrink-0" onClick={e => e.stopPropagation()}>
                           {totalSubtasks > 0 ? (
                             <div>
                               <div className="flex justify-between text-[9px] font-bold text-text-secondary mb-1">
@@ -1724,7 +1724,7 @@ function GroupedTaskFeed({
                         </div>
 
                         {/* 9. View Subtask Button */}
-                        <div className="w-24 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                        <div className="w-16 2xl:w-24 flex-shrink-0" onClick={e => e.stopPropagation()}>
                           {hasSubtasks ? (
                             <button
                               onClick={(e) => {
@@ -1742,7 +1742,7 @@ function GroupedTaskFeed({
                         </div>
 
                         {/* 10. Add Subtask Button */}
-                        <div className="w-24 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                        <div className="w-16 2xl:w-24 flex-shrink-0" onClick={e => e.stopPropagation()}>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1944,7 +1944,7 @@ function GroupedTaskFeed({
                           <div className="text-[9px] font-bold uppercase tracking-wider text-text-muted select-none">Subtasks</div>
                           
                           {/* Subtasks Headers Row (hidden on mobile) */}
-                          <div className="hidden lg:flex items-center p-2 bg-background-secondary/30 rounded-lg border border-border-subtle/20 text-[9px] font-bold text-text-muted uppercase tracking-wider select-none gap-4 min-w-[990px]">
+                          <div className="hidden lg:flex items-center p-2 bg-background-secondary/30 rounded-lg border border-border-subtle/20 text-[9px] font-bold text-text-muted uppercase tracking-wider select-none gap-2 2xl:gap-4 min-w-[860px] 2xl:min-w-[990px]">
                             <div className="flex-1 min-w-[120px] pr-4 pl-[30px]">Subtask Title</div>
                             <div className="w-32 flex-shrink-0">Description</div>
                             <div className="w-20 flex-shrink-0">Start Date</div>
@@ -1969,11 +1969,11 @@ function GroupedTaskFeed({
                                   className="p-2 bg-background-secondary/50 border border-border-subtle/40 rounded-lg hover:bg-surface-hover/30 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px]"
                                 >
                                   {/* Desktop columns layout */}
-                                  <div className="hidden lg:flex items-center w-full gap-4 min-w-[990px]">
+                                  <div className="hidden lg:flex items-center w-full gap-2 2xl:gap-4 min-w-[860px] 2xl:min-w-[990px]">
                                     {/* 1. Title */}
                                     <div className="flex-1 min-w-[120px] flex items-center gap-2 pr-4 pl-2">
                                       <div className={cn("w-3.5 h-3.5 rounded border flex items-center justify-center text-[9px] font-bold flex-shrink-0", isCompleted ? "bg-accent-green border-accent-green text-white" : "border-text-muted/40 text-transparent")}>✓</div>
-                                      <span className={cn("font-medium truncate", isCompleted && "line-through text-text-muted")}>{st.title}</span>
+                                      <span title={st.title} className={cn("font-medium line-clamp-2 break-words", isCompleted && "line-through text-text-muted")}>{st.title}</span>
                                     </div>
 
                                     {/* 1.5 Description */}
@@ -2076,7 +2076,7 @@ function GroupedTaskFeed({
                                   <div className="flex flex-col lg:hidden w-full gap-2.5">
                                     <div className="flex items-center gap-2">
                                       <div className={cn("w-3.5 h-3.5 rounded border flex items-center justify-center text-[9px] font-bold flex-shrink-0", isCompleted ? "bg-accent-green border-accent-green text-white" : "border-text-muted/40 text-transparent")}>✓</div>
-                                      <span className={cn("font-medium truncate", isCompleted && "line-through text-text-muted")}>{st.title}</span>
+                                      <span title={st.title} className={cn("font-medium line-clamp-2 break-words", isCompleted && "line-through text-text-muted")}>{st.title}</span>
                                     </div>
 
                                     {st.description && <div className="text-[10px] text-text-muted/80 italic pl-6">{st.description}</div>}
