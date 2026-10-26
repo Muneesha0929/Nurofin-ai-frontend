@@ -53,7 +53,7 @@ const CircularProgress = ({ percentage, label, color = "blue", size = "normal" }
             cy={center}
           />
         </svg>
-        <span className={`absolute font-bold text-slate-700 dark:text-slate-200 ${textClass}`}>{Math.round(percentage)}%</span>
+        <span className={`absolute font-bold text-slate-700 dark:text-slate-200 ${textClass}`}>{Math.round(clampedPercent)}%</span>
       </div>
       <span className={`font-medium text-slate-500 dark:text-slate-400 mt-1.5 whitespace-nowrap ${labelClass}`}>{label}</span>
     </div>
@@ -79,6 +79,8 @@ interface Props {
   allTargets: Record<number, Target[]>;
   allUsersList: UserProfile[];
   currentUser: UserProfile;
+  selectedEmployee?: number | null;
+  onSelectEmployee?: (id: number | null) => void;
   onEdit?: (target: Target) => void;
   onDelete?: (targetId: number) => void;
   onToggle?: (target: Target) => void;
@@ -87,8 +89,27 @@ interface Props {
   onAddTarget?: (assigneeId: number) => void;
 }
 
-export default function PerformanceDashboard({ viewMonth, users, allTargets, allUsersList, currentUser, onEdit, onDelete, onToggle, onScoreUpdate, onPushTarget, onAddTarget }: Props) {
-  const [selectedEmployee, setSelectedEmployee] = useState<number | null>(null);
+export default function PerformanceDashboard({ 
+  viewMonth, 
+  users, 
+  allTargets, 
+  allUsersList, 
+  currentUser, 
+  selectedEmployee: selectedEmployeeProp,
+  onSelectEmployee,
+  onEdit, 
+  onDelete, 
+  onToggle, 
+  onScoreUpdate, 
+  onPushTarget, 
+  onAddTarget 
+}: Props) {
+  const [localSelectedEmployee, setLocalSelectedEmployee] = useState<number | null>(null);
+  const selectedEmployee = selectedEmployeeProp !== undefined ? selectedEmployeeProp : localSelectedEmployee;
+  const setSelectedEmployee = (id: number | null) => {
+    if (onSelectEmployee) onSelectEmployee(id);
+    else setLocalSelectedEmployee(id);
+  };
 
   const getCleanTitle = (title: string) => title.replace(/^\[Quarterly\]\s*/i, '').replace(/^\[Eval\]\s*/i, '');
   const isQuarterly = (t: Target) => t.title.toLowerCase().startsWith('[quarterly]');
@@ -134,11 +155,14 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
           users.map((emp, index) => {
             const allT = allTargets[Number(emp.id)] || [];
             const targets = allT.filter(t => {
+                // Ignore obsolete duplicate pushed tasks
+                if (t.title && t.title.includes('(Pushed)')) return false;
+
                 const isQuarterly = t.title.toLowerCase().startsWith('[quarterly]');
                 if (isQuarterly) {
                     if (viewMonth === 'all' || !viewMonth) return true;
                     if (t.q_start && t.q_end) {
-                        return (viewMonth >= t.q_start && viewMonth <= t.q_end) || !t.is_completed;
+                        return (viewMonth >= t.q_start && viewMonth <= t.q_end);
                     }
                     if (t.month) {
                         const [y, m] = t.month.split('-').map(Number);
@@ -147,14 +171,14 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                             const endM = startM + 2;
                             const qStart = `${y}-${String(startM).padStart(2, '0')}`;
                             const qEnd = `${y}-${String(endM).padStart(2, '0')}`;
-                            return (viewMonth >= qStart && viewMonth <= qEnd) || !t.is_completed;
+                            return (viewMonth >= qStart && viewMonth <= qEnd);
                         }
                     }
                     return true;
                 }
                 if (viewMonth === 'all' || !viewMonth) return true;
                 const targetMonth = t.month || "";
-                return !targetMonth || targetMonth === viewMonth || !t.is_completed;
+                return targetMonth === viewMonth;
             });
 
             const themeColor = userColors[index % userColors.length];
@@ -173,34 +197,41 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                 if (t.reviewer_scores && t.reviewer_scores.length > 0) {
                     t.reviewer_scores.forEach(s => {
                         const rId = Number(s.reviewer_id);
+                        const sScore = Math.min(Math.max(Number(s.score) || 0, 0), 100);
                         if (rId === Number(emp.id)) {
                             if (!isEvalTarget) {
-                                workSum += s.score;
+                                workSum += sScore;
                                 validWorkTargets++;
                                 hasSelfScore = true;
                             }
                         } else if (isCeo(rId)) {
-                            ceoSum += s.score;
+                            ceoSum += sScore;
                             validCeoTargets++;
                         } else {
-                            peerSum += s.score;
+                            peerSum += sScore;
                             validPeerTargets++;
                         }
                     });
                 } else {
-                    if (t.my_score != null && t.my_score > 0 && !isEvalTarget) {
-                        workSum += t.my_score;
+                    if (t.my_score != null && !isEvalTarget) {
+                        const myScoreVal = Math.min(Math.max(Number(t.my_score) || 0, 0), 100);
+                        workSum += myScoreVal;
                         validWorkTargets++;
                         hasSelfScore = true;
                     }
                     if (t.average_score != null && (t.score_count || 0) > 0) {
+                        const avgVal = Math.min(Math.max(Number(t.average_score) || 0, 0), 100);
                         if (t.my_score != null && (t.score_count || 0) > 1) {
-                            const othersTotal = (t.average_score * (t.score_count || 0)) - (isEvalTarget ? 0 : t.my_score);
-                            const othersAvg = othersTotal / ((t.score_count || 0) - (isEvalTarget ? 0 : 1));
-                            ceoSum += othersAvg;
-                            validCeoTargets++;
+                            const myScoreVal = Math.min(Math.max(Number(t.my_score) || 0, 0), 100);
+                            const othersTotal = (avgVal * (t.score_count || 0)) - (isEvalTarget ? 0 : myScoreVal);
+                            const othersCount = (t.score_count || 0) - (isEvalTarget ? 0 : 1);
+                            if (othersCount > 0) {
+                              const othersAvg = Math.min(Math.max(othersTotal / othersCount, 0), 100);
+                              ceoSum += othersAvg;
+                              validCeoTargets++;
+                            }
                         } else if (t.my_score == null && (t.score_count || 0) > 0) {
-                            ceoSum += t.average_score;
+                            ceoSum += avgVal;
                             validCeoTargets++;
                         }
                     }
@@ -218,13 +249,13 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
 
             const isEmpCeo = isCeo(Number(emp.id));
 
-            let workCompleted = validWorkTargets > 0 ? (workSum / validWorkTargets) : 0;
-            let ceoEval = validCeoTargets > 0 ? (ceoSum / validCeoTargets) : 0;
-            let peerEval = validPeerTargets > 0 ? (peerSum / validPeerTargets) : 0;
+            let workCompleted = validWorkTargets > 0 ? Math.min(Math.max(workSum / validWorkTargets, 0), 100) : 0;
+            let ceoEval = validCeoTargets > 0 ? Math.min(Math.max(ceoSum / validCeoTargets, 0), 100) : 0;
+            let peerEval = validPeerTargets > 0 ? Math.min(Math.max(peerSum / validPeerTargets, 0), 100) : 0;
             
             let overall = 0;
             if (targets.length === 0) overall = 0;
-            else overall = (workCompleted + peerEval + ceoEval) / 3;
+            else overall = Math.min(Math.max((workCompleted + peerEval + ceoEval) / 3, 0), 100);
 
             // CEO does not have evaluation performance or individual targets; everything is 000
             if (isEmpCeo) {
@@ -287,18 +318,29 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                 if (t.reviewer_scores && t.reviewer_scores.length > 0) {
                     t.reviewer_scores.forEach(s => {
                         const rId = Number(s.reviewer_id);
-                        if (rId === Number(emp.id)) { tWork = s.score; hasWork = true; }
-                        else if (isCeo(rId)) { tCeo = s.score; hasCeo = true; }
-                        else { tPeer = s.score; hasPeer = true; }
+                        const sScore = Math.min(Math.max(Number(s.score) || 0, 0), 100);
+                        if (rId === Number(emp.id)) { tWork = sScore; hasWork = true; }
+                        else if (isCeo(rId)) { tCeo = sScore; hasCeo = true; }
+                        else { tPeer = sScore; hasPeer = true; }
                     });
                 } else {
-                    if (t.my_score != null && t.my_score > 0) { tWork = t.my_score; hasWork = true; }
+                    if (t.my_score != null) { 
+                      tWork = Math.min(Math.max(Number(t.my_score) || 0, 0), 100); 
+                      hasWork = true; 
+                    }
                     if (t.average_score != null && (t.score_count || 0) > 0) {
+                        const avgVal = Math.min(Math.max(Number(t.average_score) || 0, 0), 100);
                         if (t.my_score != null && (t.score_count || 0) > 1) {
-                            const othersTotal = (t.average_score * (t.score_count || 0)) - t.my_score;
-                            tCeo = othersTotal / ((t.score_count || 0) - 1); hasCeo = true;
+                            const myScoreVal = Math.min(Math.max(Number(t.my_score) || 0, 0), 100);
+                            const othersTotal = (avgVal * (t.score_count || 0)) - myScoreVal;
+                            const othersCount = (t.score_count || 0) - 1;
+                            if (othersCount > 0) {
+                              tCeo = Math.min(Math.max(othersTotal / othersCount, 0), 100); 
+                              hasCeo = true;
+                            }
                         } else if (t.my_score == null && (t.score_count || 0) > 0) {
-                            tCeo = t.average_score; hasCeo = true;
+                            tCeo = avgVal; 
+                            hasCeo = true;
                         }
                     }
                 }
@@ -308,7 +350,7 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                 if (hasWork && !isEvalSection) { tOverallSum += tWork; tOverallCount++; }
                 if (hasPeer) { tOverallSum += tPeer; tOverallCount++; }
                 if (hasCeo) { tOverallSum += tCeo; tOverallCount++; }
-                const tOverall = tOverallCount > 0 ? tOverallSum / tOverallCount : 0;
+                const tOverall = tOverallCount > 0 ? Math.min(Math.max(tOverallSum / tOverallCount, 0), 100) : 0;
                 
                 const isSelfTarget = Number(currentUser?.id) === Number(emp.id);
                 const isViewerCeo = viewerRole === 'ceo' || viewerRole === 'super_admin' || viewerRole === 'admin' || Number(currentUser?.id) === 1;
@@ -330,17 +372,17 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                   if (isViewerCeo) {
                     showScoreInput = !isWcQuarter;
                     scoreLabel = isEvalSection ? "CEO Eval %" : "CEO Score %";
-                    initialScoreValue = tCeo || 0;
+                    initialScoreValue = t.my_score != null ? t.my_score : (tCeo || 0);
                   } else if (isViewerLead) {
                     showScoreInput = !isWcQuarter;
                     scoreLabel = isEvalSection ? "Lead Eval %" : "Lead Score %";
-                    initialScoreValue = tPeer || 0;
+                    initialScoreValue = t.my_score != null ? t.my_score : (tPeer || 0);
                   } else {
                     // Regular peers can only evaluate competency feedback
                     if (isEvalSection) {
                       showScoreInput = true;
                       scoreLabel = "Peer Eval %";
-                      initialScoreValue = tPeer || 0;
+                      initialScoreValue = t.my_score != null ? t.my_score : (tPeer || 0);
                     }
                   }
                 }
@@ -412,17 +454,28 @@ export default function PerformanceDashboard({ viewMonth, users, allTargets, all
                                 type="number" 
                                 min="0" 
                                 max="100" 
-                                key={`${t.id}-${initialScoreValue}`}
+                                key={t.id}
                                 defaultValue={initialScoreValue} 
-                                onBlur={(e) => { e.stopPropagation(); onScoreUpdate?.(t, Number(e.target.value)); }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    (e.target as HTMLInputElement).blur();
+                                  }
+                                }}
+                                onBlur={(e) => { 
+                                  e.stopPropagation(); 
+                                  const raw = e.target.value;
+                                  const num = raw === '' ? 0 : Math.min(Math.max(Number(raw) || 0, 0), 100);
+                                  e.target.value = String(num);
+                                  onScoreUpdate?.(t, num); 
+                                }}
                                 className="w-16 bg-white dark:bg-[#12131c] border border-slate-300 dark:border-slate-600 rounded px-2 py-1 text-sm outline-none focus:border-blue-500 text-slate-800 dark:text-slate-200 font-bold text-center"
-                                title="Enter percentage score and click away"
+                                title="Enter percentage score (0-100) and press Enter or Tab"
                             />
                         </div>
 
                         {!isWcQuarter && !isEvalSection && (
                             <div className="flex items-center gap-1">
-                              {!t.is_completed && !t.title.includes('(Pushed)') && (
+                              {isSelfTarget && !t.is_completed && !t.title.includes('(Pushed)') && (
                                   <button onClick={(e) => { e.stopPropagation(); onPushTarget?.(t); }} className="p-2 text-slate-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-md transition-colors" title="Push to Next Month">
                                       <ArrowRight className="w-5 h-5" />
                                   </button>

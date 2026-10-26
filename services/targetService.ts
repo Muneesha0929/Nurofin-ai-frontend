@@ -27,6 +27,7 @@ export interface TargetCreate {
 export interface TargetUpdate {
   title?: string;
   description?: string;
+  month?: string;
   is_completed?: boolean;
 }
 

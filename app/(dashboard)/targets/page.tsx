@@ -16,6 +16,7 @@ export default function UnifiedTargetsPage() {
   const [allUsersList, setAllUsersList] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMonth, setViewMonth] = useState('all');
+  const [selectedEmployee, setSelectedEmployee] = useState<number | null>(null);
   
   // Data for the dashboard
   const [allTargets, setAllTargets] = useState<Record<number, Target[]>>({});
@@ -41,13 +42,15 @@ export default function UnifiedTargetsPage() {
 
   useEffect(() => {
     if (userProfile.id) {
-      loadData();
+      loadData(false);
     }
   }, [userProfile.id, userProfile.role]);
 
-  const loadData = async () => {
+  const loadData = async (silent: boolean = false) => {
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       const myData = await targetService.getMyTargets();
       
       const allU = await usersService.getUsers();
@@ -112,24 +115,32 @@ export default function UnifiedTargetsPage() {
         }
         setAllTargets(targetsMap);
       } else {
-        const teamLeads = allU.filter(u => u.role?.toLowerCase() === 'team_lead');
-        const visibleUsers = [userProfile, ...teamLeads.filter(tl => tl.id !== userProfile.id && !isUserCeo(tl))];
+        // Employees see themselves, teammates in their department, and team leads
+        const isTeammateOrLead = (u: UserProfile) => {
+          if (u.id === userProfile.id || isUserCeo(u)) return false;
+          if (u.role?.toLowerCase() === 'team_lead' || u.role?.toLowerCase() === 'lead') return true;
+          if (userProfile.department && u.department) {
+            return u.department.trim().toLowerCase() === userProfile.department.trim().toLowerCase();
+          }
+          return true; // fallback if no department is specified
+        };
+        const visibleUsers = [userProfile, ...allU.filter(isTeammateOrLead)];
         setUsers(visibleUsers);
         
         const targetsMap: Record<number, Target[]> = {};
         targetsMap[Number(userProfile.id)] = isUserCeo(userProfile) ? [] : combinedMyTargets;
         
-        for (const tl of teamLeads) {
-          if (tl.id === userProfile.id || isUserCeo(tl)) continue;
+        for (const u of visibleUsers) {
+          if (u.id === userProfile.id || isUserCeo(u)) continue;
           try {
-            const tlTargets = await targetService.getUserTargets(Number(tl.id));
-            const merged = [...tlTargets, ...quarterTargets];
+            const uTargets = await targetService.getUserTargets(Number(u.id));
+            const merged = [...uTargets, ...quarterTargets];
             for (const gt of globalTargetsFromMyData) {
               if (!merged.some(m => m.id === gt.id)) {
                 merged.push(gt);
               }
             }
-            targetsMap[Number(tl.id)] = merged;
+            targetsMap[Number(u.id)] = merged;
           } catch(e) {}
         }
         setAllTargets(targetsMap);
@@ -137,7 +148,9 @@ export default function UnifiedTargetsPage() {
     } catch (err) {
       console.error('Failed to load data', err);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -167,9 +180,10 @@ export default function UnifiedTargetsPage() {
     if (!confirm('Are you sure you want to delete this target?')) return;
     try {
       await targetService.deleteTarget(targetId);
-      loadData();
+      loadData(true);
     } catch (err: any) {
       alert('Failed to delete target: ' + err.message);
+      loadData(true);
     }
   };
 
@@ -181,17 +195,19 @@ export default function UnifiedTargetsPage() {
     try {
       const updateData: TargetUpdate = { is_completed: !target.is_completed };
       await targetService.updateTarget(target.id, updateData);
-      loadData();
+      loadData(true);
     } catch (err: any) {
       alert('Error updating target: ' + err.message);
+      loadData(true);
     }
   };
 
-  const handleProgressUpdate = async (targetObj: Target, progress: number) => {
+  const handleProgressUpdate = async (targetObj: Target, rawProgress: number) => {
     if (targetObj.id < 0 && !targetObj.title.startsWith('[Eval]')) {
         alert("Workcenter quarter progress is calculated automatically based on tasks. You cannot score a global Workcenter quarter here.");
         return;
     }
+    const progress = Math.min(Math.max(Number(rawProgress) || 0, 0), 100);
     try {
       let targetId = targetObj.id;
       
@@ -216,7 +232,7 @@ export default function UnifiedTargetsPage() {
           const newTargets = { ...prev };
           for (const userId in newTargets) {
               const list = newTargets[userId];
-              const idx = list.findIndex(t => t.id === targetObj.id);
+              const idx = list.findIndex(t => t.id === targetObj.id || (targetId > 0 && t.id === targetId));
               if (idx !== -1) {
                   const t = { ...list[idx] };
                   targetWasCompleted = t.is_completed || false;
@@ -235,7 +251,17 @@ export default function UnifiedTargetsPage() {
                   }
                   
                   // if we just created it, swap the negative ID with the real one in state
-                  if (targetObj.id < 0) t.id = targetId;
+                  t.id = targetId;
+
+                  // Update reviewer_scores optimistically
+                  const rScores = [...(t.reviewer_scores || [])];
+                  const existingIdx = rScores.findIndex(s => Number(s.reviewer_id) === Number(userProfile.id));
+                  if (existingIdx !== -1) {
+                    rScores[existingIdx] = { reviewer_id: Number(userProfile.id), score: progress };
+                  } else {
+                    rScores.push({ reviewer_id: Number(userProfile.id), score: progress });
+                  }
+                  t.reviewer_scores = rScores;
 
                   newTargets[userId] = [...list.slice(0, idx), t, ...list.slice(idx + 1)];
               }
@@ -243,45 +269,75 @@ export default function UnifiedTargetsPage() {
           return newTargets;
       });
 
-      await targetService.scoreTarget(targetId, { score: progress } as TargetScoreUpdate);
+      const updatedScoredTarget = await targetService.scoreTarget(targetId, { score: progress } as TargetScoreUpdate);
 
       if (shouldUpdateDbCompleted && !targetObj.title.startsWith('[Eval]')) {
           await targetService.updateTarget(targetId, { is_completed: updatedCompleted });
       }
 
-      loadData();
+      if (updatedScoredTarget) {
+        setAllTargets(prev => {
+          const next = { ...prev };
+          for (const uId in next) {
+            next[uId] = next[uId].map(t => (t.id === targetId || t.id === targetObj.id) ? { ...t, ...updatedScoredTarget, id: targetId } : t);
+          }
+          return next;
+        });
+      }
+
+      // Silent background sync without resetting or flashing page
+      loadData(true);
     } catch (err: any) {
       alert('Error updating progress: ' + err.message);
-      loadData(); // Revert on failure
+      loadData(true); // Revert on failure silently
     }
   };
 
-    const handlePushTarget = async (target: Target) => {
-    if (!confirm(`Push "${target.title}" to the next month?`)) return;
+  const handlePushTarget = async (target: Target) => {
+    // Only the user himself should have the option to move / push his own tasks
+    if (Number(userProfile?.id) !== Number(target.user_id)) {
+      alert("Only the task owner can push their own tasks to the next month.");
+      return;
+    }
+
+    const cleanTitle = target.title.replace(/\s*\(Pushed\)$/i, '').trim();
+    if (!confirm(`Push "${cleanTitle}" to the next month?`)) return;
+
     try {
       const [year, month] = target.month.split('-');
       const d = new Date(Number(year), Number(month), 1);
       const nextMonthStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
       
-      const newTarget = await targetService.createTarget({
-          title: target.title.replace(' (Pushed)', ''),
-          description: `[Pushed from ${target.month}]\n${target.description || ''}`.trim(),
-          month: nextMonthStr,
-          is_global: target.is_global,
-          user_id: target.user_id
-      } as TargetCreate);
+      const cleanDesc = (target.description || '')
+        .replace(/\[Pushed from \d{4}-\d{2}\]\s*/g, '')
+        .trim();
+      const newDesc = `[Pushed from ${target.month}]\n${cleanDesc}`.trim();
       
-      if (target.my_score != null && target.my_score > 0) {
-          await targetService.scoreTarget(newTarget.id, { score: target.my_score } as TargetScoreUpdate);
-      }
-      
+      // Move task directly to the next month - no duplicate creation!
       await targetService.updateTarget(target.id, {
-          title: target.title + ' (Pushed)'
+        title: cleanTitle,
+        description: newDesc,
+        month: nextMonthStr
       });
       
-      loadData();
+      // Optimistically update local state so task moves cleanly
+      setAllTargets(prev => {
+        const next = { ...prev };
+        for (const uId in next) {
+          next[uId] = next[uId].map(t => 
+            t.id === target.id 
+              ? { ...t, title: cleanTitle, description: newDesc, month: nextMonthStr }
+              : t
+          );
+        }
+        return next;
+      });
+
+      // Silent background sync
+      loadData(true);
     } catch (err: any) {
       alert('Failed to push target: ' + err.message);
+      loadData(true);
     }
   };
 
@@ -318,7 +374,7 @@ export default function UnifiedTargetsPage() {
       setTargetType('individual');
       setEditingTarget(null);
       setShowTargetModal(false);
-      await loadData();
+      await loadData(true);
     } catch (err: any) {
       alert('Failed to save target: ' + err.message);
     } finally {
@@ -436,6 +492,8 @@ export default function UnifiedTargetsPage() {
           allTargets={allTargets} 
           allUsersList={allUsersList}
           currentUser={userProfile}
+          selectedEmployee={selectedEmployee}
+          onSelectEmployee={setSelectedEmployee}
           onEdit={startEdit}
           onDelete={handleDelete}
           onToggle={handleToggleComplete}
