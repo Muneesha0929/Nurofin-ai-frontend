@@ -60,6 +60,7 @@ export default function Topbar() {
     if (pathname === '/deadlines') return 'Deadlines';
     if (pathname === '/projects') return 'Projects & Initiatives';
     if (pathname === '/tasks' || pathname === '/workcenter') return 'Task Center / Execution Hub';
+    if (pathname === '/features') return 'Product Features';
     if (pathname === '/planner') return 'Executive Planner';
     if (pathname === '/meetings') return 'Meeting Operations';
     if (pathname === '/knowledge') return 'Document Hub';

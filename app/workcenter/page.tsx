@@ -1,6 +1,7 @@
 'use client';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { ObjectiveSelect, TaskObjectiveBadge, currentObjectiveOf, syncTaskObjective, useLinkableObjectives } from '@/components/targets/TaskObjectiveLink';
+import { FeatureSelect, TaskFeatureChips, currentFeatureOf, refreshTaskFeatures, syncTaskFeature, useLinkableFeatures } from '@/components/features/TaskFeatureLink';
 import { departmentTargetsService } from '@/services/departmentTargets';
 import { ObjectivesBoard } from '@/components/targets/ObjectivesBoard';
 
@@ -187,6 +188,12 @@ export default function TaskCenterPage() {
   // Make sure the Task Center has a tab for the quarter we are in (e.g. "FY27 - Q3"); reload if one was added.
   useEffect(() => {
     departmentTargetsService.ensureTaskQuarter().then(r => { if (r.created) loadDataRef.current?.(); }).catch(() => {});
+    refreshTaskFeatures();
+  }, []);
+  const openFromLinkRef = useRef<((t: { id: number }) => void) | null>(null);
+  useEffect(() => {
+    const id = Number(new URLSearchParams(window.location.search).get('task'));
+    if (id) setTimeout(() => openFromLinkRef.current?.({ id }), 0);
   }, []);
   const [projects, setProjects] = useState<Project[]>([]);
   const [allUsers, setAllUsers] = useState<UserType[]>([]);
@@ -308,9 +315,13 @@ export default function TaskCenterPage() {
     delete mainTaskPayload.subtasks;
     delete mainTaskPayload.cos_objective_id;
     delete mainTaskPayload.cos_objective_prev;
+    const featureId = mainTaskPayload.cos_feature_id || '';
+    delete mainTaskPayload.cos_feature_id;
+    delete mainTaskPayload.cos_feature_prev;
 
     const mainTask = await workcenterService.createTask(mainTaskPayload);
     await syncTaskObjective(mainTask?.id, objectiveId, '').catch(console.error);
+    await syncTaskFeature(mainTask?.id, featureId, '').catch(console.error);
 
     if (subtasksToCreate.length > 0 && mainTask && mainTask.id) {
       const subtaskPromises = subtasksToCreate.map((st: any) => {
@@ -328,9 +339,10 @@ export default function TaskCenterPage() {
 
   const handleEditTask = async (payload: any) => {
     if (!editingTask) return;
-    const { cos_objective_id = '', cos_objective_prev = '', ...rest } = payload;
+    const { cos_objective_id = '', cos_objective_prev = '', cos_feature_id = '', cos_feature_prev = '', ...rest } = payload;
     await workcenterService.updateTask(editingTask.id, rest);
     await syncTaskObjective(editingTask.id, cos_objective_id, cos_objective_prev).catch(console.error);
+    await syncTaskFeature(editingTask.id, cos_feature_id, cos_feature_prev).catch(console.error);
     await loadData();
   };
 
@@ -391,6 +403,8 @@ export default function TaskCenterPage() {
       console.error('Failed to load task details:', err);
     }
   };
+
+  openFromLinkRef.current = handleSelectTask;
 
   const handleTransfer = async (taskId: number, payload: any) => {
     await workcenterService.transferTask(taskId, payload);
@@ -1619,6 +1633,7 @@ function GroupedTaskFeed({
                             {idx + 1}. {task.title}
                           </h4>
                           <div className="flex flex-wrap gap-2 mt-1.5">
+                            <TaskFeatureChips taskId={task.id} />
                             {task.parent_title && (
                               <span className="inline-flex items-center gap-1 text-[9px] font-bold text-accent-purple bg-accent-purple/5 border border-accent-purple/10 px-2 py-0.5 rounded-full">
                                 <span className="w-1.5 h-1.5 rounded-full bg-accent-purple animate-pulse" />
@@ -1807,6 +1822,7 @@ function GroupedTaskFeed({
                             {idx + 1}. {task.title}
                           </h4>
                           <div className="flex flex-wrap gap-2 mt-1.5">
+                            <TaskFeatureChips taskId={task.id} />
                             {task.parent_title && (
                               <span className="inline-flex items-center gap-1 text-[9px] font-bold text-accent-purple bg-accent-purple/5 border border-accent-purple/10 px-2 py-0.5 rounded-full">
                                 <span className="w-1.5 h-1.5 rounded-full bg-accent-purple animate-pulse" />
@@ -2296,6 +2312,7 @@ function TaskDetailDialog({
             <div>
               <DialogTitle className="text-sm font-bold">{task.title}</DialogTitle>
               <TaskObjectiveBadge taskId={task.id} />
+              <div className="mt-1.5 flex flex-wrap gap-1.5"><TaskFeatureChips taskId={task.id} size="md" /></div>
             </div>
             {task.parent_id && onSelectTask && (
               <button
@@ -2628,6 +2645,15 @@ function CreateEditTaskDialog({
     setObjectiveId(''); setObjectivePrev('');
     if (task) currentObjectiveOf(task.id).then(v => { setObjectiveId(v); setObjectivePrev(v); });
   }, [open, task]);
+  // optional link to a product feature (stored by the product-features API, not on the task)
+  const features = useLinkableFeatures(open);
+  const [featureId, setFeatureId] = useState('');
+  const [featurePrev, setFeaturePrev] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    setFeatureId(''); setFeaturePrev('');
+    if (task) currentFeatureOf(task.id).then(v => { setFeatureId(v); setFeaturePrev(v); });
+  }, [open, task]);
 
   useEffect(() => {
     if (open) {
@@ -2751,6 +2777,8 @@ function CreateEditTaskDialog({
       deadline: form.deadline || '',
       cos_objective_id: objectiveId,
       cos_objective_prev: objectivePrev,
+      cos_feature_id: featureId,
+      cos_feature_prev: featurePrev,
       subtasks: subtasks.map(st => ({
         ...st,
         assigned_to_id: st.assigned_to_id ? Number(st.assigned_to_id) : 0,
@@ -2831,6 +2859,8 @@ function CreateEditTaskDialog({
               const tq = objectives.find(o => String(o.id) === v)?.task_quarter_id;
               if (tq) setForm(f => ({ ...f, quarter_id: String(tq) }));
             }}
+            className="w-full h-9 bg-background-secondary border border-border-subtle rounded-md px-2 text-[11px] text-text-primary outline-none normal-case" />
+          <FeatureSelect features={features} value={featureId} onChange={setFeatureId}
             className="w-full h-9 bg-background-secondary border border-border-subtle rounded-md px-2 text-[11px] text-text-primary outline-none normal-case" />
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">

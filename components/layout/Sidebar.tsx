@@ -25,6 +25,7 @@ import {
   Building2,
   CalendarClock,
   TrendingUp,
+  Lightbulb,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
@@ -51,6 +52,7 @@ export const getNavSections = (isAdmin: boolean, userProfile: any): NavSection[]
       { label: 'Deadlines', href: '/deadlines', icon: CalendarClock },
       { label: 'Projects', href: '/projects', icon: Briefcase },
       { label: 'Task Center', href: '/workcenter', icon: CheckSquare },
+      { label: 'Product Features', href: '/features', icon: Lightbulb },
       { label: 'Targets & Performance', href: '/targets', icon: Target },
     ]
   },
