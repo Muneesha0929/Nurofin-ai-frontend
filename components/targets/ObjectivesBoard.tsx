@@ -180,6 +180,24 @@ function ComingSoon({ q, fy, startLabel, start, director }: { q: number; fy: num
  * "My other tasks": the caller's existing Task Center tasks that are not linked to any objective,
  * with their sub-tasks. Nothing changes unless someone picks an objective to link one to.
  */
+function OtherSubtaskRow({ s, depth = 1, isDone, onOpen }: { s: any; depth?: number; isDone: (t: any) => boolean; onOpen: (t: any) => void }) {
+  const childSubs = s.subtasks || [];
+  return (
+    <React.Fragment key={s.id}>
+      <div className="flex items-center gap-3 pr-4 py-1.5 text-[12.5px] border-t border-border-subtle/60" style={{ paddingLeft: `${depth * 16 + 32}px` }}>
+        <button onClick={() => onOpen(s)} className="flex-1 min-w-0 text-left hover:text-accent-blue">
+          <span className={cn('truncate', isDone(s) && 'line-through text-text-secondary')}>{depth > 1 ? '↳ '.repeat(depth) : '↳ '}{s.title}</span>
+        </button>
+        <span className="text-[11.5px] text-text-secondary truncate max-w-[140px]">{s.assigned_to_name || ''}</span>
+        <span className="text-[11.5px] text-text-secondary w-14 text-right">{fmt(s.deadline?.slice(0, 10))}</span>
+      </div>
+      {childSubs.map((child: any) => (
+        <OtherSubtaskRow key={child.id} s={child} depth={depth + 1} isDone={isDone} onOpen={onOpen} />
+      ))}
+    </React.Fragment>
+  );
+}
+
 function OtherTasks({ me, search, objectives, onOpen, onLinked }: { me?: number; search: string; objectives: BoardDepartment[]; onOpen: (t: WCTask) => void; onLinked: () => void }) {
   const [tasks, setTasks] = useState<WCTask[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -260,11 +278,7 @@ function OtherTasks({ me, search, objectives, onOpen, onLinked }: { me?: number;
                 )}
               </div>
               {expanded && subs.map(s => (
-                <div key={s.id} className="flex items-center gap-3 pl-12 pr-4 py-1.5 text-[12.5px] border-t border-border-subtle/60">
-                  <span className={cn('flex-1 min-w-0 truncate', isDone(s) && 'line-through text-text-secondary')}>↳ {s.title}</span>
-                  <span className="text-[11.5px] text-text-secondary truncate max-w-[140px]">{s.assigned_to_name || ''}</span>
-                  <span className="text-[11.5px] text-text-secondary w-14 text-right">{fmt(s.deadline?.slice(0, 10))}</span>
-                </div>
+                <OtherSubtaskRow key={s.id} s={s} depth={1} isDone={isDone} onOpen={onOpen} />
               ))}
             </div>
           );

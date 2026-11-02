@@ -80,6 +80,8 @@ export interface Task {
   actual_completion_date?: string;
   assigneeId?: string;
   parentId?: string;
+  meetingId?: string;
+  createdAt?: string;
   has_subtasks?: boolean;
   assignedTo: {
     id?: string;

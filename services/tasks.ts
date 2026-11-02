@@ -41,6 +41,8 @@ export const tasksService = {
       pushed_to_next_day: t.pushed_to_next_day,
       actual_completion_date: t.actual_completion_date || undefined,
       parentId: t.parent_id?.toString() || undefined,
+      meetingId: t.meeting_id ? String(t.meeting_id) : undefined,
+      createdAt: t.created_at ? String(t.created_at) : undefined,
       has_subtasks: t.has_subtasks || false,
       source: t.source,
       is_issue: t.is_issue
@@ -60,7 +62,8 @@ export const tasksService = {
       scheduled_date: task.scheduledDate,
       scheduled_start_time: task.scheduledStartTime,
       scheduled_end_time: task.scheduledEndTime,
-      parent_id: (task as any).parentId ? parseInt((task as any).parentId, 10) : undefined
+      parent_id: (task as any).parentId ? parseInt((task as any).parentId, 10) : undefined,
+      meeting_id: (task as any).meetingId ? parseInt(String((task as any).meetingId), 10) : undefined
     };
     const res = await fetch('/api/v1/tasks', {
       method: 'POST',
@@ -106,7 +109,8 @@ export const tasksService = {
       extended_time: task.extended_time,
       pushed_to_next_day: task.pushed_to_next_day,
       actual_completion_date: task.actual_completion_date,
-      parent_id: (task as any).parentId ? parseInt((task as any).parentId, 10) : undefined
+      parent_id: (task as any).parentId ? parseInt((task as any).parentId, 10) : undefined,
+      meeting_id: (task as any).meetingId ? parseInt(String((task as any).meetingId), 10) : undefined
     };
     // Remove undefined values
     Object.keys(payload).forEach(key => (payload as any)[key] === undefined && delete (payload as any)[key]);

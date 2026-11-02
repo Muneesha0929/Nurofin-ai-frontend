@@ -1,7 +1,7 @@
 'use client';
 import { useSearchParams } from 'next/navigation';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { cn } from '@/utils/cn';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -114,6 +114,93 @@ export default function PlannerPage() {
   const [taskExtendedTime, setTaskExtendedTime] = useState('');
 
   const isOwnSchedule = selectedUserId === currentUserId;
+
+  const hierarchicalRelatedTasks = useMemo(() => {
+    // 1. Filter tasks by selected project if specified
+    const projectTasks = allTasks.filter((t: any) => {
+      if (newEventProjectId === 'none') return true;
+      if (String(t.projectId) === String(newEventProjectId)) return true;
+      // Inherit project from parent if not explicitly set
+      let curr = t;
+      while (curr && curr.parentId) {
+        const parent = allTasks.find((p: any) => String(p.id) === String(curr.parentId));
+        if (parent && String(parent.projectId) === String(newEventProjectId)) return true;
+        curr = parent;
+      }
+      return false;
+    });
+
+    const taskMap = new Map<string, any>();
+    projectTasks.forEach((t: any) => taskMap.set(String(t.id), t));
+
+    // Helper to get sort weight (recent first)
+    const getSortWeight = (t: any): number => {
+      if (t.createdAt) {
+        const ts = new Date(t.createdAt).getTime();
+        if (!isNaN(ts)) return ts;
+      }
+      const numId = parseInt(t.id, 10);
+      return isNaN(numId) ? 0 : numId;
+    };
+
+    // Group children by parentId
+    const childrenByParent = new Map<string, any[]>();
+    const rootTasks: any[] = [];
+
+    projectTasks.forEach((t: any) => {
+      const pid = t.parentId ? String(t.parentId) : null;
+      if (pid && taskMap.has(pid)) {
+        if (!childrenByParent.has(pid)) {
+          childrenByParent.set(pid, []);
+        }
+        childrenByParent.get(pid)!.push(t);
+      } else {
+        rootTasks.push(t);
+      }
+    });
+
+    // Sort root tasks: recent to oldest (descending)
+    rootTasks.sort((a, b) => getSortWeight(b) - getSortWeight(a));
+
+    // Sort children for each parent: recent to oldest
+    childrenByParent.forEach((children) => {
+      children.sort((a, b) => getSortWeight(b) - getSortWeight(a));
+    });
+
+    // Flatten tree: Main Task -> Subtask -> Sub-subtask -> ...
+    const result: Array<{ id: string; displayTitle: string; depth: number }> = [];
+
+    const traverse = (task: any, depth: number) => {
+      const tid = String(task.id);
+      let prefix = '';
+      if (depth === 0) {
+        prefix = '📌 ';
+      } else if (depth === 1) {
+        prefix = '    ↳ [Subtask] ';
+      } else if (depth === 2) {
+        prefix = '        ↳↳ [Sub-subtask] ';
+      } else {
+        prefix = '  '.repeat(depth * 2) + '↳ ';
+      }
+
+      const statusBadge = (task.status === 'completed' || task.status === 'done') ? ' (Completed)' : '';
+
+      result.push({
+        id: tid,
+        displayTitle: `${prefix}${task.title}${statusBadge}`,
+        depth
+      });
+
+      const children = childrenByParent.get(tid);
+      if (children && children.length > 0) {
+        children.forEach((child) => traverse(child, depth + 1));
+      }
+    };
+
+    rootTasks.forEach((root) => traverse(root, 0));
+
+    return result;
+  }, [allTasks, newEventProjectId]);
 
   const getWeekStart = (date: Date): string => {
     const d = new Date(date);
@@ -458,12 +545,31 @@ export default function PlannerPage() {
           task_id: newEventTaskId !== 'none' ? newEventTaskId : undefined
         });
         if (newEventTaskId !== 'none') {
+          const parentTask = allTasks.find(t => String(t.id) === newEventTaskId);
+          const resolvedProjectId = parentTask?.projectId || (newEventProjectId !== 'none' ? newEventProjectId : undefined);
+
+          await tasksService.createTask({
+            title: newEventTitle,
+            description: `[${newEventType.toUpperCase()}] Scheduled in Planner`,
+            status: 'in_progress',
+            priority: 'medium',
+            startDate: newEventStartDate,
+            dueDate: newEventEndDate,
+            scheduledDate: newEventStartDate,
+            scheduledStartTime: newEventStartTime,
+            scheduledEndTime: newEventEndTime,
+            assigneeId: selectedUserId.toString(),
+            projectId: resolvedProjectId,
+            parentId: newEventTaskId,
+            meetingId: newEvent?.id
+          } as any);
+
           await tasksService.updateTask(newEventTaskId, {
             scheduledDate: newEventStartDate,
             scheduledStartTime: newEventStartTime,
             scheduledEndTime: newEventEndTime,
           });
-          loadTasks();
+          await loadTasks();
         }
         setLocalEvents([...localEvents, { ...newEvent, source: 'nurofin' }]);
       }
@@ -819,7 +925,8 @@ export default function PlannerPage() {
           priority: t.priority,
           status: t.status,
           extended_time: t.extended_time,
-          pushed_to_next_day: t.pushed_to_next_day
+          pushed_to_next_day: t.pushed_to_next_day,
+          meetingId: t.meetingId
         };
       });
 
@@ -836,7 +943,10 @@ export default function PlannerPage() {
        }
     });
 
-    return [...finalLocal, ...uniqueGoogle, ...scheduledTasks].sort((a, b) => {
+    const meetingIdsInLocal = new Set(finalLocal.map(m => String(m.id)));
+    const filteredTasks = scheduledTasks.filter(t => !t.meetingId || !meetingIdsInLocal.has(String(t.meetingId)));
+
+    return [...finalLocal, ...uniqueGoogle, ...filteredTasks].sort((a, b) => {
       const timeA = a.start_time || (a.start ? a.start.split('T')[1] : '00:00');
       const timeB = b.start_time || (b.start ? b.start.split('T')[1] : '00:00');
       return String(timeA).localeCompare(String(timeB));
@@ -1271,14 +1381,12 @@ export default function PlannerPage() {
                   onChange={e => setNewEventTaskId(e.target.value)}
                   className="w-full h-10 bg-background-primary border border-border-subtle rounded-lg px-3 text-sm text-text-primary focus:border-accent-blue transition-all"
                 >
-                  <option value="none">None</option>
-                  {allTasks.filter((t: any) => newEventProjectId === 'none' || String(t.projectId) === String(newEventProjectId)).map((t: any) => {
-                    const parent = t.parentId ? allTasks.find((p: any) => p.id === t.parentId) : null;
-                    const displayTitle = parent ? `${parent.title} ➔ ${t.title}` : t.title;
-                    return (
-                      <option key={t.id} value={t.id}>{displayTitle}</option>
-                    );
-                  })}
+                  <option value="none">None (No related task)</option>
+                  {hierarchicalRelatedTasks.map((t) => (
+                    <option key={t.id} value={t.id} className={t.depth === 0 ? "font-bold text-text-primary" : t.depth === 1 ? "font-medium text-text-secondary" : "italic text-text-muted"}>
+                      {t.displayTitle}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="space-y-1.5 sm:col-span-6">
