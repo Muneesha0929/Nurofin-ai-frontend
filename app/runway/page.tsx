@@ -14,7 +14,7 @@ import { runwayService, Runway, RunwayError } from '@/services/runway';
 import { Btn, ToastHost } from '@/components/runway/ui';
 import { CapitalView, Expenses, Income, Open, Overview } from '@/components/runway/views';
 import { ImportSheet } from '@/components/runway/ImportSheet';
-import { BankSheet, CapitalSheet, CategoriesSheet, ExpenseSheet, FigureSheet, HowSheet, MonthTotalSheet, ProductSheet } from '@/components/runway/sheets';
+import { BankSheet, CapitalSheet, CategoriesSheet, ClientSheet, ExpenseSheet, FigureSheet, HowSheet, MonthTotalSheet, ProductSheet } from '@/components/runway/sheets';
 
 const TABS = [['overview', 'Overview'], ['expenses', 'Expenses'], ['income', 'Income'], ['capital', 'Capital']] as const;
 
@@ -73,7 +73,7 @@ function RunwayInner() {
 
   const props = { rw, apply: setRw, open: (o: Open) => { setMenu(false); setSheet(o); }, go };
   const close = () => setSheet(null);
-  const figureProducts = rw.data.products.filter(p => p.tracking === 'figures');
+  const figureProducts = rw.data.products.filter(p => p.tracking !== 'fixed');
 
   return (
     <Shell>
@@ -118,6 +118,7 @@ function RunwayInner() {
       {sheet?.kind === 'bank' && <BankSheet rw={rw} apply={setRw} onClose={close} />}
       {sheet?.kind === 'how' && <HowSheet rw={rw} apply={setRw} onClose={close} />}
       {sheet?.kind === 'import' && <ImportSheet rw={rw} apply={setRw} onClose={close} />}
+      {sheet?.kind === 'client' && (() => { const p = rw.data.products.find(x => x.id === sheet.productId); return p ? <ClientSheet rw={rw} product={p} client={sheet.clientId ? p.clients.find(c => c.id === sheet.clientId) || null : null} apply={setRw} onClose={close} /> : null; })()}
     </Shell>
   );
 }
