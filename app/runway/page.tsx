@@ -109,7 +109,7 @@ function RunwayInner() {
       {tab === 'income' && <Income {...props} />}
       {tab === 'capital' && <CapitalView {...props} />}
 
-      {sheet?.kind === 'expense' && <ExpenseSheet rw={rw} expense={sheet.expense} month={month} apply={setRw} onClose={close} />}
+      {sheet?.kind === 'expense' && <ExpenseSheet rw={rw} expense={sheet.expense} month={month} apply={setRw} onClose={close} onShowMonth={m => go('expenses', m)} />}
       {sheet?.kind === 'categories' && <CategoriesSheet rw={rw} apply={setRw} onClose={close} />}
       {sheet?.kind === 'product' && <ProductSheet rw={rw} product={sheet.product} apply={setRw} onClose={close} onCreated={() => tab !== 'income' && go('income')} />}
       {sheet?.kind === 'figure' && <FigureSheet rw={rw} productId={sheet.productId} figure={sheet.figureId ? rw.data.products.flatMap(p => p.figures).find(f => f.id === sheet.figureId) || null : null} apply={setRw} onClose={close} />}

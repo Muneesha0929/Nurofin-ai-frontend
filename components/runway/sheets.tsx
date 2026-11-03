@@ -14,7 +14,7 @@ const P = ({ children }: { children: React.ReactNode }) => <p className="m-0 tex
 
 // ----------------------------------------------------------------- expense
 
-export function ExpenseSheet({ rw, expense, month, apply, onClose }: { rw: Runway; expense: Expense | null; month: string; apply: Apply; onClose: () => void }) {
+export function ExpenseSheet({ rw, expense, month, apply, onClose, onShowMonth }: { rw: Runway; expense: Expense | null; month: string; apply: Apply; onClose: () => void; onShowMonth?: (m: string) => void }) {
   const toast = useToast();
   const { data, summary } = rw;
   const cur = summary.current_month, start = data.settings.start_month;
@@ -26,7 +26,8 @@ export function ExpenseSheet({ rw, expense, month, apply, onClose }: { rw: Runwa
   const [newCat, setNewCat] = useState('');
   const [how, setHow] = useState<How>(expense?.how || 'monthly');
   const [amount, setAmount] = useState(moneyText(expense && expense.how !== 'once' ? expense.amount : null));
-  const [from, setFrom] = useState(expense?.start || (month >= cur ? month : cur));
+  // a new line starts in the month being looked at, so it shows up right there after saving
+  const [from, setFrom] = useState(expense?.start || (month >= start ? month : start));
   const [to, setTo] = useState(expense?.end || '');
   const [raise, setRaise] = useState(String(expense?.raise ?? 0));
   const [oAmt, setOAmt] = useState(moneyText(expense?.how === 'once' ? expense.months[onceMonth] : null));
@@ -45,7 +46,11 @@ export function ExpenseSheet({ rw, expense, month, apply, onClose }: { rw: Runwa
       Object.assign(body, { amount: a, start_month: from, end_month: to || null, raise_pct: how === 'monthly' ? +raise : 0 });
     }
     apply(isNew ? await api.addExpense(body) : await api.updateExpense(expense!.id, body));
-    toast(isNew ? `Added ${body.name}` : `Saved ${body.name}`);
+    // never let a saved line vanish: if it does not cover the month on screen, go to where it starts
+    const first = how === 'once' ? oMonth : from;
+    const covers = how === 'once' ? oMonth === month : from <= month && (!to || to >= month);
+    if (!covers && onShowMonth) onShowMonth(first);
+    toast(`${isNew ? 'Added' : 'Saved'} ${body.name}${how === 'once' ? `, ${mLong(oMonth)}` : `, every month from ${mLong(from)}`}`);
   };
   const del = async () => {
     apply(await api.deleteExpense(expense!.id));
@@ -76,7 +81,7 @@ export function ExpenseSheet({ rw, expense, month, apply, onClose }: { rw: Runwa
       ) : (
         <>
           <Field label={how === 'varies' ? 'Usual amount per month' : 'Amount per month'} htmlFor="eAmt"
-            help={how === 'varies' ? 'Used until there are three months of real figures; after that it follows them.' : undefined}>
+            help={how === 'varies' ? 'Used until there are three months of real figures; after that it follows them.' : 'Counted in every month from the start month, past months included. Change any single month on the Expenses list.'}>
             <MoneyInput id="eAmt" value={amount} onChange={setAmount} />
           </Field>
           <div className="grid sm:grid-cols-2 gap-3">
@@ -92,7 +97,7 @@ export function ExpenseSheet({ rw, expense, month, apply, onClose }: { rw: Runwa
           )}
         </>
       )}
-      {!isNew && <p className="m-0 text-[13.5px] text-[#8A94A3]">A new amount applies from {mName(cur)} onwards. Months already entered keep their figures.</p>}
+      {!isNew && <p className="m-0 text-[13.5px] text-[#8A94A3]">A new amount applies from {mName(cur)} onwards. Past months keep what was really paid.</p>}
     </Sheet>
   );
 }

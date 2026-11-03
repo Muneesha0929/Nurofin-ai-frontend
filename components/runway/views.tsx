@@ -311,13 +311,14 @@ export function Expenses({ rw, apply, open, month, setMonth }: ViewProps & { mon
   const cur = summary.current_month, start = data.settings.start_month, isPast = month < cur;
   const months = range(start, addM(cur, 12));
   const active = (e: Expense, m: string) => e.how === 'once' ? m in e.months : m >= e.start && (!e.end || m <= e.end);
-  const valueOf = (e: Expense, m: string) => m in e.months ? e.months[m] : m < cur ? 0 : (summary.planned[e.id]?.[m] ?? 0);
+  // same rule as the forecast: a same-every-month line counts its amount in past months too
+  const valueOf = (e: Expense, m: string) => m in e.months ? e.months[m] : m < cur ? (e.how === 'monthly' && active(e, m) ? e.amount : 0) : (summary.planned[e.id]?.[m] ?? 0);
   const items = data.expenses.filter(e => active(e, month) || month in e.months);
   const total = items.reduce((a, e) => a + valueOf(e, month), 0);
   const prev = addM(month, -1);
   const prevTotal = month > start ? data.expenses.reduce((a, e) => a + valueOf(e, prev), 0) : null;
   const change = prevTotal ? (total - prevTotal) / prevTotal * 100 : null;
-  const missing = isPast ? items.filter(e => e.how !== 'once' && !(month in e.months)) : [];
+  const missing = isPast ? items.filter(e => e.how === 'varies' && !(month in e.months)) : [];
   const [editing, setEditing] = useState<number | null>(null);
 
   const saveOne = async (e: Expense, raw: string) => {
@@ -381,7 +382,7 @@ export function Expenses({ rw, apply, open, month, setMonth }: ViewProps & { mon
                     ? <AmountInput initial={has ? String(e.months[month]) : isPast ? '' : String(Math.round(valueOf(e, month)))} label={`${e.name}, ${mLong(month)}`} onDone={v => v === null ? setEditing(null) : saveOne(e, v)} />
                     : <button type="button" onClick={() => setEditing(e.id)} aria-label={`Change ${e.name} for ${mLong(month)}`}
                         className="font-medium px-2.5 py-1.5 rounded-lg text-right sm:min-w-[120px] min-h-[40px] border border-transparent hover:border-[#D0D5DD] hover:bg-white tabular-nums">
-                        {isPast && !has ? <span className="text-[#D98A00]">Not entered</span> : rs(valueOf(e, month))}
+                        {isPast && !has && e.how === 'varies' ? <span className="text-[#D98A00]">Not entered</span> : rs(valueOf(e, month))}
                       </button>}
                   <IconBtn label={`Edit ${e.name}`} className="hidden sm:grid" onClick={() => open({ kind: 'expense', expense: e })}><Pencil className="w-[17px] h-[17px]" /></IconBtn>
                 </div>
