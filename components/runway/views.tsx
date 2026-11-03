@@ -147,6 +147,7 @@ function OverviewReady({ rw, open, go }: ViewProps) {
       <h1 className="mt-3.5 text-[clamp(28px,4.2vw,40px)] leading-[1.15] font-semibold tracking-[-.025em] max-w-[22ch] text-[#0E1726]">{st.headline}</h1>
       <p className="mt-3.5 text-[16.5px] text-[#526070] max-w-[62ch]">{st.sub}</p>
       <p className="mt-2.5 text-[13.5px] text-[#8A94A3]">{st.basis}</p>
+      <Sureness rw={rw} go={go} />
 
       {E.be === cur ? (
         <div className="mt-9 flex flex-wrap gap-2.5">
@@ -659,5 +660,52 @@ export function CapitalView({ rw, open }: ViewProps) {
       </Card>
       <p className="text-[13.5px] text-[#8A94A3] text-center mt-5">An entry with a future date counts as a planned top-up and is included in the forecast.</p>
     </>
+  );
+}
+
+
+/* ------------------------------------------------------------ how sure is this */
+
+const SURE_TONE = { high: ['#0B7A50', '#E8F7F0', 'High'], medium: ['#9A6200', '#FFF6E5', 'Medium'], low: ['#B42318', '#FDEEEE', 'Low'] } as const;
+
+function Sureness({ rw, go }: { rw: Runway; go: ViewProps['go'] }) {
+  const c = rw.summary.confidence;
+  const [open, setOpen] = React.useState(c.label !== 'high');
+  if (!c) return null;
+  const [fg, bg, word] = SURE_TONE[c.label];
+  const r = c.be_range;
+  const when = (m: string | null) => (m ? mLong(m) : 'not within three years');
+  const range = r.early === r.late
+    ? (r.expected ? `Break-even: ${mLong(r.expected)}.` : 'No break-even within three years, even if income comes in at the high end.')
+    : `Break-even: ${r.early ? `as early as ${mLong(r.early)} if income comes in at the high end` : 'not within three years'}` +
+      `${r.expected ? `, ${mLong(r.expected)} at today's pace` : ', not within three years at today\'s pace'}` +
+      `${r.late !== r.expected ? `, ${when(r.late)} if it is slower` : ''}.`;
+  return (
+    <Card className="mt-6 p-4 sm:p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[13.5px] font-semibold" style={{ color: fg, background: bg }}>
+          How sure: {word} · {c.score}/100
+        </span>
+        <span className="text-[14.5px] text-[#344054]">{range}</span>
+      </div>
+      {c.gaps.length > 0 && (
+        <div className="mt-3">
+          <button type="button" onClick={() => setOpen(o => !o)} className="text-[13.5px] font-medium text-[#2F54EB] hover:underline">
+            {open ? 'Hide' : 'Show'} what would make this more accurate ({c.gaps.length})
+          </button>
+          {open && (
+            <ul className="mt-2.5 flex flex-col gap-2.5">
+              {c.gaps.map(g => (
+                <li key={g.key} className="flex gap-2.5 text-[14px]">
+                  <span className="mt-[7px] w-1.5 h-1.5 rounded-full shrink-0" style={{ background: fg }} />
+                  <span><span className="text-[#0E1726]">{g.text}</span> <span className="text-[#526070]">{g.fix}</span></span>
+                </li>
+              ))}
+              <li><button type="button" onClick={() => go('sheet')} className="text-[13.5px] font-medium text-[#2F54EB] hover:underline">Open the sheet to fill these in</button></li>
+            </ul>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }

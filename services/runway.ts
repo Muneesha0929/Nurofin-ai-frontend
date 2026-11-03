@@ -3,7 +3,7 @@
 // Every change returns the whole picture again, so the page never has to recompute anything.
 
 export type How = 'monthly' | 'varies' | 'once';
-export type Tracking = 'figures' | 'fixed' | 'billed';
+export type Tracking = 'figures' | 'fixed' | 'billed' | 'once';
 export type RunwayState = 'self_funding' | 'good' | 'watch' | 'risk';
 
 export interface RunwaySettings { start_month: string; buffer_pct: number; green_months: number; amber_months: number }
@@ -50,6 +50,28 @@ export interface ProductSummary {
   paid_this_month: number;       // money arriving this month (an earlier month's bill when paid later)
   billed_this_month: number;
   committed?: number; committed_next?: number; clients_live?: number;
+  history_months?: number; trend?: boolean;
+  /** Per month (billing month): the line's value and where it comes from. */
+  grid: Record<string, { v: number; cost: number; how: CellHow }>;
+}
+/** typed = entered by hand; rule = follows the line's "every month" amount or repeats the last figure;
+ *  forecast = worked out from past months; minimum = clients' minimums; estimated / so_far = from figures. */
+export type CellHow = 'typed' | 'rule' | 'forecast' | 'minimum' | 'estimated' | 'so_far';
+export interface Confidence {
+  score: number; label: 'low' | 'medium' | 'high';
+  parts: Record<'history' | 'steady' | 'committed' | 'expenses' | 'fresh', number>;
+  weights: Record<'history' | 'steady' | 'committed' | 'expenses' | 'fresh', number>;
+  be_range: { early: string | null; expected: string | null; late: string | null };
+  out_range: { early: string | null; expected: string | null; late: string | null };
+  gaps: { key: string; text: string; fix: string }[];
+}
+export interface SheetGrid {
+  expenses: Record<string, Record<string, { v: number; how: 'typed' | 'rule' }>>;
+  capital: Record<string, number>;
+  buffer: Record<string, number>;
+  income_total: Record<string, number>;
+  cost_total: Record<string, number>;
+  cash: Record<string, number>;
 }
 export type Todo =
   | { kind: 'expenses_missing'; month: string; names: string[] }
@@ -64,6 +86,9 @@ export interface RunwaySummary {
   now: { inc: number; cost: number; gap: number };
   expected: Outlook & { low: string; low_cash: number };
   slower: Outlook;
+  faster: Outlook;
+  confidence: Confidence;
+  grid: SheetGrid;
   need: number;
   share_now: number | null;
   first_income_month: string | null;
@@ -170,5 +195,9 @@ export const runwayService = {
   },
   previewImport: (csv: string) => call<ImportPreview>('/import/preview', json('POST', { csv })),
   applyImport: (csv: string, replace: boolean) => call<Runway & { imported: { added: number; changed: number; kept: number; categories: number; expenses: number; products: number } }>('/import/apply', json('POST', { csv, replace })),
+  /** The spreadsheet: many cells at once (typed, a filled range, a pasted block, an undo). null clears. */
+  saveCells: (changes: { row: string; month: string; amount: number | null }[]) => call<Runway>('/cells', json('POST', { changes })),
+  expenseFrom: (id: number, month: string, amount: number) => call<Runway>(`/expenses/${id}/from`, json('POST', { month, amount })),
+  editRow: (kind: 'expense' | 'product', id: number, body: { name?: string; category_id?: number }) => call<Runway>(`/rows/${kind}/${id}`, json('PATCH', body)),
   restore: (kind: 'expense' | 'product' | 'figure' | 'capital' | 'category' | 'client', id: number) => call<Runway>(`/restore/${kind}/${id}`, json('POST')),
 };
