@@ -28,6 +28,7 @@ import {
   Lightbulb,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
+import { useMeetingBadge } from '@/components/meetings/MeetingWidgets';
 import { cn } from '@/utils/cn';
 
 interface NavItem {
@@ -86,6 +87,7 @@ export default function Sidebar() {
   const logoSrc = theme === 'light' ? '/logo-black.svg' : '/logo-white.svg';
 
   const unreadNotificationsCount = notifications.filter(n => !n.read).length;
+  const meetingBadge = useMeetingBadge();
   const isAdmin = userProfile && ['super_admin', 'ceo'].includes(userProfile.role);
 
   const handleLogout = () => {
@@ -197,6 +199,18 @@ export default function Sidebar() {
                       style={isActive ? { color: 'var(--theme-color)' } : {}}
                     >
                       {unreadNotificationsCount}
+                    </span>
+                  )}
+
+                  {/* Meetings left today; pulses when one starts within 15 minutes */}
+                  {item.label === 'Meetings' && meetingBadge.count > 0 && (
+                    <span title={`${meetingBadge.count} meeting${meetingBadge.count === 1 ? '' : 's'} left today`}
+                      className={cn(
+                        "flex-shrink-0 rounded-full text-2xs px-1.5 py-0.5 font-bold leading-none",
+                        sidebarCollapsed ? "absolute -top-1 -right-1 bg-accent-blue text-white" : isActive ? "bg-white text-[#3B82F6]" : "bg-accent-blue/15 text-accent-blue",
+                        meetingBadge.soon && "animate-pulse"
+                      )}>
+                      {meetingBadge.count}
                     </span>
                   )}
 

@@ -10,6 +10,7 @@ import { workcenterService } from '@/services/workcenter';
 import { departmentTargetsService } from '@/services/departmentTargets';
 import { usersService } from '@/services/users';
 import { refreshTaskFeatures } from './TaskFeatureLink';
+import { Attachments, CostProfit, ProductTags, Replies, short } from './FeatureExtras';
 import {
   FeatureDetail, FeatureEvent, FeatureInput, FeatureSolution, FeatureSource, FeatureStatus, NEEDS_REASON, SOURCE_LABEL,
   STATUS_LABEL, STATUS_ORDER, productFeaturesService,
@@ -128,17 +129,21 @@ function eventLine(e: FeatureEvent): React.ReactNode {
   const who = <b className="font-semibold text-text-primary">{e.user?.name || 'Someone'}</b>;
   switch (e.kind) {
     case 'created': return <>{who} raised this</>;
-    case 'edited': return <>{who} changed {Object.keys(e.data?.changes || {}).map(k => FIELD_LABEL[k] || k).join(', ')}</>;
+    case 'edited': return e.data?.field === 'products' ? <>{who} tagged it {e.data?.new ? <b className="font-semibold">{e.data.new}</b> : 'with no product'}</>
+      : <>{who} changed {Object.keys(e.data?.changes || {}).map(k => FIELD_LABEL[k] || k).join(', ')}</>;
     case 'status': return e.data?.from === e.data?.to
       ? <>{who} added a note to the decision</>
       : <>{who} moved it from <b className="font-semibold">{STATUS_LABEL[e.data?.from as FeatureStatus] || e.data?.from}</b> to <b className="font-semibold">{STATUS_LABEL[e.data?.to as FeatureStatus] || e.data?.to}</b></>;
-    case 'comment': return <>{who} commented</>;
+    case 'comment': return e.data?.solution_id ? <>{who} replied to an idea</> : <>{who} commented</>;
+    case 'attachment': return <>{who} attached <b className="font-semibold">{e.text}</b></>;
+    case 'attachment_removed': return <>{who} removed <b className="font-semibold">{e.text}</b></>;
+    case 'costs': return <>{who} {e.data?.before ? 'changed' : 'added'} the cost estimate{e.data?.after ? <>: {short(e.data.after.one_time_cost + 12 * e.data.after.monthly_cost)} first-year cost, {short(e.data.after.net_first_year)} after a year</> : ''}</>;
     case 'me_too': return <>{who} noticed this too</>;
     case 'task_linked': return <>{who} linked the task “{e.data?.title}”</>;
     case 'task_unlinked': return <>{who} unlinked the task “{e.data?.title}”</>;
     case 'solution_added': return <>{who} suggested a solution</>;
     case 'solution_edited': return <>{who} reworded their solution</>;
-    case 'solution_chosen': return <>{who} chose {e.data?.by ? <b className="font-semibold text-text-primary">{e.data.by}</b> : 'a'}{e.data?.by ? '’s' : ''} solution{e.data?.replaced ? ' instead' : ''}</>;
+    case 'solution_chosen': return <>{who}{e.data?.as === 'HOD' ? ' (HOD)' : ''} chose {e.data?.by ? <b className="font-semibold text-text-primary">{e.data.by}</b> : 'a'}{e.data?.by ? '’s' : ''} solution{e.data?.replaced ? ' instead' : ''}</>;
     default: return <>{who} {e.kind}</>;
   }
 }
@@ -158,7 +163,7 @@ function History({ events }: { events: FeatureEvent[] }) {
             {e.kind === 'solution_chosen' && e.data?.solution && (
               <div className="mt-1.5 text-[13px] rounded-lg px-3 py-2 bg-accent-green/5 border-l-2 border-accent-green break-words">{e.data.solution}</div>
             )}
-            {e.text && (
+            {e.text && e.kind !== 'attachment' && e.kind !== 'attachment_removed' && (
               <div className={cn('mt-1.5 text-[13px] whitespace-pre-wrap break-words rounded-lg px-3 py-2',
                 e.kind === 'status' ? 'bg-accent-blue/5 border-l-2 border-accent-blue text-text-primary' : 'bg-[var(--bg-primary)] text-text-primary')}>
                 {(e.kind === 'status' || e.kind === 'solution_chosen') && <span className="font-semibold">Why: </span>}{e.text}
@@ -263,7 +268,7 @@ function Tasks({ f, onChanged }: { f: FeatureDetail; onChanged: (f: FeatureDetai
           )}
         </div>
       ))}
-      {allDone && f.status !== 'shipped' && <div className="text-[12.5px] text-accent-green">All tasks are done. {f.permissions.can_decide ? 'Mark it Shipped above when it is live.' : 'Sir can mark it Shipped.'}</div>}
+      {allDone && f.status !== 'shipped' && <div className="text-[12.5px] text-accent-green">All tasks are done. {f.permissions.can_set_status ? 'Mark it Shipped above when it is live.' : 'Sir can mark it Shipped.'}</div>}
 
       {f.permissions.can_link && mode === 'none' && (
         <div className="flex flex-wrap gap-2 mt-1">
@@ -370,6 +375,7 @@ function SolutionCard({ f, s, onChanged }: { f: FeatureDetail; s: FeatureSolutio
           </div>
         </div>
       )}
+      <Replies f={f} s={s} onChanged={onChanged} />
       {error && <div className="text-[12.5px] text-accent-red">{error}</div>}
     </div>
   );
@@ -457,6 +463,7 @@ export function FeaturePanel({ id, areas, onClose, onChanged }: { id: number; ar
               {f.source !== 'team' && <span>· from {SOURCE_LABEL[f.source].toLowerCase()}</span>}
               {f.source_note && <span>· {f.source_note}</span>}
             </div>
+            <ProductTags key={f.products.map(p => p.id).join(',')} f={f} onChanged={update} />
 
             {editing ? (
               <div className="flex flex-col gap-3">
@@ -472,6 +479,10 @@ export function FeaturePanel({ id, areas, onClose, onChanged }: { id: number; ar
                 <section>
                   <Label>What we noticed</Label>
                   <div className="text-[14px] leading-relaxed whitespace-pre-wrap break-words">{f.problem}</div>
+                </section>
+                <section>
+                  <Label>Screenshots and files {f.attachments.length > 0 && <span className="normal-case tracking-normal font-semibold">· {f.attachments.length}</span>}</Label>
+                  <Attachments f={f} onChanged={update} />
                 </section>
               </>
             )}
@@ -490,8 +501,13 @@ export function FeaturePanel({ id, areas, onClose, onChanged }: { id: number; ar
             </section>
 
             <section>
-              <Label>Solutions {f.solutions_list.length > 1 && <span className="normal-case tracking-normal font-semibold">· {f.solutions_list.length} ideas, {f.chosen_solution ? 'one chosen' : 'Sir picks one'}</span>}</Label>
+              <Label>Ideas {f.solutions_list.length > 1 && <span className="normal-case tracking-normal font-semibold">· {f.solutions_list.length} ideas, {f.chosen_solution ? 'one chosen' : 'Sir or the HOD picks one'}</span>}</Label>
               <Solutions f={f} onChanged={update} />
+            </section>
+
+            <section>
+              <Label>Cost and profit</Label>
+              <CostProfit f={f} onChanged={update} />
             </section>
 
             <section>
@@ -504,7 +520,7 @@ export function FeaturePanel({ id, areas, onClose, onChanged }: { id: number; ar
                     {f.decision_note && <div className="text-[13.5px] mt-1.5 whitespace-pre-wrap break-words"><b className="font-semibold">Why: </b>{f.decision_note}</div>}
                   </div>
                 )}
-              {f.permissions.can_decide && <Decide key={f.status + f.decided_at} f={f} onSaved={update} />}
+              {f.permissions.can_set_status && <Decide key={f.status + f.decided_at} f={f} onSaved={update} />}
             </section>
 
             <section>

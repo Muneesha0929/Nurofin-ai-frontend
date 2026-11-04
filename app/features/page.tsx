@@ -5,6 +5,7 @@ import { CheckSquare, Lightbulb, MessageSquare, Plus, Search, Star, ThumbsUp } f
 import { cn } from '@/utils/cn';
 import { Avatar, Panel } from '@/components/targets/ui';
 import { FeaturePanel, StatusChip, SuggestDialog, fmtDate } from '@/components/features/FeaturePanel';
+import { MoneySummary } from '@/components/features/FeatureExtras';
 import { FeatureList, FeatureStatus, STATUS_LABEL, STATUS_ORDER, productFeaturesService } from '@/services/productFeatures';
 
 /** Product Features: every idea the team raises, Sir's decision, and why. Nothing is deleted. */
@@ -15,12 +16,13 @@ export default function FeaturesPage() {
   const [status, setStatus] = useState<FeatureStatus | ''>('');
   const [area, setArea] = useState('');
   const [mine, setMine] = useState(false);
+  const [product, setProduct] = useState<number | ''>('');
   const [open, setOpen] = useState<number | null>(null);
   const [suggesting, setSuggesting] = useState(false);
 
   const load = useCallback(() => {
-    productFeaturesService.list({ q, status, area, mine }).then(d => { setData(d); setError(''); }).catch(e => setError(e.message));
-  }, [q, status, area, mine]);
+    productFeaturesService.list({ q, status, area, mine, product: product || undefined }).then(d => { setData(d); setError(''); }).catch(e => setError(e.message));
+  }, [q, status, area, mine, product]);
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [load, q]);
 
   // Notifications link here as /features?id=12.
@@ -39,7 +41,7 @@ export default function FeaturesPage() {
   const all = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
   const chip = (active: boolean) => cn('px-3 py-1.5 text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap',
     active ? 'bg-accent-blue/10 text-accent-blue' : 'text-text-secondary hover:text-text-primary');
-  const filtered = !!(q || status || area || mine);
+  const filtered = !!(q || status || area || mine || product);
 
   return (
     <div className="p-4 sm:p-6 flex flex-col gap-5 bg-background-primary min-h-screen text-text-primary normal-case">
@@ -72,6 +74,13 @@ export default function FeaturesPage() {
             className="rounded-lg border border-border-subtle bg-background-secondary px-3 py-1.5 text-[12.5px] font-semibold text-text-secondary outline-none">
             <option value="">All areas</option>
             {data.areas.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        )}
+        {!!data?.products?.length && (
+          <select value={product} onChange={e => setProduct(e.target.value ? +e.target.value : '')} aria-label="Product"
+            className="rounded-lg border border-border-subtle bg-background-secondary px-3 py-1.5 text-[12.5px] font-semibold text-text-secondary outline-none">
+            <option value="">All products</option>
+            {data.products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         )}
         <button onClick={() => setMine(m => !m)} aria-pressed={mine}
@@ -119,6 +128,7 @@ export default function FeaturesPage() {
                   <div className="text-[12.5px] mt-1.5 line-clamp-1 break-words"><b className="font-semibold">Why: </b><span className="text-text-secondary">{f.decision_note}</span></div>
                 )}
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[12px] text-text-secondary">
+                  {f.products?.map(p => <span key={p.id} className="rounded-md bg-accent-blue/10 text-accent-blue px-2 py-0.5 font-semibold">{p.name}</span>)}
                   {f.area && <span className="rounded-md bg-[var(--bg-primary)] px-2 py-0.5 font-semibold">{f.area}</span>}
                   <span className="inline-flex items-center gap-1.5"><Avatar p={f.created_by} size={18} />{f.created_by?.name} · {fmtDate(f.created_at)}</span>
                   {f.me_too > 0 && <span className="inline-flex items-center gap-1" title="People who noticed this too"><ThumbsUp size={12} />{f.me_too}</span>}
@@ -126,6 +136,7 @@ export default function FeaturesPage() {
                   {f.solutions > 0 && !f.chosen_solution && <span className="inline-flex items-center gap-1" title="Solutions suggested"><Lightbulb size={12} />{f.solutions} {f.solutions === 1 ? 'solution' : 'solutions'}</span>}
                   {f.chosen_solution && <span className="inline-flex items-center gap-1 font-semibold text-accent-green" title={f.chosen_solution.text}><Star size={12} className="fill-current" />Going with {f.chosen_solution.by?.name || 'a'}&rsquo;s solution</span>}
                   {f.tasks_total > 0 && <span className="inline-flex items-center gap-1" title="Task Center tasks done"><CheckSquare size={12} />{f.tasks_done}/{f.tasks_total} tasks</span>}
+                  {f.money && <MoneySummary t={f.money} compact />}
                 </div>
               </div>
               <StatusChip s={f.status} />

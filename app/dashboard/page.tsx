@@ -12,6 +12,8 @@ import { DeptCard, Panel, QuarterPills } from '@/components/targets/ui';
 import { CompanyTargets } from '@/components/targets/CompanyTargets';
 import { MonthlyTargets } from '@/components/targets/MonthlyTargets';
 import { RunwayCard } from '@/components/runway/RunwayCard';
+import { NextMeeting, UpcomingMeetings } from '@/components/meetings/MeetingWidgets';
+import { leftToday, useMyMeetings } from '@/components/meetings/useMyMeetings';
 import { ObjectivePanel, TaskPanel } from '@/components/SidePanel';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { workcenterService, WCTask } from '@/services/workcenter';
@@ -63,6 +65,8 @@ export default function DashboardPage() {
   const comingUp = entries.filter(e => !e.done && e.date >= now && e.date <= soon).sort((a, b) => a.date.localeCompare(b.date));
   const late = entries.filter(e => e.overdue).sort((a, b) => a.date.localeCompare(b.date));
   const myOpenTasks = tasks.filter(t => t.status !== 'completed' && (isDirector || String(t.assigned_to_id) === me));
+  const { meetings: calendar } = useMyMeetings();
+  const meetingsLeftToday = leftToday(calendar).length;
   const todaysMeetings = meetings.filter(m => m.date === now && (isDirector || m.attendees?.includes(userProfile?.name) || m.owner_name === userProfile?.name));
   const activeProjects = projects.filter(p => ['active', 'in progress'].includes((p.status || '').toLowerCase()) && (isDirector || p.members?.some(m => m.name === userProfile?.name)));
   const openIssues = (issues || []).filter(i => i.status !== 'closed' && (isDirector || i.assigneeName === userProfile?.name || i.reporterName === userProfile?.name));
@@ -81,7 +85,7 @@ export default function DashboardPage() {
     { label: isDirector ? 'Open tasks' : 'My open tasks', value: myOpenTasks.length, href: '/workcenter?status=pending', tone: 'blue' },
     { label: 'Overdue', value: late.length, href: '/deadlines', tone: 'red' },
     { label: 'Due in 14 days', value: comingUp.length, href: '/deadlines', tone: 'blue' },
-    { label: 'Meetings today', value: todaysMeetings.length, href: '/meetings', tone: 'blue' },
+    { label: 'Meetings left today', value: Math.max(meetingsLeftToday, 0), href: '/meetings', tone: 'blue' },
     { label: 'Active projects', value: activeProjects.length, href: '/projects', tone: 'blue' },
     { label: 'Pending issues', value: openIssues.length, href: '/issues', tone: 'orange' },
   ];
@@ -94,6 +98,7 @@ export default function DashboardPage() {
         {overview && <QuarterPills quarter={overview.quarter} />}
         <Greeting name={userProfile?.name} />
       </div>
+      <NextMeeting />
 
       {overview && <NewTargetBanners data={overview} />}
       {overview && (
@@ -136,7 +141,7 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
         <ListCard title="Coming up" right={<Link href="/deadlines" className="text-[12.5px] font-semibold text-accent-blue">Open calendar →</Link>}
-          empty="Nothing due in the next 14 days." items={comingUp.slice(0, 7)} onOpen={open} />
+          empty={calendar.length ? '' : 'Nothing due in the next 14 days.'} items={comingUp.slice(0, 7)} onOpen={open} top={<UpcomingMeetings />} />
         <ListCard title="Needs attention" right={<span className="text-[12.5px] text-text-secondary">{late.length} overdue</span>}
           empty="Nothing overdue." items={late.slice(0, 7)} onOpen={open} />
       </div>
@@ -171,11 +176,11 @@ const SectionHead = ({ title, right }: { title: string; right?: React.ReactNode 
   </div>
 );
 
-function ListCard({ title, right, items, empty, onOpen }: { title: string; right: React.ReactNode; items: Entry[]; empty: string; onOpen: (e: Entry) => void }) {
+function ListCard({ title, right, items, empty, onOpen, top }: { title: string; right: React.ReactNode; items: Entry[]; empty: string; onOpen: (e: Entry) => void; top?: React.ReactNode }) {
   return (
     <Panel className="overflow-hidden">
       <div className="flex items-baseline justify-between px-4 pt-4 pb-2"><h2 className="text-[18px] font-extrabold">{title}</h2>{right}</div>
-      <div className="px-4 pb-2">{items.length ? items.map(e => <EntryRow key={e.key} e={e} onOpen={onOpen} />) : <div className="py-3 text-[13px] text-text-secondary">{empty}</div>}</div>
+      <div className="px-4 pb-2">{top}{items.length ? items.map(e => <EntryRow key={e.key} e={e} onOpen={onOpen} />) : empty ? <div className="py-3 text-[13px] text-text-secondary">{empty}</div> : null}</div>
     </Panel>
   );
 }

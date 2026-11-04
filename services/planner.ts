@@ -75,6 +75,11 @@ export const plannerService = {
     const res = await fetch(`/api/v1/planner/schedule/${userId}${qs}`, { headers: getHeaders() });
     if (!res.ok) throw new Error('Failed to fetch schedule');
     const json = await res.json();
+    // Outlook events render exactly like Google ones (same timed-event handling everywhere on the page)
+    if (json.data?.schedule) {
+      json.data.schedule = json.data.schedule.map((e: any) => e.source === 'outlook_calendar' ? { ...e, source: 'google_calendar', calendar: 'outlook' }
+        : e.source === 'outlook_error' ? { ...e, source: 'google_error' } : e);
+    }
     return json.data;
   },
 

@@ -20,6 +20,7 @@ export interface Product {
   start: string; end: string | null;
   pay_delay: number;          // months between a month's bill and the money arriving
   clients: Client[];          // billed products: each client's minimum monthly bill
+  received?: Record<string, number>;   // what actually came in, by month (typed in the Sheet)
   figures: Figure[];
   months: Record<string, { revenue: number; cost: number }>;
 }
@@ -53,6 +54,9 @@ export interface ProductSummary {
   history_months?: number; trend?: boolean;
   /** Per month (billing month): the line's value and where it comes from. */
   grid: Record<string, { v: number; cost: number; how: CellHow }>;
+  /** money reaching the bank: expected (the bill pay_delay back), what was typed as received, and what is still owed after */
+  cash?: Record<string, { expected: number; received: number | null; cash: number; owed_after: number }>;
+  owed_now?: number;
 }
 /** typed = entered by hand; rule = follows the line's "every month" amount or repeats the last figure;
  *  forecast = worked out from past months; minimum = clients' minimums; estimated / so_far = from figures. */

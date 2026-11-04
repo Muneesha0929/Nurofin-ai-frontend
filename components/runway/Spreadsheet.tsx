@@ -72,7 +72,7 @@ type Cell = { v: number; how?: CellHow | 'total' };
 type RowKind = 'section' | 'cat' | 'line' | 'total' | 'add' | 'calc';
 interface Row {
   key: string; kind: RowKind; label: string; sub?: string;
-  ref?: string;                       // e:<id> | p:<id> | cap  (editable rows only)
+  ref?: string;                       // e:<id> | p:<id> | r:<id> (received) | cap  (editable rows only)
   values: Record<string, Cell>;
   expense?: Expense; product?: Product; catId?: number; addKind?: 'income' | 'expense' | 'category';
   strong?: boolean; tone?: 'cash';
@@ -95,8 +95,20 @@ function buildRows(rw: Runway, months: string[]): Row[] {
       values: Object.fromEntries(Object.entries(ps?.grid || {}).map(([m, c]) => [m, { v: c.v, how: c.how }])) };
   });
   rows.push(...inc);
+  // under each income line: what actually came in, and what is still owed (or was paid ahead)
+  for (const r of inc) {
+    const ps = s.products.find(x => x.id === r.product!.id);
+    if (!ps?.cash) continue;
+    rows.splice(rows.indexOf(r) + 1, 0,
+      { key: `r${r.product!.id}`, kind: 'line', label: 'Received', sub: 'what came in; blank = as expected', ref: `r:${r.product!.id}`, product: r.product,
+        values: Object.fromEntries(Object.entries(ps.cash).map(([m, c]) => [m, { v: c.received ?? c.cash, how: (c.received != null ? 'typed' : m < s.current_month ? 'rule' : 'forecast') as CellHow }])) });
+    const owed = Object.entries(ps.cash).filter(([, c]) => Math.abs(c.owed_after) >= 1);
+    if (owed.length) rows.splice(rows.indexOf(r) + 2, 0,
+      { key: `o${r.product!.id}`, kind: 'calc', label: 'Still owed', sub: 'minus = paid ahead',
+        values: Object.fromEntries(Object.entries(ps.cash).map(([m, c]) => [m, { v: c.owed_after, how: 'total' as const }])) });
+  }
   rows.push({ key: 'add-inc', kind: 'add', label: 'Add an income line', sub: 'e.g. onboarding fees, set-up fees', addKind: 'income', values: {} });
-  rows.push({ key: 't-inc', kind: 'total', label: 'Total billed', values: sum(inc), strong: true });
+  rows.push({ key: 't-inc', kind: 'total', label: 'Total billed', values: sum(inc), strong: true });   // inc = bill lines only
   if (data.products.some(p => p.pay_delay)) {
     rows.push({ key: 'c-recv', kind: 'calc', label: 'Money received that month', sub: 'bills paid the month after arrive then',
       values: Object.fromEntries(months.map(m => [m, { v: g.income_total[m] || 0, how: 'total' as const }])) });
@@ -193,6 +205,7 @@ export function Spreadsheet({ rw, apply, go }: { rw: Runway; apply: (r: Runway) 
     if (ref === 'cap') return rw.summary.grid.capital[m] || null;
     const [k, id] = ref.split(':');
     if (k === 'e') return rw.data.expenses.find(e => e.id === +id)?.months[m] ?? null;
+    if (k === 'r') return rw.data.products.find(p => p.id === +id)?.received?.[m] ?? null;
     return rw.data.products.find(p => p.id === +id)?.months[m]?.revenue ?? null;
   }, [rw]);
 
@@ -209,7 +222,11 @@ export function Spreadsheet({ rw, apply, go }: { rw: Runway; apply: (r: Runway) 
     } finally { setBusy(false); }
   }, [apply, toast, typedNow]);
 
+  // Enter commits and moves focus; the input then blurs and would commit the same cell again.
+  const lastCommit = useRef(0);
   const commit = (text: string, move?: 'down' | 'right' | 'none') => {
+    if (Date.now() - lastCommit.current < 250) return true;
+    lastCommit.current = Date.now();
     const v = parseAmount(text);
     if (v !== null && (isNaN(v) || v < 0)) { toast('That is not an amount. Try 150000, 1.5L, 50k or =150000*1.1'); return false; }
     const targets = (sel.r1 !== sel.r2 || sel.c1 !== sel.c2) ? selCells() : (editable(rows[active.r]) ? [{ row: rows[active.r], m: months[active.c] }] : []);
@@ -529,7 +546,7 @@ export function Spreadsheet({ rw, apply, go }: { rw: Runway; apply: (r: Runway) 
                           <div className={cn('truncate', row.strong || row.kind === 'cat' ? 'font-semibold text-[#0E1726]' : 'text-[#0E1726]', row.kind === 'calc' && 'text-[#526070]')} title={row.label}>{row.label}</div>
                           {row.sub && <div className="text-[11px] text-[#8A94A3] truncate" title={row.sub}>{row.sub}</div>}
                         </div>
-                        {isLine && row.ref !== 'cap' && (
+                        {isLine && row.ref !== 'cap' && !row.ref?.startsWith('r:') && (
                           <button type="button" aria-label={`Options for ${row.label}`} onClick={e => { const b = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenu({ row, x: b.left, y: b.bottom + 4 }); }}
                             className="p-1 rounded text-[#8A94A3] hover:text-[#0E1726] hover:bg-[#F0F2F5] opacity-60 group-hover:opacity-100"><MoreHorizontal className="w-4 h-4" /></button>
                         )}
