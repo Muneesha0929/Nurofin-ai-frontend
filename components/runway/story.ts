@@ -46,6 +46,12 @@ export function story(s: RunwaySummary | Glance): Story {
       sub: 'Runway needs what the company spends, what it earns and the money put in.',
       short: 'Not set up yet: add the figures to see the forecast.' };
   }
+  if (s.cash_now < 0) {
+    return { tone: 'risk', status: 'Check the figures', basis,
+      headline: `The books show ${L(-s.cash_now)} more spent than put in.`,
+      sub: 'That usually means money put into the company has not been entered yet. Add it under Capital, or check the bank balance there, and the forecast will correct itself.',
+      short: 'More spent than put in: check the capital entries.' };
+  }
   if (s.state === 'self_funding') {
     return { tone: 'good', status: 'On track', headline: 'The company now pays for itself.', basis,
       sub: 'Income is more than everything the company spends, so every month from here adds to the bank.',
@@ -57,9 +63,9 @@ export function story(s: RunwaySummary | Glance): Story {
       sub: `Income is on track to pay for every cost from ${mLong(E.be)}. At today's pace the bank runs low in ${mLong(E.out!)}, ${mIdx(E.be) - mIdx(E.out!)} months before that. Adding about ${L(s.need)}, or trimming costs, carries the company across.`,
       short: `Break-even ${mLong(E.be)}; about ${L(s.need)} more needed to get there.` };
     return { tone: 'risk', status: 'Needs a plan', basis,
-      headline: `Today's cash covers the next ${E.runway} months.`,
+      headline: E.runway ? `Today's cash covers the next ${E.runway} month${E.runway === 1 ? '' : 's'}.` : 'The bank runs low this month.',
       sub: `Income is growing, but not yet fast enough to pay for every cost within three years. About ${L(s.need)} more, faster growth or lower costs would change that.`,
-      short: `Cash covers the next ${E.runway} months.` };
+      short: E.runway ? `Cash covers the next ${E.runway} month${E.runway === 1 ? '' : 's'}.` : 'The bank runs low this month.' };
   }
   if (!E.be) {
     return { tone: s.state === 'good' ? 'good' : 'watch', status: s.state === 'good' ? 'On track' : 'Within reach', basis,

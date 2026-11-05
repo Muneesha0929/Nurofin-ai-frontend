@@ -5,6 +5,7 @@ import Sidebar from '@/components/layout/Sidebar';
 import Topbar from '@/components/layout/Topbar';
 import GlobalChat from '@/components/layout/GlobalChat';
 import GlobalAssignmentPopup from '@/components/layout/GlobalAssignmentPopup';
+import { MeetingReminder } from '@/components/meetings/MeetingWidgets';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -304,6 +305,7 @@ export default function ClientLayout({
           {/* Floating AI Helper overlay */}
           <GlobalChat />
           <GlobalAssignmentPopup />
+          <MeetingReminder />
         </div>
       </div>
     </QueryClientProvider>

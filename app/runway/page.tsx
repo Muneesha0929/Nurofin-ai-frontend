@@ -14,9 +14,10 @@ import { runwayService, Runway, RunwayError } from '@/services/runway';
 import { Btn, ToastHost } from '@/components/runway/ui';
 import { CapitalView, Expenses, Income, Open, Overview } from '@/components/runway/views';
 import { ImportSheet } from '@/components/runway/ImportSheet';
-import { BankSheet, CapitalSheet, CategoriesSheet, ExpenseSheet, FigureSheet, HowSheet, MonthTotalSheet, ProductSheet } from '@/components/runway/sheets';
+import { Spreadsheet } from '@/components/runway/Spreadsheet';
+import { BankSheet, CapitalSheet, CategoriesSheet, ClientSheet, ExpenseSheet, FigureSheet, HowSheet, MonthTotalSheet, ProductSheet } from '@/components/runway/sheets';
 
-const TABS = [['overview', 'Overview'], ['expenses', 'Expenses'], ['income', 'Income'], ['capital', 'Capital']] as const;
+const TABS = [['overview', 'Overview'], ['sheet', 'Sheet'], ['expenses', 'Expenses'], ['income', 'Income'], ['capital', 'Capital']] as const;
 
 export default function RunwayPage() {
   return <Suspense fallback={null}><ToastHost><RunwayInner /></ToastHost></Suspense>;
@@ -73,10 +74,10 @@ function RunwayInner() {
 
   const props = { rw, apply: setRw, open: (o: Open) => { setMenu(false); setSheet(o); }, go };
   const close = () => setSheet(null);
-  const figureProducts = rw.data.products.filter(p => p.tracking === 'figures');
+  const figureProducts = rw.data.products.filter(p => p.tracking !== 'fixed');
 
   return (
-    <Shell>
+    <Shell wide={tab === 'sheet'}>
       <div className="flex flex-wrap items-center justify-between gap-4 mb-5 sm:mb-7">
         <nav className="flex gap-1 bg-[#F0F2F5] p-1 rounded-xl w-full sm:w-auto overflow-x-auto" aria-label="Runway sections">
           {TABS.map(([k, l]) => (
@@ -105,11 +106,12 @@ function RunwayInner() {
       </div>
 
       {tab === 'overview' && <Overview {...props} />}
+      {tab === 'sheet' && <Spreadsheet rw={rw} apply={setRw} go={go} />}
       {tab === 'expenses' && <Expenses {...props} month={month} setMonth={m => go('expenses', m)} />}
       {tab === 'income' && <Income {...props} />}
       {tab === 'capital' && <CapitalView {...props} />}
 
-      {sheet?.kind === 'expense' && <ExpenseSheet rw={rw} expense={sheet.expense} month={month} apply={setRw} onClose={close} />}
+      {sheet?.kind === 'expense' && <ExpenseSheet rw={rw} expense={sheet.expense} month={month} apply={setRw} onClose={close} onShowMonth={m => go('expenses', m)} />}
       {sheet?.kind === 'categories' && <CategoriesSheet rw={rw} apply={setRw} onClose={close} />}
       {sheet?.kind === 'product' && <ProductSheet rw={rw} product={sheet.product} apply={setRw} onClose={close} onCreated={() => tab !== 'income' && go('income')} />}
       {sheet?.kind === 'figure' && <FigureSheet rw={rw} productId={sheet.productId} figure={sheet.figureId ? rw.data.products.flatMap(p => p.figures).find(f => f.id === sheet.figureId) || null : null} apply={setRw} onClose={close} />}
@@ -118,15 +120,16 @@ function RunwayInner() {
       {sheet?.kind === 'bank' && <BankSheet rw={rw} apply={setRw} onClose={close} />}
       {sheet?.kind === 'how' && <HowSheet rw={rw} apply={setRw} onClose={close} />}
       {sheet?.kind === 'import' && <ImportSheet rw={rw} apply={setRw} onClose={close} />}
+      {sheet?.kind === 'client' && (() => { const p = rw.data.products.find(x => x.id === sheet.productId); return p ? <ClientSheet rw={rw} product={p} client={sheet.clientId ? p.clients.find(c => c.id === sheet.clientId) || null : null} apply={setRw} onClose={close} /> : null; })()}
     </Shell>
   );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="min-h-screen bg-[#F5F6F8] text-[#0E1726] normal-case px-4 sm:px-8 lg:px-12 pt-7 pb-24 text-[15px] leading-[1.55]">
       <style>{`@media (prefers-reduced-motion: no-preference){.rw-grow{animation:rwgrow .9s cubic-bezier(.2,.7,.2,1) both}@keyframes rwgrow{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}}`}</style>
-      <div className="max-w-[920px] mx-auto">{children}</div>
+      <div className={cn('mx-auto', wide ? 'max-w-none' : 'max-w-[920px]')}>{children}</div>
     </div>
   );
 }

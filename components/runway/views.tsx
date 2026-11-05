@@ -17,7 +17,8 @@ export type Open =
   | { kind: 'capital'; id: number | null }
   | { kind: 'bank' }
   | { kind: 'how' }
-  | { kind: 'import' };
+  | { kind: 'import' }
+  | { kind: 'client'; productId: number; clientId: number | null };
 interface ViewProps { rw: Runway; apply: (r: Runway) => void; open: (o: Open) => void; go: (tab: string, month?: string) => void }
 
 // ================================================================= OVERVIEW
@@ -26,9 +27,10 @@ interface ViewProps { rw: Runway; apply: (r: Runway) => void; open: (o: Open) =>
 export function setupState(rw: Runway) {
   const d = rw.data;
   const spend = d.expenses.length;
-  const income = d.products.some(p => p.tracking === 'fixed' ? p.amount > 0 : p.figures.length > 0 || Object.keys(p.months).length > 0);
+  const income = d.products.some(p => p.tracking === 'fixed' ? p.amount > 0 : p.figures.length > 0 || Object.keys(p.months).length > 0 || (p.clients || []).some(c => c.minimum > 0));
   const capital = d.capital.length > 0;
-  return { spend, income, capital, ready: spend > 0 && (income || capital) };
+  // the runway needs what is in the bank, so money put in is required; income can still be zero
+  return { spend, income, capital, ready: spend > 0 && capital };
 }
 
 export function Overview(props: ViewProps) {
@@ -37,7 +39,7 @@ export function Overview(props: ViewProps) {
 
 function GettingStarted({ rw, open, go }: ViewProps) {
   const st = setupState(rw);
-  const figures = rw.data.products.filter(p => p.tracking === 'figures');
+  const figures = rw.data.products.filter(p => p.tracking !== 'fixed');
   const steps = [
     { done: st.spend > 0, t: 'What the company spends', d: st.spend ? `${st.spend} expense${st.spend === 1 ? '' : 's'} added` : 'Salaries, AWS, rent, compliance and anything else paid each month',
       b: 'Add expense', act: () => open({ kind: 'expense', expense: null }) },
@@ -145,6 +147,7 @@ function OverviewReady({ rw, open, go }: ViewProps) {
       <h1 className="mt-3.5 text-[clamp(28px,4.2vw,40px)] leading-[1.15] font-semibold tracking-[-.025em] max-w-[22ch] text-[#0E1726]">{st.headline}</h1>
       <p className="mt-3.5 text-[16.5px] text-[#526070] max-w-[62ch]">{st.sub}</p>
       <p className="mt-2.5 text-[13.5px] text-[#8A94A3]">{st.basis}</p>
+      <Sureness rw={rw} go={go} />
 
       {E.be === cur ? (
         <div className="mt-9 flex flex-wrap gap-2.5">
@@ -179,7 +182,7 @@ function OverviewReady({ rw, open, go }: ViewProps) {
       <Card className="grid grid-cols-1 sm:grid-cols-3 mt-8">
         <Fact icon={<Landmark className="w-[18px] h-[18px]" />} k="In the bank" v={L(s.cash_now)} s={`end of ${mName(s.last_month)}`} />
         <Fact icon={<ArrowUp className="w-[18px] h-[18px]" style={{ color: C.out }} />} k="Going out each month" v={L(s.now.cost)} s={`all expenses in ${mName(cur)}`} border />
-        <Fact icon={<ArrowDown className="w-[18px] h-[18px]" style={{ color: C.in }} />} k="Coming in each month" v={L(s.now.inc)} s={`all products, expected for ${mName(cur)}`} border />
+        <Fact icon={<ArrowDown className="w-[18px] h-[18px]" style={{ color: C.in }} />} k="Coming in each month" v={L(s.now.inc)} s={`reaching the bank in ${mName(cur)}`} border />
       </Card>
 
       <Card className="p-6 mt-5">
@@ -311,13 +314,14 @@ export function Expenses({ rw, apply, open, month, setMonth }: ViewProps & { mon
   const cur = summary.current_month, start = data.settings.start_month, isPast = month < cur;
   const months = range(start, addM(cur, 12));
   const active = (e: Expense, m: string) => e.how === 'once' ? m in e.months : m >= e.start && (!e.end || m <= e.end);
-  const valueOf = (e: Expense, m: string) => m in e.months ? e.months[m] : m < cur ? 0 : (summary.planned[e.id]?.[m] ?? 0);
+  // same rule as the forecast: a same-every-month line counts its amount in past months too
+  const valueOf = (e: Expense, m: string) => m in e.months ? e.months[m] : m < cur ? (e.how === 'monthly' && active(e, m) ? e.amount : 0) : (summary.planned[e.id]?.[m] ?? 0);
   const items = data.expenses.filter(e => active(e, month) || month in e.months);
   const total = items.reduce((a, e) => a + valueOf(e, month), 0);
   const prev = addM(month, -1);
   const prevTotal = month > start ? data.expenses.reduce((a, e) => a + valueOf(e, prev), 0) : null;
   const change = prevTotal ? (total - prevTotal) / prevTotal * 100 : null;
-  const missing = isPast ? items.filter(e => e.how !== 'once' && !(month in e.months)) : [];
+  const missing = isPast ? items.filter(e => e.how === 'varies' && !(month in e.months)) : [];
   const [editing, setEditing] = useState<number | null>(null);
 
   const saveOne = async (e: Expense, raw: string) => {
@@ -381,7 +385,7 @@ export function Expenses({ rw, apply, open, month, setMonth }: ViewProps & { mon
                     ? <AmountInput initial={has ? String(e.months[month]) : isPast ? '' : String(Math.round(valueOf(e, month)))} label={`${e.name}, ${mLong(month)}`} onDone={v => v === null ? setEditing(null) : saveOne(e, v)} />
                     : <button type="button" onClick={() => setEditing(e.id)} aria-label={`Change ${e.name} for ${mLong(month)}`}
                         className="font-medium px-2.5 py-1.5 rounded-lg text-right sm:min-w-[120px] min-h-[40px] border border-transparent hover:border-[#D0D5DD] hover:bg-white tabular-nums">
-                        {isPast && !has ? <span className="text-[#D98A00]">Not entered</span> : rs(valueOf(e, month))}
+                        {isPast && !has && e.how === 'varies' ? <span className="text-[#D98A00]">Not entered</span> : rs(valueOf(e, month))}
                       </button>}
                   <IconBtn label={`Edit ${e.name}`} className="hidden sm:grid" onClick={() => open({ kind: 'expense', expense: e })}><Pencil className="w-[17px] h-[17px]" /></IconBtn>
                 </div>
@@ -413,11 +417,10 @@ export function Income({ rw, open }: ViewProps) {
   const [sel, setSel] = useState<number | null>(data.products[0]?.id ?? null);
   useEffect(() => { if (!data.products.some(p => p.id === sel)) setSel(data.products[0]?.id ?? null); }, [data.products, sel]);
   const ps = (id: number) => summary.products.find(x => x.id === id);
-  const thisMonth = (p: Product) => {
-    if (p.tracking === 'fixed') return cur >= p.start && (!p.end || cur <= p.end) ? (p.months[cur]?.revenue ?? p.amount) : 0;
-    return ps(p.id)?.current?.value ?? ps(p.id)?.expected_this_month ?? 0;
-  };
-  const total = data.products.reduce((a, p) => a + thisMonth(p), 0);
+  // what each product bills this month, and what actually reaches the bank this month
+  const thisMonth = (p: Product) => ps(p.id)?.billed_this_month ?? 0;
+  const total = summary.products.reduce((a, x) => a + (x.paid_this_month || 0), 0);
+  const anyDelay = data.products.some(x => x.pay_delay > 0);
   const p = data.products.find(x => x.id === sel) || null;
   return (
     <>
@@ -427,7 +430,7 @@ export function Income({ rw, open }: ViewProps) {
       </div>
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 mt-[18px] mb-[22px]">
         <span className="text-[28px] sm:text-[34px] font-semibold tracking-[-.025em] tabular-nums">{L(total)}</span>
-        <span className="text-[14.5px] text-[#526070]">expected in {mName(cur)} from {data.products.length} product{data.products.length === 1 ? '' : 's'}</span>
+        <span className="text-[14.5px] text-[#526070]">reaching the bank in {mName(cur)}{anyDelay ? ', mostly from last month’s bills' : ''}, from {data.products.length} product{data.products.length === 1 ? '' : 's'}</span>
       </div>
       {data.products.length > 1 && (
         <div className="flex flex-wrap gap-2 mb-4" role="tablist" aria-label="Products">
@@ -445,7 +448,7 @@ export function Income({ rw, open }: ViewProps) {
           <p className="text-[#526070] max-w-[46ch] mx-auto mb-4">Add each thing the company earns from. Its income then counts in the forecast.</p>
           <Btn kind="primary" onClick={() => open({ kind: 'product', product: null })}><Plus className="w-[18px] h-[18px]" />Add product</Btn>
         </div>
-      ) : p.tracking === 'fixed' ? <FixedProduct rw={rw} p={p} open={open} /> : <FiguresProduct rw={rw} p={p} open={open} />}
+      ) : p.tracking === 'fixed' ? <FixedProduct rw={rw} p={p} open={open} /> : p.tracking === 'billed' ? <BilledProduct rw={rw} p={p} open={open} /> : <FiguresProduct rw={rw} p={p} open={open} />}
     </>
   );
 }
@@ -491,7 +494,7 @@ function FiguresProduct({ rw, p, open }: { rw: Runway; p: Product; open: ViewPro
             <div className="h-2 rounded bg-[#E8F7F0] overflow-hidden mt-3.5 mb-2" role="img" aria-label={`${Math.round(pc.so_far / pc.value * 100)}% of the expected month total`}>
               <i className="block h-full rounded" style={{ width: `${Math.min(pc.so_far / pc.value * 100, 100)}%`, background: C.in }} />
             </div>
-            <p className="text-[13.5px] text-[#526070]">Day {pc.day} of {pc.days}. {p.name} is bringing in about {L(pc.rate)} a day{pc.product_forecast ? `, and its own forecast says ${L(pc.product_forecast)}` : ''}, so the month should end near {L(pc.value)}.</p>
+            <p className="text-[13.5px] text-[#526070]">Day {pc.day} of {pc.days}. {p.name} is bringing in about {L(pc.rate ?? 0)} a day{pc.product_forecast ? `, and its own forecast says ${L(pc.product_forecast)}` : ''}, so the month should end near {L(pc.value)}.</p>
           </>
         ) : (
           <><h3 className="text-[17px] font-semibold">No {p.name} figure for {mName(cur)} yet</h3><p className="mt-1 text-[14.5px] text-[#526070]">Add one from its dashboard. Until then this month follows the trend.</p></>
@@ -514,6 +517,83 @@ function FiguresProduct({ rw, p, open }: { rw: Runway; p: Product; open: ViewPro
               <Pill key="p" tone={m.how === 'final' ? 'ok' : m.how === 'estimated' ? 'est' : 'gray'}>{m.how === 'final' ? 'Final' : m.how === 'estimated' ? 'Estimated' : 'Missing'}</Pill>] }))} />
           : <p className="px-5 py-4 text-[14.5px] text-[#526070]">Totals appear here once a month closes.</p>}
         <div className="px-5 py-3 border-t border-[#E4E7EC]"><Btn kind="text" className="!px-0" onClick={() => open({ kind: 'month', productId: p.id, month: addM(cur, -1) })}><Plus className="w-4 h-4" />Enter a month total</Btn></div>
+      </Card>
+    </>
+  );
+}
+
+const PAID = ['the same month', 'the month after', 'two months after'];
+
+/** A product billed once a month with client minimums (GMDI). */
+function BilledProduct({ rw, p, open }: { rw: Runway; p: Product; open: ViewProps['open'] }) {
+  const s = rw.summary, cur = s.current_month;
+  const sum = s.products.find(x => x.id === p.id);
+  const pc = sum?.current;
+  const live = (c: { start: string; end: string | null }, m: string) => c.start <= m && (!c.end || m <= c.end);
+  const clients = [...p.clients].sort((a, b) => Number(live(b, cur)) - Number(live(a, cur)) || a.name.localeCompare(b.name));
+  const committed = sum?.committed ?? 0;
+  const figs = [...p.figures].sort((a, b) => (a.day < b.day ? 1 : -1));
+  const est = (sum?.months || []).filter(m => m.how === 'estimated');
+  const gmdi = p.name.toLowerCase() === 'gmdi';
+  const paidIn = (m: string) => mShort(addM(m, p.pay_delay));
+  return (
+    <>
+      <ProductHead p={p} open={open} right={<Btn onClick={() => open({ kind: 'figure', productId: p.id, figureId: null })}><Plus className="w-[18px] h-[18px]" />{p.name} figure</Btn>} />
+      <p className="-mt-1 mb-3 text-[13.5px] text-[#526070]">Billed once a month. Each client pays its usage fees, or its minimum if usage falls short. Paid {PAID[p.pay_delay] || `${p.pay_delay} months after`}.</p>
+      <Card className="p-6">
+        <div className="flex flex-wrap justify-between items-start gap-4">
+          <div>
+            <p className="text-[14.5px] text-[#526070]">{mName(cur)} bill, expected</p>
+            <div className="text-[34px] font-semibold tracking-[-.025em] tabular-nums">{L(sum?.billed_this_month || 0)}</div>
+            <p className="mt-1 text-[13.5px] text-[#526070]">
+              {pc ? (pc.source === 'product'
+                ? `From ${gmdi ? 'GMDI’s Profit Outlook' : `${p.name}’s dashboard`} on ${dShort(pc.as_of)}, minimums included.`
+                : `Usage of ${L(pc.so_far)} by ${dShort(pc.as_of)}, carried to the month end and lifted to the clients’ minimums.`)
+                : committed ? `No figure yet this month, so this is the forecast, never below the clients’ minimums.` : 'No figure yet this month.'}
+            </p>
+          </div>
+          <div className="sm:text-right">
+            <p className="text-[14.5px] text-[#526070]">Clients must pay at least</p>
+            <div className="text-[22px] font-semibold tracking-[-.02em] mt-2 tabular-nums">{committed ? L(committed) : '—'}</div>
+            <p className="mt-1 text-[13px] text-[#8A94A3]">{sum?.clients_live ? `${sum.clients_live} client${sum.clients_live === 1 ? '' : 's'} with minimums` : 'Add clients’ minimums below'}</p>
+          </div>
+        </div>
+        {p.pay_delay > 0 && (
+          <div className="mt-4 pt-4 border-t border-[#E4E7EC] text-[14px] text-[#526070]">
+            This bill reaches the bank in <b className="font-medium text-[#0E1726]">{mLong(addM(cur, p.pay_delay))}</b>. Coming in this month: <b className="font-medium text-[#0E1726] tabular-nums">{L(sum?.paid_this_month || 0)}</b>, the {mName(addM(cur, -p.pay_delay))} bill.
+          </div>
+        )}
+      </Card>
+      {est.map(m => (
+        <div key={m.month} className="mt-4"><Banner><span>{mName(m.month)}’s bill total was never entered, so it is estimated at <b>{L(m.revenue || 0)}</b>.</span><Btn onClick={() => open({ kind: 'month', productId: p.id, month: m.month })}>Enter {mName(m.month)}’s total</Btn></Banner></div>
+      ))}
+      <Card className="mt-5 overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#E4E7EC]">
+          <div><h3 className="text-[15.5px] font-semibold">Clients and minimums</h3><p className="text-[13px] text-[#8A94A3]">The forecast never goes below these</p></div>
+          <Btn kind="text" onClick={() => open({ kind: 'client', productId: p.id, clientId: null })}><Plus className="w-4 h-4" />Add client</Btn>
+        </div>
+        {clients.length ? <Table head={['Client', 'Minimum a month', 'Fixed a month', 'Billing']}
+          rows={clients.map(c => ({ key: c.id, onClick: () => open({ kind: 'client', productId: p.id, clientId: c.id }),
+            cells: [<span key="n" className={live(c, cur) ? '' : 'text-[#8A94A3]'}>{c.name}</span>, rs(c.minimum), c.fixed ? rs(c.fixed) : '—',
+              <span key="b" className="text-[#526070]">{c.end ? `${mShort(c.start)} to ${mShort(c.end)}` : c.start > cur ? `from ${mShort(c.start)}` : `since ${mShort(c.start)}`}</span>] }))} />
+          : <p className="px-5 py-4 text-[14.5px] text-[#526070]">Add each client’s minimum monthly bill from its agreement. Without them the forecast only follows past bills.</p>}
+      </Card>
+      <Card className="mt-3.5 overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#E4E7EC]"><h3 className="text-[15.5px] font-semibold">Month totals</h3><span className="text-[13px] text-[#8A94A3]">The bill, before GST</span></div>
+        {sum?.months.length ? <Table head={['Month', 'Billed', ...(p.cost_label ? [p.cost_label, 'Company keeps'] : []), ...(p.pay_delay ? ['Paid in'] : []), '']}
+          rows={sum.months.map(m => ({ key: m.month, onClick: () => open({ kind: 'month', productId: p.id, month: m.month }),
+            cells: [mLong(m.month), m.revenue != null ? rs(m.revenue) : '—', ...(p.cost_label ? [m.cost != null ? rs(m.cost) : '—', m.revenue != null ? rs(m.revenue - (m.cost || 0)) : '—'] : []),
+              ...(p.pay_delay ? [<span key="pi" className="text-[#526070]">{paidIn(m.month)}</span>] : []),
+              <Pill key="p" tone={m.how === 'final' ? 'ok' : m.how === 'estimated' ? 'est' : 'gray'}>{m.how === 'final' ? 'Final' : m.how === 'estimated' ? 'Estimated' : 'Missing'}</Pill>] }))} />
+          : <p className="px-5 py-4 text-[14.5px] text-[#526070]">Totals appear here once a month is billed.</p>}
+        <div className="px-5 py-3 border-t border-[#E4E7EC]"><Btn kind="text" className="!px-0" onClick={() => open({ kind: 'month', productId: p.id, month: addM(cur, -1) })}><Plus className="w-4 h-4" />Enter a month’s bill</Btn></div>
+      </Card>
+      <Card className="mt-3.5 overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[#E4E7EC]"><h3 className="text-[15.5px] font-semibold">Figures you added</h3><span className="text-[13px] text-[#8A94A3]">Tap one to change or delete it</span></div>
+        {figs.length ? <Table head={['Date', 'Expected bill', ...(p.cost_label ? [p.cost_label] : []), 'Usage so far']}
+          rows={figs.map(f => ({ key: f.id, onClick: () => open({ kind: 'figure', productId: p.id, figureId: f.id }),
+            cells: [dLong(f.day), f.forecast != null ? rs(f.forecast) : '—', ...(p.cost_label ? [f.cost != null ? rs(f.cost) : '—'] : []), f.revenue ? rs(f.revenue) : '—'] }))} />
+          : <p className="px-5 py-4 text-[14.5px] text-[#526070]">No figures yet. Add {gmdi ? 'GMDI’s expected bill from the Profit Outlook card' : 'the expected bill'} whenever you check it.</p>}
       </Card>
     </>
   );
@@ -580,5 +660,52 @@ export function CapitalView({ rw, open }: ViewProps) {
       </Card>
       <p className="text-[13.5px] text-[#8A94A3] text-center mt-5">An entry with a future date counts as a planned top-up and is included in the forecast.</p>
     </>
+  );
+}
+
+
+/* ------------------------------------------------------------ how sure is this */
+
+const SURE_TONE = { high: ['#0B7A50', '#E8F7F0', 'High'], medium: ['#9A6200', '#FFF6E5', 'Medium'], low: ['#B42318', '#FDEEEE', 'Low'] } as const;
+
+function Sureness({ rw, go }: { rw: Runway; go: ViewProps['go'] }) {
+  const c = rw.summary.confidence;
+  const [open, setOpen] = React.useState(c.label !== 'high');
+  if (!c) return null;
+  const [fg, bg, word] = SURE_TONE[c.label];
+  const r = c.be_range;
+  const when = (m: string | null) => (m ? mLong(m) : 'not within three years');
+  const range = r.early === r.late
+    ? (r.expected ? `Break-even: ${mLong(r.expected)}.` : 'No break-even within three years, even if income comes in at the high end.')
+    : `Break-even: ${r.early ? `as early as ${mLong(r.early)} if income comes in at the high end` : 'not within three years'}` +
+      `${r.expected ? `, ${mLong(r.expected)} at today's pace` : ', not within three years at today\'s pace'}` +
+      `${r.late !== r.expected ? `, ${when(r.late)} if it is slower` : ''}.`;
+  return (
+    <Card className="mt-6 p-4 sm:p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[13.5px] font-semibold" style={{ color: fg, background: bg }}>
+          How sure: {word} · {c.score}/100
+        </span>
+        <span className="text-[14.5px] text-[#344054]">{range}</span>
+      </div>
+      {c.gaps.length > 0 && (
+        <div className="mt-3">
+          <button type="button" onClick={() => setOpen(o => !o)} className="text-[13.5px] font-medium text-[#2F54EB] hover:underline">
+            {open ? 'Hide' : 'Show'} what would make this more accurate ({c.gaps.length})
+          </button>
+          {open && (
+            <ul className="mt-2.5 flex flex-col gap-2.5">
+              {c.gaps.map(g => (
+                <li key={g.key} className="flex gap-2.5 text-[14px]">
+                  <span className="mt-[7px] w-1.5 h-1.5 rounded-full shrink-0" style={{ background: fg }} />
+                  <span><span className="text-[#0E1726]">{g.text}</span> <span className="text-[#526070]">{g.fix}</span></span>
+                </li>
+              ))}
+              <li><button type="button" onClick={() => go('sheet')} className="text-[13.5px] font-medium text-[#2F54EB] hover:underline">Open the sheet to fill these in</button></li>
+            </ul>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }

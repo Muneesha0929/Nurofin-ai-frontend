@@ -4,7 +4,7 @@
 // fresh picture the API returns, and says what happened in a toast (with Undo after a delete).
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
-import { runwayService as api, Capital, Expense, Figure, How, Product, Runway, Tracking } from '@/services/runway';
+import { runwayService as api, Capital, Client, Expense, Figure, How, Product, Runway, Tracking } from '@/services/runway';
 import { Choice, Field, IconBtn, MoneyInput, MonthSelect, Sheet, TextInput, inputCls, moneyText, useToast } from './ui';
 import { addM, dShort, mLong, mName, parseRs, range, rs } from './story';
 
@@ -14,7 +14,7 @@ const P = ({ children }: { children: React.ReactNode }) => <p className="m-0 tex
 
 // ----------------------------------------------------------------- expense
 
-export function ExpenseSheet({ rw, expense, month, apply, onClose }: { rw: Runway; expense: Expense | null; month: string; apply: Apply; onClose: () => void }) {
+export function ExpenseSheet({ rw, expense, month, apply, onClose, onShowMonth }: { rw: Runway; expense: Expense | null; month: string; apply: Apply; onClose: () => void; onShowMonth?: (m: string) => void }) {
   const toast = useToast();
   const { data, summary } = rw;
   const cur = summary.current_month, start = data.settings.start_month;
@@ -26,7 +26,8 @@ export function ExpenseSheet({ rw, expense, month, apply, onClose }: { rw: Runwa
   const [newCat, setNewCat] = useState('');
   const [how, setHow] = useState<How>(expense?.how || 'monthly');
   const [amount, setAmount] = useState(moneyText(expense && expense.how !== 'once' ? expense.amount : null));
-  const [from, setFrom] = useState(expense?.start || (month >= cur ? month : cur));
+  // a new line starts in the month being looked at, so it shows up right there after saving
+  const [from, setFrom] = useState(expense?.start || (month >= start ? month : start));
   const [to, setTo] = useState(expense?.end || '');
   const [raise, setRaise] = useState(String(expense?.raise ?? 0));
   const [oAmt, setOAmt] = useState(moneyText(expense?.how === 'once' ? expense.months[onceMonth] : null));
@@ -45,7 +46,11 @@ export function ExpenseSheet({ rw, expense, month, apply, onClose }: { rw: Runwa
       Object.assign(body, { amount: a, start_month: from, end_month: to || null, raise_pct: how === 'monthly' ? +raise : 0 });
     }
     apply(isNew ? await api.addExpense(body) : await api.updateExpense(expense!.id, body));
-    toast(isNew ? `Added ${body.name}` : `Saved ${body.name}`);
+    // never let a saved line vanish: if it does not cover the month on screen, go to where it starts
+    const first = how === 'once' ? oMonth : from;
+    const covers = how === 'once' ? oMonth === month : from <= month && (!to || to >= month);
+    if (!covers && onShowMonth) onShowMonth(first);
+    toast(`${isNew ? 'Added' : 'Saved'} ${body.name}${how === 'once' ? `, ${mLong(oMonth)}` : `, every month from ${mLong(from)}`}`);
   };
   const del = async () => {
     apply(await api.deleteExpense(expense!.id));
@@ -76,7 +81,7 @@ export function ExpenseSheet({ rw, expense, month, apply, onClose }: { rw: Runwa
       ) : (
         <>
           <Field label={how === 'varies' ? 'Usual amount per month' : 'Amount per month'} htmlFor="eAmt"
-            help={how === 'varies' ? 'Used until there are three months of real figures; after that it follows them.' : undefined}>
+            help={how === 'varies' ? 'Used until there are three months of real figures; after that it follows them.' : 'Counted in every month from the start month, past months included. Change any single month on the Expenses list.'}>
             <MoneyInput id="eAmt" value={amount} onChange={setAmount} />
           </Field>
           <div className="grid sm:grid-cols-2 gap-3">
@@ -92,7 +97,7 @@ export function ExpenseSheet({ rw, expense, month, apply, onClose }: { rw: Runwa
           )}
         </>
       )}
-      {!isNew && <p className="m-0 text-[13.5px] text-[#8A94A3]">A new amount applies from {mName(cur)} onwards. Months already entered keep their figures.</p>}
+      {!isNew && <p className="m-0 text-[13.5px] text-[#8A94A3]">A new amount applies from {mName(cur)} onwards. Past months keep what was really paid.</p>}
     </Sheet>
   );
 }
@@ -134,22 +139,26 @@ export function CategoriesSheet({ rw, apply, onClose }: { rw: Runway; apply: App
 
 // ----------------------------------------------------------------- products
 
+const DELAYS = [[0, 'In the same month'], [1, 'The month after (invoice on the 1st)'], [2, 'Two months after']] as const;
+
 export function ProductSheet({ rw, product, apply, onClose, onCreated }: { rw: Runway; product: Product | null; apply: Apply; onClose: () => void; onCreated?: (id: number) => void }) {
   const toast = useToast();
   const cur = rw.summary.current_month, start = rw.data.settings.start_month;
   const isNew = !product;
   const [name, setName] = useState(product?.name || '');
-  const [tracking, setTracking] = useState<Tracking>(product?.tracking || 'figures');
-  const [costLabel, setCostLabel] = useState(product?.cost_label || '');
+  const [tracking, setTracking] = useState<Tracking>(product?.tracking || 'billed');
+  const [costLabel, setCostLabel] = useState(product?.cost_label ?? (isNew ? 'Bank charges' : ''));
   const [amount, setAmount] = useState(moneyText(product?.tracking === 'fixed' ? product.amount : null));
   const [from, setFrom] = useState(product?.start || cur);
   const [to, setTo] = useState(product?.end || '');
+  const [delay, setDelay] = useState(String(product?.pay_delay ?? 1));
   const save = async () => {
     need(!!name.trim(), 'Give it a name.');
     need(!to || to >= from, 'The end month is before the start month.');
     const a = parseRs(amount);
     if (tracking === 'fixed') need(!isNaN(a) && a >= 0, 'Enter the amount per month.');
-    const body = { name: name.trim(), tracking, cost_label: tracking === 'figures' ? costLabel.trim() || null : null, amount: tracking === 'fixed' ? a : 0, start_month: from, end_month: to || null };
+    const body = { name: name.trim(), tracking, cost_label: tracking !== 'fixed' ? costLabel.trim() || null : null, amount: tracking === 'fixed' ? a : 0,
+                   start_month: from, end_month: to || null, pay_delay: +delay };
     if (isNew) { const r = await api.addProduct(body); apply(r); onCreated?.(r.id); } else apply(await api.updateProduct(product!.id, body));
     toast(isNew ? `Added ${body.name}` : `Saved ${body.name}`);
   };
@@ -161,17 +170,23 @@ export function ProductSheet({ rw, product, apply, onClose, onCreated }: { rw: R
     <Sheet title={isNew ? 'Add product' : 'Edit product'} onClose={onClose} onSave={save} saveLabel={isNew ? 'Add product' : 'Save changes'} onDelete={isNew ? undefined : del}>
       <P>A product is anything the company earns from. Add each one once; its income then counts in the forecast.</P>
       <Field label="Name" htmlFor="pName"><TextInput id="pName" autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Build-Track" /></Field>
-      <Field label="How does its income come in?">
+      <Field label="How does it earn?">
         <Choice name="pTrack" value={tracking} onChange={setTracking} options={[
-          { value: 'figures', title: 'Changes every month', hint: 'You copy "revenue so far" from its dashboard now and then, like GMDI' },
+          { value: 'billed', title: 'Billed once a month, with client minimums', hint: 'Like GMDI: each client pays its usage fees, or its minimum if usage falls short' },
+          { value: 'figures', title: 'Changes every month', hint: 'You copy "revenue so far" from its dashboard now and then' },
           { value: 'fixed', title: 'Same amount every month', hint: 'A retainer, a subscription, a fixed contract' },
         ]} />
       </Field>
-      {tracking === 'figures'
-        ? <Field label="Cost that grows with its revenue (optional)" htmlFor="pCost" help='For GMDI this is "Bank charges". Leave empty if there is none.'>
+      {tracking !== 'fixed'
+        ? <Field label="Cost that comes with its revenue (optional)" htmlFor="pCost" help='For GMDI this is "Bank charges". Leave empty if there is none.'>
             <TextInput id="pCost" value={costLabel} onChange={e => setCostLabel(e.target.value)} placeholder="e.g. Bank charges" />
           </Field>
         : <Field label="Amount per month" htmlFor="pAmt"><MoneyInput id="pAmt" value={amount} onChange={setAmount} /></Field>}
+      <Field label="When does the money arrive?" htmlFor="pDelay" help="Runway counts money in the month it reaches the bank, so the runway is never flattered by bills not yet paid.">
+        <select id="pDelay" className={inputCls} value={delay} onChange={e => setDelay(e.target.value)}>
+          {DELAYS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </Field>
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Earning from" htmlFor="pStart"><MonthSelect id="pStart" value={from} onChange={setFrom} months={range(start, addM(cur, 24))} /></Field>
         <Field label="Until" htmlFor="pEnd"><MonthSelect id="pEnd" value={to} onChange={setTo} months={range(start, addM(cur, 36))} blank="No end date" /></Field>
@@ -182,12 +197,13 @@ export function ProductSheet({ rw, product, apply, onClose, onCreated }: { rw: R
 
 export function FigureSheet({ rw, productId, figure, apply, onClose }: { rw: Runway; productId: number | null; figure: Figure | null; apply: Apply; onClose: () => void }) {
   const toast = useToast();
-  const products = rw.data.products.filter(p => p.tracking === 'figures');
+  const products = rw.data.products.filter(p => p.tracking !== 'fixed');
   const isNew = !figure;
   const [pid, setPid] = useState<number>(productId ?? products[0]?.id);
   const p = products.find(x => x.id === pid);
+  const billed = p?.tracking === 'billed';
   const [day, setDay] = useState(figure?.day || rw.summary.today);
-  const [rev, setRev] = useState(moneyText(figure?.revenue));
+  const [rev, setRev] = useState(moneyText(figure?.revenue || null));
   const [cost, setCost] = useState(moneyText(figure?.cost));
   const [fc, setFc] = useState(moneyText(figure?.forecast));
   if (!products.length) return (
@@ -197,9 +213,10 @@ export function FigureSheet({ rw, productId, figure, apply, onClose }: { rw: Run
   );
   const save = async () => {
     need(!!day && day <= rw.summary.today, 'Pick a date up to today.');
-    const r = parseRs(rev); need(!isNaN(r) && r >= 0, 'Enter the revenue so far.');
-    const c = parseRs(cost), f = parseRs(fc);
-    const body = { day, revenue: r, cost: isNaN(c) ? null : c, forecast: isNaN(f) ? null : f };
+    const r = parseRs(rev), c = parseRs(cost), f = parseRs(fc);
+    if (billed) need(!isNaN(f) || (!isNaN(r) && r > 0), `Enter ${p?.name}'s expected bill for this month.`);
+    else need(!isNaN(r) && r >= 0, 'Enter the revenue so far.');
+    const body = { day, revenue: isNaN(r) ? 0 : r, cost: isNaN(c) ? null : c, forecast: isNaN(f) ? null : f };
     apply(isNew ? await api.addFigure(pid, body) : await api.updateFigure(pid, figure!.id, body));
     toast(isNew ? `${p?.name} figure added` : `${p?.name} figure saved`);
   };
@@ -207,50 +224,123 @@ export function FigureSheet({ rw, productId, figure, apply, onClose }: { rw: Run
     apply(await api.deleteFigure(pid, figure!.id));
     toast('Figure deleted', async () => apply(await api.restore('figure', figure!.id)));
   };
+  const gmdi = (p?.name || '').toLowerCase() === 'gmdi';
   return (
     <Sheet title={isNew ? `Add ${products.length === 1 ? products[0].name + ' ' : ''}figure` : `Edit ${p?.name} figure`} onClose={onClose} onSave={save} saveLabel={isNew ? 'Add figure' : 'Save changes'} onDelete={isNew ? undefined : del}>
-      <P>Copy these from the product’s dashboard whenever you check it. Every 10 days or every 15, any gap works.</P>
+      <P>{billed
+        ? `Copy this from ${gmdi ? 'the GMDI super-admin Profit Outlook card' : `${p?.name}'s dashboard`} whenever you check it. Its expected bill already applies each client's minimum.`
+        : 'Copy these from the product’s dashboard whenever you check it. Every 10 days or every 15, any gap works.'}</P>
       {isNew && products.length > 1 && (
         <Field label="Product" htmlFor="fP">
           <select id="fP" className={inputCls} value={pid} onChange={e => setPid(+e.target.value)}>{products.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
         </Field>
       )}
       <Field label="Date of the figures" htmlFor="fDay"><input id="fDay" type="date" className={inputCls} value={day} max={rw.summary.today} min={`${rw.data.settings.start_month}-01`} onChange={e => setDay(e.target.value)} /></Field>
-      <Field label="Revenue so far this month" htmlFor="fRev" help={p?.name === 'GMDI' ? 'Before GST. On the GMDI dashboard, Profit Outlook, month to date.' : 'Before GST, from the start of the month to this date.'}>
-        <MoneyInput id="fRev" value={rev} onChange={setRev} autoFocus />
-      </Field>
-      {p?.cost_label && (
-        <Field label={`${p.cost_label} so far this month`} htmlFor="fCost" help="Leave empty to use the usual share of revenue.">
-          <MoneyInput id="fCost" value={cost} onChange={setCost} />
-        </Field>
+      {billed ? (
+        <>
+          <Field label="Expected bill this month" htmlFor="fFc" help={gmdi ? 'Before GST. Profit Outlook, "Projected bill".' : 'Before GST, minimums included.'}>
+            <MoneyInput id="fFc" value={fc} onChange={setFc} autoFocus />
+          </Field>
+          {p?.cost_label && (
+            <Field label={`Expected ${p.cost_label.toLowerCase()} this month`} htmlFor="fCost" help={gmdi ? 'Profit Outlook, "Projected bank cost". Leave empty to use the usual share.' : 'Leave empty to use the usual share.'}>
+              <MoneyInput id="fCost" value={cost} onChange={setCost} />
+            </Field>
+          )}
+          <Field label="Usage fees so far (optional)" htmlFor="fRev" help="Only needed if there is no expected bill; Runway then lifts it to the clients' minimums.">
+            <MoneyInput id="fRev" value={rev} onChange={setRev} />
+          </Field>
+        </>
+      ) : (
+        <>
+          <Field label="Revenue so far this month" htmlFor="fRev" help="Before GST, from the start of the month to this date.">
+            <MoneyInput id="fRev" value={rev} onChange={setRev} autoFocus />
+          </Field>
+          {p?.cost_label && (
+            <Field label={`${p.cost_label} so far this month`} htmlFor="fCost" help="Leave empty to use the usual share of revenue.">
+              <MoneyInput id="fCost" value={cost} onChange={setCost} />
+            </Field>
+          )}
+          <Field label="Its own month-end forecast (optional)" htmlFor="fFc" help="If the dashboard shows one. Makes the month-end estimate more accurate.">
+            <MoneyInput id="fFc" value={fc} onChange={setFc} />
+          </Field>
+        </>
       )}
-      <Field label="Its own month-end forecast (optional)" htmlFor="fFc" help="If the dashboard shows one. Makes the month-end estimate more accurate.">
-        <MoneyInput id="fFc" value={fc} onChange={setFc} />
-      </Field>
     </Sheet>
   );
 }
 
-export function MonthTotalSheet({ rw, product, month, apply, onClose }: { rw: Runway; product: Product; month: string; apply: Apply; onClose: () => void }) {
+export function ClientSheet({ rw, product, client, apply, onClose }: { rw: Runway; product: Product; client: Client | null; apply: Apply; onClose: () => void }) {
   const toast = useToast();
-  const final = product.months[month];
-  const row = rw.summary.products.find(x => x.id === product.id)?.months.find(x => x.month === month);
-  const [rev, setRev] = useState(moneyText(final?.revenue ?? row?.revenue));
-  const [cost, setCost] = useState(moneyText(final?.cost ?? row?.cost));
+  const cur = rw.summary.current_month, start = rw.data.settings.start_month;
+  const isNew = !client;
+  const [name, setName] = useState(client?.name || '');
+  const [minimum, setMinimum] = useState(moneyText(client?.minimum));
+  const [fixed, setFixed] = useState(moneyText(client?.fixed || null));
+  const [from, setFrom] = useState(client?.start || cur);
+  const [to, setTo] = useState(client?.end || '');
   const save = async () => {
-    const r = parseRs(rev); need(!isNaN(r) && r >= 0, 'Enter the revenue.');
-    const c = parseRs(cost);
-    apply(await api.setProductMonth(product.id, month, r, isNaN(c) ? null : c));
-    toast(`${product.name}, ${mName(month)} total saved`);
+    need(!!name.trim(), 'Give the client a name.');
+    const m = parseRs(minimum); need(!isNaN(m) && m >= 0, 'Enter the minimum monthly bill (0 if there is none).');
+    const f = parseRs(fixed);
+    need(!to || to >= from, 'The end month is before the start month.');
+    const body = { name: name.trim(), minimum: m, fixed: isNaN(f) ? 0 : f, start_month: from, end_month: to || null };
+    apply(isNew ? await api.addClient(product.id, body) : await api.updateClient(product.id, client!.id, body));
+    toast(isNew ? `Added ${body.name}` : `Saved ${body.name}`);
   };
   const del = async () => {
-    apply(await api.deleteProductMonth(product.id, month));
-    toast(`${mName(month)} total removed`, async () => apply(await api.setProductMonth(product.id, month, final.revenue, final.cost)));
+    apply(await api.deleteClient(product.id, client!.id));
+    toast(`Deleted ${client!.name}`, async () => apply(await api.restore('client', client!.id)));
   };
   return (
-    <Sheet title={`${product.name} total for ${mLong(month)}`} onClose={onClose} onSave={save} saveLabel="Save total" onDelete={final ? del : undefined}>
-      <P>From {product.name}’s reports for {mLong(month)}.{!final && row?.revenue != null ? ` Right now it is estimated at ${rs(row.revenue)}.` : ''}</P>
-      <Field label="Revenue for the month" htmlFor="tRev" help="Before GST"><MoneyInput id="tRev" value={rev} onChange={setRev} autoFocus /></Field>
+    <Sheet title={isNew ? `Add ${product.name} client` : `Edit ${client!.name}`} onClose={onClose} onSave={save} saveLabel={isNew ? 'Add client' : 'Save changes'} onDelete={isNew ? undefined : del}>
+      <P>Each month a client pays its usage fees, or its minimum if usage falls short. The minimums together are the least {product.name} can bill, so the forecast never drops below them.</P>
+      <Field label="Client" htmlFor="clName"><TextInput id="clName" autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Acme Logistics" /></Field>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Minimum monthly bill" htmlFor="clMin" help="Before GST, from the agreement"><MoneyInput id="clMin" value={minimum} onChange={setMinimum} /></Field>
+        <Field label="Fixed charges per month" htmlFor="clFix" help="Optional, on top of usage"><MoneyInput id="clFix" value={fixed} onChange={setFixed} /></Field>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Billing from" htmlFor="clStart" help="The go-live month"><MonthSelect id="clStart" value={from} onChange={setFrom} months={range(start, addM(cur, 24))} /></Field>
+        <Field label="Until" htmlFor="clEnd"><MonthSelect id="clEnd" value={to} onChange={setTo} months={range(start, addM(cur, 36))} blank="Still a client" /></Field>
+      </div>
+    </Sheet>
+  );
+}
+
+export function MonthTotalSheet({ rw, product, month: initial, apply, onClose }: { rw: Runway; product: Product; month: string; apply: Apply; onClose: () => void }) {
+  const toast = useToast();
+  const months = range(rw.data.settings.start_month, addM(rw.summary.current_month, -1)).reverse();
+  const [month, setMonth] = useState(initial);
+  const valuesFor = (m: string) => {
+    const f = product.months[m];
+    const row = rw.summary.products.find(x => x.id === product.id)?.months.find(x => x.month === m);
+    return { f, row, rev: moneyText(f?.revenue ?? row?.revenue), cost: moneyText(f?.cost ?? row?.cost) };
+  };
+  const [rev, setRev] = useState(valuesFor(initial).rev);
+  const [cost, setCost] = useState(valuesFor(initial).cost);
+  const pick = (m: string) => { setMonth(m); const v = valuesFor(m); setRev(v.rev); setCost(v.cost); };
+  const { f: final, row } = valuesFor(month);
+  const billed = product.tracking === 'billed';
+  const save = async () => {
+    const r = parseRs(rev); need(!isNaN(r) && r >= 0, billed ? 'Enter the bill for the month.' : 'Enter the revenue.');
+    const c = parseRs(cost);
+    apply(await api.setProductMonth(product.id, month, r, isNaN(c) ? null : c));
+    toast(`${product.name}, ${mName(month)} ${billed ? 'bill' : 'total'} saved`);
+  };
+  const del = async () => {
+    const was = final!;
+    apply(await api.deleteProductMonth(product.id, month));
+    toast(`${mName(month)} total removed`, async () => apply(await api.setProductMonth(product.id, month, was.revenue, was.cost)));
+  };
+  return (
+    <Sheet title={`${product.name} ${billed ? 'bill' : 'total'} for a month`} onClose={onClose} onSave={save} saveLabel="Save" onDelete={final ? del : undefined}>
+      <P>From {product.name}’s {billed ? 'invoices' : 'reports'} for the month.{!final && row?.revenue != null ? ` Right now ${mName(month)} is estimated at ${rs(row.revenue)}.` : ''}</P>
+      <Field label="Month" htmlFor="tMonth">
+        <select id="tMonth" className={inputCls} value={month} onChange={e => pick(e.target.value)}>
+          {months.map(m => <option key={m} value={m}>{mLong(m)}{product.months[m] ? '' : ' (not entered)'}</option>)}
+        </select>
+      </Field>
+      <Field label={billed ? 'Bill for the month' : 'Revenue for the month'} htmlFor="tRev" help={billed ? 'Before GST: the invoice total, minimums included' : 'Before GST'}><MoneyInput id="tRev" value={rev} onChange={setRev} autoFocus /></Field>
       {product.cost_label && <Field label={`${product.cost_label} for the month`} htmlFor="tCost"><MoneyInput id="tCost" value={cost} onChange={setCost} /></Field>}
     </Sheet>
   );
@@ -322,8 +412,8 @@ export function HowSheet({ rw, apply, onClose }: { rw: Runway; apply: Apply; onC
     <Sheet title="How these numbers are worked out" onClose={onClose} onSave={save} saveLabel="Done" hideCancel>
       <div className="flex flex-col gap-3 text-[14.5px] text-[#526070]">
         <div><H>Going out</H>Your expenses as you entered them. Salaries and rent stay the same and go up each April by the raise you set. Costs that change, like AWS, follow their own trend. {s.buffer_pct}% is added on top for things nobody remembers to plan.</div>
-        <div><H>Coming in</H>Each product on its own. A fixed product counts its monthly amount. A product whose income changes follows its recent growth, and the growth slowly levels off so one good month is not stretched forever. Its linked cost, like GMDI’s bank charges, counts as going out at the same share of revenue as its last three months.</div>
-        <div><H>This month</H>From your figures: money so far divided by the days it took, carried to the month end. If you also typed the product’s own forecast, the two are averaged. Any number of days between figures works.</div>
+        <div><H>Coming in</H>Each product on its own, counted in the month the money reaches the bank. GMDI bills each month on the 1st of the next: every client pays its usage fees, or its minimum if usage falls short, so the forecast follows GMDI’s past bills and never drops below the clients’ minimums. A fixed product counts its monthly amount. A product whose income changes follows its recent growth, which slowly levels off so one good month is not stretched forever. Linked costs like GMDI’s bank charges count as going out in the month they happen.</div>
+        <div><H>This month</H>For GMDI, the expected bill from its Profit Outlook, taken as it is. For other products, money so far divided by the days it took, carried to the month end, and averaged with the product’s own forecast if you typed one. Any number of days between figures works.</div>
         <div><H>Break-even</H>The first month income pays for all costs, and keeps doing it three months in a row.</div>
         <div><H>All money back</H>The month when everything earned since {mLong(s.start_month)} catches up with everything spent.</div>
         <div><H>On track</H>Checked against a slower-growth case, on purpose. On track if the money lasts {s.green_months} months or more even then; within reach from {s.amber_months} to {s.green_months}; needs a plan below {s.amber_months}.</div>
