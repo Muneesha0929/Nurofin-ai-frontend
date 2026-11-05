@@ -20,7 +20,9 @@ import {
   WCHistoryEntry,
   WCTransfer,
   WCPerformance,
+  TaskComment,
 } from '@/services/workcenter';
+import { MentionTextarea, MentionContent, MentionUser } from '@/components/ui/MentionTextarea';
 import { UserProfile as UserType, Project } from '@/types';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
@@ -50,6 +52,12 @@ import {
 import {
   Plus,
   CheckCircle,
+  CheckCircle2,
+  Paperclip,
+  Send,
+  Reply,
+  Check,
+  Pencil,
   Clock,
   AlertTriangle,
   Loader2,
@@ -192,8 +200,23 @@ export default function TaskCenterPage() {
   }, []);
   const openFromLinkRef = useRef<((t: { id: number }) => void) | null>(null);
   useEffect(() => {
-    const id = Number(new URLSearchParams(window.location.search).get('task'));
-    if (id) setTimeout(() => openFromLinkRef.current?.({ id }), 0);
+    const handleUrlCheck = () => {
+      const params = new URLSearchParams(window.location.search);
+      const id = Number(params.get('task'));
+      const tab = params.get('tab');
+      if (tab === 'updates') {
+        setDetailDefaultTab('updates');
+      }
+      if (id) {
+        setTimeout(() => {
+          if (tab === 'updates') setDetailDefaultTab('updates');
+          openFromLinkRef.current?.({ id });
+        }, 50);
+      }
+    };
+    handleUrlCheck();
+    window.addEventListener('popstate', handleUrlCheck);
+    return () => window.removeEventListener('popstate', handleUrlCheck);
   }, []);
   const [projects, setProjects] = useState<Project[]>([]);
   const [allUsers, setAllUsers] = useState<UserType[]>([]);
@@ -216,7 +239,7 @@ export default function TaskCenterPage() {
   const [editingTask, setEditingTask] = useState<WCTask | null>(null);
   const [createSubtaskForParent, setCreateSubtaskForParent] = useState<WCTask | null>(null);
   const [selectedTask, setSelectedTask] = useState<WCTask | null>(null);
-  const [detailDefaultTab, setDetailDefaultTab] = useState<'details' | 'history' | 'transfers'>('details');
+  const [detailDefaultTab, setDetailDefaultTab] = useState<'details' | 'updates' | 'history' | 'transfers'>('details');
   const [detailOpen, setDetailOpen] = useState(false);
   const [transferTask, setTransferTask] = useState<WCTask | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -941,6 +964,10 @@ export default function TaskCenterPage() {
                     handleSelectTask({ id: task.id });
                   }}
                   onDeleteTask={handleDeleteTask}
+                  onFollowUpTask={(task) => {
+                    setDetailDefaultTab('updates');
+                    handleSelectTask(task);
+                  }}
                 />
               ) : (
                 <TaskTableView tasks={filteredTasks} onSelectTask={handleSelectTask} />
@@ -1328,6 +1355,7 @@ export default function TaskCenterPage() {
         onRefreshTask={id => handleSelectTask({ id })}
         onSelectTask={handleSelectTask}
         defaultTab={detailDefaultTab}
+        onAddSubtask={(parent) => { setCreateSubtaskForParent(parent); setShowCreateEdit(true); }}
       />
 
       {/* Transfer Dialog */}
@@ -1516,7 +1544,7 @@ export default function TaskCenterPage() {
 
 /* ─── Kanban Board ────────────────────────────────────────────────────────── */
 
-function RecursiveWorkcenterSubtaskList({ subtasks, onSelectTask, onStatusChange, onEditTask, onDeleteTask, depth = 1 }: any) {
+function RecursiveWorkcenterSubtaskList({ subtasks, onSelectTask, onStatusChange, onEditTask, onDeleteTask, onAddSubtask, onFollowUpTask, depth = 1 }: any) {
   if (!subtasks || subtasks.length === 0) return null;
   return (
     <div className="grid grid-cols-1 gap-1.5 w-full">
@@ -1617,7 +1645,28 @@ function RecursiveWorkcenterSubtaskList({ subtasks, onSelectTask, onStatusChange
                 </div>
 
                 {/* 8. Actions */}
-                <div className="w-14 flex-shrink-0 flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
+                <div className="w-36 flex-shrink-0 flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      if (onFollowUpTask) onFollowUpTask(st);
+                      else onSelectTask(st);
+                    }} 
+                    className="px-2 py-0.5 bg-accent-blue/15 hover:bg-accent-blue text-accent-blue hover:text-white border border-accent-blue/40 text-[9px] font-bold rounded transition-all flex items-center gap-1 select-none shadow-xs" 
+                    title="Open Updates & Follow-up thread"
+                  >
+                    <MessageSquare className="w-3 h-3" />
+                    <span>Follow-up</span>
+                  </button>
+                  {onAddSubtask && (
+                    <button 
+                      onClick={() => onAddSubtask(st)} 
+                      className="p-1 rounded hover:bg-background-primary text-text-muted hover:text-accent-blue transition-colors flex items-center gap-0.5 text-[9px] font-semibold" 
+                      title="Add Sub-subtask"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   {onEditTask && (
                     <button 
                       onClick={() => onEditTask(st as any)} 
@@ -1695,6 +1744,8 @@ function RecursiveWorkcenterSubtaskList({ subtasks, onSelectTask, onStatusChange
                 onEditTask={onEditTask}
                 onDeleteTask={onDeleteTask}
                 depth={depth + 1}
+                onAddSubtask={onAddSubtask}
+                onFollowUpTask={onFollowUpTask}
               />
             )}
           </div>
@@ -1715,6 +1766,7 @@ function GroupedTaskFeed({
   onViewHistory,
   onDeleteTask,
   onAddSubtask,
+  onFollowUpTask,
 }: {
   tasks: WCTask[];
   onSelectTask: (t: any) => void;
@@ -1726,6 +1778,7 @@ function GroupedTaskFeed({
   onViewHistory?: (t: WCTask) => void;
   onDeleteTask?: (id: number) => void;
   onAddSubtask?: (parent: WCTask) => void;
+  onFollowUpTask?: (task: any) => void;
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     in_progress: true,
@@ -1794,6 +1847,7 @@ function GroupedTaskFeed({
                     <div className="w-14 flex-shrink-0">Priority</div>
                     <div className="w-16 2xl:w-24 flex-shrink-0">View Subtask</div>
                     <div className="w-16 2xl:w-24 flex-shrink-0">Add Subtask</div>
+                    <div className="w-20 2xl:w-24 flex-shrink-0 text-center font-bold text-accent-blue">Follow-up</div>
                     <div className="w-24 flex-shrink-0">Status</div>
                     <div className="w-16 flex-shrink-0 text-right pr-2">Actions</div>
                   </div>
@@ -1954,6 +2008,23 @@ function GroupedTaskFeed({
                             className="px-2 py-1 bg-background-secondary hover:bg-surface-hover border border-border-subtle/50 text-[9px] font-bold rounded text-text-secondary hover:text-text-primary transition-all flex items-center gap-1 select-none w-full justify-center"
                           >
                             <Plus className="w-3 h-3 text-text-muted" /> Add
+                          </button>
+                        </div>
+
+                        {/* 10b. Dedicated Follow-up Button */}
+                        <div className="w-20 2xl:w-24 flex-shrink-0 flex justify-center" onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onFollowUpTask) onFollowUpTask(task);
+                              else onSelectTask(task);
+                            }}
+                            className="px-2.5 py-1 bg-accent-blue/15 hover:bg-accent-blue text-accent-blue hover:text-white border border-accent-blue/40 text-[9px] font-bold rounded transition-all flex items-center gap-1 select-none hover:scale-105 active:scale-95 shadow-xs"
+                            title="Open Updates & Follow-up thread"
+                          >
+                            <MessageSquare className="w-3 h-3" />
+                            <span>Follow-up</span>
                           </button>
                         </div>
 
@@ -2157,7 +2228,7 @@ function GroupedTaskFeed({
                             <div className="w-20 flex-shrink-0">Assignee</div>
                             <div className="w-24 flex-shrink-0">Transferred Info</div>
                             <div className="w-24 flex-shrink-0">Status</div>
-                            <div className="w-14 flex-shrink-0 text-right">Actions</div>
+                            <div className="w-36 flex-shrink-0 text-right pr-2">Actions / Follow-up</div>
                           </div>
 
                           <div className="grid grid-cols-1 gap-1.5">
@@ -2168,6 +2239,7 @@ function GroupedTaskFeed({
                               onEditTask={onEditTask}
                               onDeleteTask={onDeleteTask}
                               depth={1}
+                              onAddSubtask={onAddSubtask}
                             />
                           </div>
                         </div>
@@ -2208,6 +2280,7 @@ function TaskTableView({
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Deadline</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Actual Completion</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Status</TableHead>
+            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted text-center">Follow-up</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -2241,6 +2314,17 @@ function TaskTableView({
                   <span className="text-[11px] font-bold">{getStatusLabel(task.status)}</span>
                 </div>
               </TableCell>
+              <TableCell onClick={e => e.stopPropagation()} className="text-center">
+                <button
+                  type="button"
+                  onClick={() => onSelectTask(task)}
+                  className="px-2.5 py-1 bg-accent-blue/15 hover:bg-accent-blue text-accent-blue hover:text-white border border-accent-blue/40 text-[9px] font-bold rounded transition-all inline-flex items-center gap-1 select-none shadow-xs"
+                  title="View updates or post a follow-up"
+                >
+                  <MessageSquare className="w-3 h-3" />
+                  <span>Follow-up</span>
+                </button>
+              </TableCell>
             </TableRow>
           ))}
           {tasks.length === 0 && (
@@ -2256,7 +2340,7 @@ function TaskTableView({
 
 /* ─── Task Detail Dialog ──────────────────────────────────────────────────── */
 
-function DetailSubtaskList({ subtasks, task, onSelectTask, onRefreshTask, depth = 0 }: any) {
+function DetailSubtaskList({ subtasks, task, onSelectTask, onRefreshTask, onAddSubtask, depth = 0 }: any) {
   if (!subtasks || subtasks.length === 0) return null;
   return (
     <>
@@ -2291,6 +2375,19 @@ function DetailSubtaskList({ subtasks, task, onSelectTask, onRefreshTask, depth 
                   {st.assigned_to_name.split(' ')[0]}
                 </span>
               )}
+              {onAddSubtask && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAddSubtask(st);
+                  }}
+                  className="p-1 text-text-muted hover:text-accent-blue hover:bg-surface-hover rounded transition-colors opacity-70 group-hover:opacity-100 flex-shrink-0"
+                  title="Add sub-subtask under this subtask"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
             {hasChildren && (
               <DetailSubtaskList 
@@ -2299,6 +2396,7 @@ function DetailSubtaskList({ subtasks, task, onSelectTask, onRefreshTask, depth 
                 onSelectTask={onSelectTask}
                 onRefreshTask={onRefreshTask}
                 depth={depth + 1}
+                onAddSubtask={onAddSubtask}
               />
             )}
           </React.Fragment>
@@ -2320,6 +2418,7 @@ function TaskDetailDialog({
   allUsers,
   onRefreshTask,
   onSelectTask,
+  onAddSubtask,
   defaultTab,
 }: {
   task: WCTask | null;
@@ -2333,17 +2432,108 @@ function TaskDetailDialog({
   allUsers: UserType[];
   onRefreshTask: (id: number) => void;
   onSelectTask?: (taskItem: { id: number }) => void;
-  defaultTab?: 'details' | 'history' | 'transfers';
+  onAddSubtask?: (parent: WCTask) => void;
+  defaultTab?: 'details' | 'updates' | 'history' | 'transfers';
 }) {
   const [history, setHistory] = useState<WCHistoryEntry[]>([]);
   const [transfers, setTransfers] = useState<WCTransfer[]>([]);
-  const [activeTab, setActiveTab] = useState<'details' | 'history' | 'transfers'>(defaultTab || 'details');
+  const [activeTab, setActiveTab] = useState<'details' | 'updates' | 'history' | 'transfers'>(defaultTab || 'details');
+
+  useEffect(() => {
+    if (defaultTab) {
+      setActiveTab(defaultTab);
+    }
+  }, [defaultTab, task?.id]);
 
   const [loading, setLoading] = useState(false);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [newSubtaskDescription, setNewSubtaskDescription] = useState('');
   const [newSubtaskAssigneeId, setNewSubtaskAssigneeId] = useState('');
   const [addingSubtask, setAddingSubtask] = useState(false);
+
+  // Description inline edit state
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [editDescValue, setEditDescValue] = useState(task?.description || '');
+  const [savingDesc, setSavingDesc] = useState(false);
+
+  // Comments / Updates state
+  const [comments, setComments] = useState<TaskComment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [newCommentText, setNewCommentText] = useState('');
+  const [isFollowupCompleted, setIsFollowupCompleted] = useState(false);
+  const [postingComment, setPostingComment] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<{ filename: string; url: string }[]>([]);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [replyingToId, setReplyingToId] = useState<number | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [postingReply, setPostingReply] = useState(false);
+
+  const loadComments = useCallback(async () => {
+    if (!task) return;
+    setLoadingComments(true);
+    try {
+      const data = await workcenterService.getComments(task.id);
+      setComments(data || []);
+    } catch (err) {
+      setComments([]);
+    } finally {
+      setLoadingComments(false);
+    }
+  }, [task]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !task) return;
+    setUploadingFile(true);
+    try {
+      const res = await workcenterService.uploadAttachment(task.id, file);
+      setAttachedFiles(prev => [...prev, { filename: res.filename || file.name, url: res.url }]);
+    } catch (err) {
+      console.error('Upload failed:', err);
+    } finally {
+      setUploadingFile(false);
+      e.target.value = '';
+    }
+  };
+
+  const handlePostComment = async () => {
+    if (!newCommentText.trim() || !task) return;
+    setPostingComment(true);
+    try {
+      await workcenterService.addComment(task.id, {
+        content: newCommentText.trim(),
+        is_followup_completed: isFollowupCompleted,
+        attachments: attachedFiles,
+      });
+      setNewCommentText('');
+      setIsFollowupCompleted(false);
+      setAttachedFiles([]);
+      loadComments();
+      if (onRefreshTask) onRefreshTask(task.id);
+    } catch (err) {
+      console.error('Failed to post update:', err);
+    } finally {
+      setPostingComment(false);
+    }
+  };
+
+  const handlePostReply = async (parentId: number) => {
+    if (!replyText.trim() || !task) return;
+    setPostingReply(true);
+    try {
+      await workcenterService.addComment(task.id, {
+        content: replyText.trim(),
+        parent_id: parentId,
+      });
+      setReplyText('');
+      setReplyingToId(null);
+      loadComments();
+    } catch (err) {
+      console.error('Failed to post reply:', err);
+    } finally {
+      setPostingReply(false);
+    }
+  };
 
   const handleAddSubtask = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -2376,6 +2566,11 @@ function TaskDetailDialog({
     if (!task || !open) return;
     setLoading(true);
     setActiveTab(defaultTab || 'details');
+    setIsEditingDescription(false);
+    setEditDescValue(task.description || '');
+    setReplyingToId(null);
+    setAttachedFiles([]);
+    loadComments();
     Promise.all([
       workcenterService.getHistory(task.id).catch(() => []),
       workcenterService.getTransfers(task.id).catch(() => []),
@@ -2384,7 +2579,7 @@ function TaskDetailDialog({
       setTransfers(t);
       setLoading(false);
     });
-  }, [task?.id, open, defaultTab]);
+  }, [task, open, defaultTab, loadComments]);
 
   if (!task) return null;
 
@@ -2407,42 +2602,165 @@ function TaskDetailDialog({
               </button>
             )}
           </div>
-          <DialogDescription className="flex flex-wrap items-center gap-2 mt-1">
-            <span className={cn("px-2 py-0.5 rounded border text-[9px] font-bold uppercase", getPriorityColor(task.priority))}>{task.priority}</span>
-            <span className="text-[11px] bg-surface-card px-2 py-0.5 rounded border border-border-subtle flex items-center gap-1 font-semibold">
-              <span className={cn("w-1.5 h-1.5 rounded-full inline-block", getStatusDot(task.status))} />
-              {getStatusLabel(task.status)}
-            </span>
-            {task.project_name && (
-              <span className="text-[11px] text-accent-blue bg-accent-blue/10 px-2 py-0.5 rounded border border-accent-blue/20">{task.project_name}</span>
-            )}
-          </DialogDescription>
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-1">
+            <DialogDescription className="flex flex-wrap items-center gap-2">
+              <span className={cn("px-2 py-0.5 rounded border text-[9px] font-bold uppercase", getPriorityColor(task.priority))}>{task.priority}</span>
+              <span className="text-[11px] bg-surface-card px-2 py-0.5 rounded border border-border-subtle flex items-center gap-1 font-semibold">
+                <span className={cn("w-1.5 h-1.5 rounded-full inline-block", getStatusDot(task.status))} />
+                {getStatusLabel(task.status)}
+              </span>
+              {task.project_name && (
+                <span className="text-[11px] text-accent-blue bg-accent-blue/10 px-2 py-0.5 rounded border border-accent-blue/20">{task.project_name}</span>
+              )}
+            </DialogDescription>
+            <button
+              type="button"
+              onClick={() => setActiveTab('updates')}
+              className={cn(
+                "px-3 py-1 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs",
+                activeTab === 'updates'
+                  ? "bg-accent-blue text-white ring-2 ring-accent-blue/30"
+                  : "bg-accent-blue/15 hover:bg-accent-blue hover:text-white text-accent-blue border border-accent-blue/40"
+              )}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Follow-up & Updates</span>
+              {comments.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-accent-blue text-white font-bold ml-0.5">
+                  {comments.length}
+                </span>
+              )}
+            </button>
+          </div>
         </DialogHeader>
 
-        {!task.parent_id && (
-          <div className="flex border-b border-border-subtle text-[10px] font-bold text-text-muted uppercase tracking-wider mt-2 select-none">
-            {(['details', 'history', 'transfers'] as const).map(tab => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={cn(
-                  "px-4 py-2 transition-colors",
-                  activeTab === tab ? "text-accent-blue border-b-2 border-accent-blue" : "hover:text-text-primary"
-                )}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="flex border-b border-border-subtle text-[10px] font-bold text-text-muted uppercase tracking-wider mt-2 select-none overflow-x-auto">
+          {(['details', 'updates', 'history', 'transfers'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={cn(
+                "px-3 py-2 transition-colors flex items-center gap-1.5 whitespace-nowrap",
+                activeTab === tab ? "text-accent-blue border-b-2 border-accent-blue" : "hover:text-text-primary"
+              )}
+            >
+              {tab === 'details' && 'Details'}
+              {tab === 'updates' && (
+                <>
+                  Updates & Follow-ups
+                  {comments.length > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-accent-blue/15 text-accent-blue font-bold">
+                      {comments.length}
+                    </span>
+                  )}
+                </>
+              )}
+              {tab === 'history' && 'History'}
+              {tab === 'transfers' && 'Transfers'}
+            </button>
+          ))}
+        </div>
 
         {activeTab === 'details' && (
           <div className="space-y-4 py-3 text-xs">
             <div className="space-y-1.5">
-              <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block">Description</span>
-              <p className="text-text-primary leading-relaxed bg-background-primary p-3 rounded border border-border-subtle/50 text-[11px] whitespace-pre-wrap">
-                {task.description || 'No description provided.'}
-              </p>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block">Description</span>
+                {!isEditingDescription && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditDescValue(task.description || '');
+                      setIsEditingDescription(true);
+                    }}
+                    className="p-1 text-text-muted hover:text-accent-blue rounded transition-colors flex items-center gap-1 text-[10px] font-semibold"
+                    title="Edit description directly"
+                  >
+                    <Pencil className="w-3 h-3" />
+                    <span>Edit</span>
+                  </button>
+                )}
+              </div>
+
+              {isEditingDescription ? (
+                <div className="space-y-2">
+                  <MentionTextarea
+                    value={editDescValue}
+                    onChange={setEditDescValue}
+                    users={allUsers}
+                    rows={3}
+                    placeholder="Task description... Type @ to tag teammates"
+                    className="w-full text-xs"
+                    autoFocus
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={savingDesc}
+                      onClick={() => setIsEditingDescription(false)}
+                      className="px-2.5 py-1 text-[10px] font-bold rounded border border-border-subtle hover:bg-surface-hover transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingDesc}
+                      onClick={async () => {
+                        setSavingDesc(true);
+                        try {
+                          await workcenterService.updateTask(task.id, { description: editDescValue.trim() || '' });
+                          task.description = editDescValue.trim() || null;
+                          setIsEditingDescription(false);
+                          if (onRefreshTask) onRefreshTask(task.id);
+                        } catch (err) {
+                          console.error('Failed to update description:', err);
+                        } finally {
+                          setSavingDesc(false);
+                        }
+                      }}
+                      className="px-2.5 py-1 text-[10px] font-bold rounded bg-accent-blue hover:bg-accent-blue-hover text-white transition-colors flex items-center gap-1"
+                    >
+                      {savingDesc ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                      Save
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-text-primary leading-relaxed bg-background-primary p-3 rounded border border-border-subtle/50 text-[11px] whitespace-pre-wrap">
+                  {task.description ? (
+                    <MentionContent text={task.description} users={allUsers} />
+                  ) : (
+                    <span className="text-text-muted italic">No description provided. Click Edit above to add one.</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Quick Follow-up Shortcut Card in Details */}
+            <div className="flex items-center justify-between p-3 rounded-lg bg-accent-blue/5 border border-accent-blue/20">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-accent-blue/10 flex items-center justify-center text-accent-blue flex-shrink-0">
+                  <MessageSquare className="w-4 h-4" />
+                </div>
+                <div className="text-left">
+                  <span className="text-xs font-bold text-text-primary block">
+                    Task Updates & Follow-ups
+                  </span>
+                  <span className="text-[10px] text-text-secondary">
+                    {comments.length > 0 
+                      ? `${comments.length} update${comments.length > 1 ? 's' : ''} / follow-up${comments.length > 1 ? 's' : ''} recorded. Click to view or post.` 
+                      : 'Tagged for a follow-up or have an update to submit? Post it here.'}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab('updates')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent-blue text-white text-[11px] font-bold hover:bg-accent-blue-hover transition-colors shadow-sm"
+              >
+                <span>Follow-up & Replies</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -2487,9 +2805,20 @@ function TaskDetailDialog({
 
             {((task.subtasks && task.subtasks.length > 0) || !task.parent_id) && (
               <div className="space-y-3 pt-3 border-t border-border-subtle/50 text-left">
-                <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block">
-                  Subtasks ({task.subtasks?.filter(s => s.status === 'completed').length ?? 0}/{task.subtasks?.length ?? 0})
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block">
+                    Subtasks ({task.subtasks?.filter(s => s.status === 'completed').length ?? 0}/{task.subtasks?.length ?? 0})
+                  </span>
+                  {onAddSubtask && (
+                    <button
+                      type="button"
+                      onClick={() => onAddSubtask(task)}
+                      className="text-[9px] font-bold text-accent-blue hover:underline flex items-center gap-0.5"
+                    >
+                      <Plus className="w-3 h-3" /> {task.parent_id ? 'Add Sub-subtask' : 'Add Subtask'}
+                    </button>
+                  )}
+                </div>
                 
                 <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
                   {task.subtasks && (
@@ -2498,6 +2827,7 @@ function TaskDetailDialog({
                       task={task}
                       onSelectTask={onSelectTask}
                       onRefreshTask={onRefreshTask}
+                      onAddSubtask={onAddSubtask}
                     />
                   )}
                   {(!task.subtasks || task.subtasks.length === 0) && (
@@ -2558,6 +2888,213 @@ function TaskDetailDialog({
                   ))}
                 </select>
               </div>
+            </div>
+          </div>
+        )}
+
+
+        {activeTab === 'updates' && (
+          <div className="py-3 space-y-4 max-h-[480px] overflow-y-auto pr-1">
+            {/* Tagged Follow-up Helper Banner */}
+            <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-text-primary flex items-start gap-2 text-xs">
+              <Sparkles className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <span className="font-bold text-emerald-500 block">Follow-up & Work Updates</span>
+                <span className="text-[10px] text-text-secondary">
+                  Post your progress below. Tag teammates with @ to notify them. If completing a requested follow-up, check &quot;Mark Follow-up Completed&quot; so the assigner is alerted.
+                </span>
+              </div>
+            </div>
+
+            {/* Post New Update / Follow-up Box */}
+            <div className="bg-background-primary p-3 rounded-lg border border-border-subtle/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                  <MessageSquare className="w-3 h-3 text-accent-blue" />
+                  Post Update or Follow-up
+                </span>
+                <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-bold select-none text-text-secondary hover:text-text-primary">
+                  <input
+                    type="checkbox"
+                    checked={isFollowupCompleted}
+                    onChange={e => setIsFollowupCompleted(e.target.checked)}
+                    className="rounded border-border-subtle text-accent-green focus:ring-0 w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
+                  />
+                  <span className={cn(isFollowupCompleted && "text-emerald-500 font-bold")}>
+                    Mark Follow-up Completed
+                  </span>
+                </label>
+              </div>
+
+              <MentionTextarea
+                value={newCommentText}
+                onChange={setNewCommentText}
+                users={allUsers}
+                rows={2}
+                placeholder="Write an update, progress note, or response... Type @ to tag teammates"
+                className="w-full text-xs"
+              />
+
+              {/* Attachments list & File upload button */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="cursor-pointer inline-flex items-center gap-1 px-2 py-1 rounded border border-border-subtle/80 hover:bg-surface-hover text-text-muted hover:text-text-primary text-[10px] font-medium transition-colors">
+                    {uploadingFile ? <Loader2 className="w-3 h-3 animate-spin text-accent-blue" /> : <Paperclip className="w-3 h-3" />}
+                    <span>Attach File</span>
+                    <input
+                      type="file"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      disabled={uploadingFile}
+                    />
+                  </label>
+                  {attachedFiles.map((f, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 bg-background-secondary border border-border-subtle px-2 py-0.5 rounded text-[10px] text-text-secondary">
+                      <Paperclip className="w-2.5 h-2.5" />
+                      <span className="truncate max-w-[120px]">{f.filename}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAttachedFiles(prev => prev.filter((_, idx) => idx !== i))}
+                        className="hover:text-accent-red ml-0.5 font-bold"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={postingComment || !newCommentText.trim()}
+                  onClick={handlePostComment}
+                  className="px-3 py-1 bg-accent-blue hover:bg-accent-blue-hover text-white text-[10px] font-bold rounded shadow transition-all disabled:opacity-50 flex items-center gap-1"
+                >
+                  {postingComment ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                  Post
+                </button>
+              </div>
+            </div>
+
+            {/* Comments / Updates List */}
+            <div className="space-y-3">
+              {loadingComments ? (
+                <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-accent-blue" /></div>
+              ) : comments.length === 0 ? (
+                <div className="text-center py-8 text-[11px] text-text-muted border border-dashed border-border-subtle rounded-lg">
+                  No updates or follow-ups posted yet. Post one above!
+                </div>
+              ) : (
+                comments.map(c => {
+                  const renderCommentNode = (item: TaskComment, isReply = false) => (
+                    <div
+                      key={item.id}
+                      className={cn(
+                        "bg-background-primary p-3 rounded-lg border border-border-subtle/40 space-y-2 text-left",
+                        isReply && "ml-5 border-l-2 border-l-accent-blue/40 bg-background-secondary/30",
+                        item.is_followup_completed && "border-emerald-500/30 bg-emerald-500/5"
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {item.user_avatar ? (
+                            <img src={item.user_avatar} className="w-5 h-5 rounded-full object-cover border border-border-subtle" alt={item.user_name} />
+                          ) : (
+                            <div className="w-5 h-5 rounded-full bg-accent-blue text-white flex items-center justify-center text-[9px] font-bold">
+                              {item.user_name?.charAt(0) || 'U'}
+                            </div>
+                          )}
+                          <span className="font-bold text-[11px] text-text-primary">{item.user_name}</span>
+                          {item.user_role && (
+                            <span className="text-[9px] text-text-muted capitalize">· {item.user_role}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {item.is_followup_completed && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Follow-up Completed
+                            </span>
+                          )}
+                          <span className="text-[9px] text-text-muted">{item.created_at ? timeAgo(item.created_at) : ''}</span>
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-text-primary leading-relaxed pl-7">
+                        <MentionContent text={item.content} users={allUsers} />
+                      </div>
+
+                      {item.attachments && item.attachments.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pl-7 pt-1">
+                          {item.attachments.map((att: any, idx: number) => (
+                            <a
+                              key={idx}
+                              href={att.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-background-secondary hover:bg-surface-hover border border-border-subtle text-[10px] text-accent-blue font-medium transition-colors"
+                            >
+                              <Paperclip className="w-3 h-3" />
+                              <span className="truncate max-w-[150px]">{att.name || att.filename || 'Attachment'}</span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Reply Button and Reply Input */}
+                      <div className="pl-7 pt-1 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => setReplyingToId(replyingToId === item.id ? null : item.id)}
+                          className="text-[10px] text-text-muted hover:text-accent-blue font-semibold flex items-center gap-1 transition-colors"
+                        >
+                          <Reply className="w-3 h-3" />
+                          Reply
+                        </button>
+                      </div>
+
+                      {replyingToId === item.id && (
+                        <div className="ml-7 mt-2 p-2.5 bg-background-secondary/70 rounded-lg border border-border-subtle/50 space-y-2">
+                          <MentionTextarea
+                            value={replyText}
+                            onChange={setReplyText}
+                            users={allUsers}
+                            rows={2}
+                            placeholder={`Reply to ${item.user_name}...`}
+                            className="w-full text-xs"
+                            autoFocus
+                          />
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => { setReplyingToId(null); setReplyText(''); }}
+                              className="px-2 py-0.5 text-[10px] font-bold rounded border border-border-subtle hover:bg-surface-hover"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              disabled={postingReply || !replyText.trim()}
+                              onClick={() => handlePostReply(item.id)}
+                              className="px-2.5 py-0.5 bg-accent-blue hover:bg-accent-blue-hover text-white text-[10px] font-bold rounded disabled:opacity-50 flex items-center gap-1"
+                            >
+                              {postingReply ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                              Send Reply
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Nested replies */}
+                      {item.replies && item.replies.length > 0 && (
+                        <div className="space-y-2 pt-2">
+                          {item.replies.map(r => renderCommentNode(r, true))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                  return renderCommentNode(c, false);
+                })
+              )}
             </div>
           </div>
         )}
@@ -2855,7 +3392,7 @@ function CreateEditTaskDialog({
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className={cn("max-h-[85vh] overflow-y-auto font-sans text-left transition-all duration-300", subtasks.length > 0 ? "max-w-2xl" : "max-w-md")}>
         <DialogHeader>
-          <DialogTitle className="text-sm font-bold">{isEdit ? 'Edit Task' : (form.parent_id ? 'Create New Subtask' : 'Create New Task')}</DialogTitle>
+          <DialogTitle className="text-sm font-bold">{isEdit ? 'Edit Task' : (form.parent_id ? (parentTask?.parent_id ? `Add Sub-subtask under "${parentTask.title}"` : (parentTask ? `Add Subtask under "${parentTask.title}"` : 'Create New Subtask')) : 'Create New Task')}</DialogTitle>
           <DialogDescription>{isEdit ? 'Update task details below.' : (form.parent_id ? 'Fill in the details to create a new subtask.' : 'Fill in the details to create a new task.')}</DialogDescription>
         </DialogHeader>
 
@@ -2866,7 +3403,14 @@ function CreateEditTaskDialog({
           </div>
           <div className="space-y-1.5">
             <label className="text-[10px] font-bold text-text-secondary uppercase">Description</label>
-            <Textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="Task details..." className="text-xs" />
+            <MentionTextarea
+              value={form.description}
+              onChange={val => setForm(f => ({ ...f, description: val }))}
+              users={allUsers}
+              rows={3}
+              placeholder="Task details... Type @ to tag teammates"
+              className="w-full text-xs"
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

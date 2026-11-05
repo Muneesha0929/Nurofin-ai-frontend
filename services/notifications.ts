@@ -77,9 +77,37 @@ export const notificationsService = {
     return rawList.map(mapNotification);
   },
 
-  markAsRead: async (id: number): Promise<void> => {
+  markAsRead: async (id: number | string): Promise<void> => {
     await fetch(`/api/v1/notifications/${id}/read`, {
       method: 'PUT',
+      headers: getHeaders()
+    });
+  },
+
+  markAllAsRead: async (unreadIds?: (string | number)[]): Promise<void> => {
+    try {
+      const res = await fetch('/api/v1/notifications/read-all', {
+        method: 'PUT',
+        headers: getHeaders()
+      });
+      if (res.ok) return;
+    } catch {}
+
+    if (unreadIds && unreadIds.length > 0) {
+      await Promise.all(
+        unreadIds.map(id =>
+          fetch(`/api/v1/notifications/${id}/read`, {
+            method: 'PUT',
+            headers: getHeaders()
+          }).catch(() => {})
+        )
+      );
+    }
+  },
+
+  clearAll: async (): Promise<void> => {
+    await fetch('/api/v1/notifications/clear-all', {
+      method: 'DELETE',
       headers: getHeaders()
     });
   }

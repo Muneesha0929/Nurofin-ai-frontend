@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import Link from 'next/link';
-import { Search, Bell, Menu, Sun, Moon, Sparkles, CheckCheck } from 'lucide-react';
+import { Search, Bell, Menu, Sun, Moon } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
+import NotificationShade from '@/components/notifications/NotificationShade';
 
 export default function Topbar() {
   const pathname = usePathname();
@@ -15,16 +15,13 @@ export default function Topbar() {
     searchQuery, 
     setSearchQuery, 
     notifications, 
-    markAllNotificationsAsRead,
-    markNotificationAsRead,
     aiStatus,
     theme,
     setTheme
   } = useStore();
 
   const [timeString, setTimeString] = useState('');
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [shadeOpen, setShadeOpen] = useState(false);
 
   // Digital Clock synchronize
   useEffect(() => {
@@ -37,17 +34,6 @@ export default function Topbar() {
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
-  }, []);
-
-  // Dropdown click outside hook
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const unreadNotifications = notifications.filter(n => !n.read);
@@ -139,84 +125,28 @@ export default function Topbar() {
           {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
 
-        {/* Notification Bell Dropdown */}
-        <div className="relative" ref={dropdownRef}>
+        {/* Notification Bell Button with Smartphone-style Pull-Down Shade */}
+        <div className="relative">
           <button
-            onClick={() => setDropdownOpen(!dropdownOpen)}
+            onClick={() => setShadeOpen(!shadeOpen)}
             className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded-md transition-colors relative"
-            aria-label="View Notification timeline"
+            aria-label="Toggle Notification center"
+            title="Open Notifications"
           >
             <Bell className="w-4 h-4" />
             {unreadCount > 0 && (
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-red animate-ping" />
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-accent-red text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow-md ring-2 ring-background-secondary animate-in zoom-in-75">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
             )}
           </button>
-
-          {dropdownOpen && (
-            <div className="absolute right-0 mt-2 w-80 bg-background-secondary border border-border-subtle rounded-md shadow-xl z-50 overflow-hidden font-sans">
-              <div className="px-4 py-3 border-b border-border-subtle flex items-center justify-between bg-surface-card/30">
-                <span className="text-xs font-bold text-text-primary">Notifications</span>
-                {unreadCount > 0 && (
-                  <button 
-                    onClick={() => {
-                      markAllNotificationsAsRead();
-                      setDropdownOpen(false);
-                    }} 
-                    className="flex items-center gap-1 text-[10px] text-accent-blue hover:underline font-semibold"
-                  >
-                    <CheckCheck className="w-3.5 h-3.5" />
-                    Mark all read
-                  </button>
-                )}
-              </div>
-
-              <div className="max-h-72 overflow-y-auto divide-y divide-border-subtle">
-                {notifications.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-text-muted">No notifications</div>
-                ) : (
-                  notifications.slice(0, 5).map((notif) => (
-                    <div 
-                      key={notif.id}
-                      onClick={() => {
-                        markNotificationAsRead(notif.id);
-                        setDropdownOpen(false);
-                      }}
-                      className={cn(
-                        "p-3 text-left transition-colors cursor-pointer hover:bg-surface-hover",
-                        !notif.read ? "bg-accent-blue/5 border-l-2 border-accent-blue" : ""
-                      )}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className={cn(
-                          "text-[10px] font-bold uppercase tracking-wider",
-                          notif.type === 'error' ? "text-accent-red" :
-                          notif.type === 'warning' ? "text-accent-orange" :
-                          notif.type === 'success' ? "text-accent-green" :
-                          "text-accent-blue"
-                        )}>
-                          {notif.category}
-                        </span>
-                        <span className="text-[9px] text-text-muted">{notif.time}</span>
-                      </div>
-                      <h4 className="text-xs font-semibold text-text-primary mb-0.5 truncate">{notif.title}</h4>
-                      <p className="text-[11px] text-text-secondary line-clamp-2 leading-relaxed">{notif.description}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div className="border-t border-border-subtle text-center">
-                <Link
-                  href="/notifications"
-                  onClick={() => setDropdownOpen(false)}
-                  className="block py-2.5 text-2xs text-text-secondary hover:text-text-primary hover:bg-surface-hover font-semibold transition-colors"
-                >
-                  View all notifications
-                </Link>
-              </div>
-            </div>
-          )}
         </div>
+
+        {/* Smartphone-Style Notification Shade */}
+        <NotificationShade
+          isOpen={shadeOpen}
+          onClose={() => setShadeOpen(false)}
+        />
       </div>
     </header>
   );

@@ -1,3 +1,18 @@
+export interface TaskComment {
+  id: number;
+  task_id: number;
+  user_id: number;
+  user_name: string;
+  user_avatar?: string | null;
+  user_role?: string | null;
+  content: string;
+  parent_id?: number | null;
+  attachments?: { name?: string; filename?: string; url: string; s3_key?: string }[];
+  is_followup_completed?: boolean;
+  created_at?: string | null;
+  replies?: TaskComment[];
+}
+
 const getHeaders = () => {
   let token = '';
   if (typeof window !== 'undefined') {
@@ -331,5 +346,44 @@ export const workcenterService = {
   getPerformance: (userId: number, quarterId?: number) => {
     const qs = quarterId ? `?quarter_id=${quarterId}` : '';
     return api<WCPerformance>(`${BASE}/performance/${userId}${qs}`);
+  },
+
+  getComments: (taskId: number) =>
+    api<TaskComment[]>(`${BASE}/${taskId}/comments`),
+
+  addComment: (
+    taskId: number,
+    payload: {
+      content: string;
+      parent_id?: number | null;
+      is_followup_completed?: boolean;
+      attachments?: { name?: string; filename?: string; url: string; s3_key?: string }[];
+    }
+  ) =>
+    api<TaskComment>(`${BASE}/${taskId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  uploadAttachment: async (taskId: number, file: File) => {
+    let token = '';
+    if (typeof window !== 'undefined') {
+      token = localStorage.getItem('auth_token') || '';
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${BASE}/${taskId}/comments/upload`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(err.detail || err.message || 'Upload failed');
+    }
+    const json = await res.json();
+    return json.data ?? json;
   },
 };

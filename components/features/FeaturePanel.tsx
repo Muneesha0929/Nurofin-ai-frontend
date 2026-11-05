@@ -14,6 +14,7 @@ import {
   FeatureDetail, FeatureEvent, FeatureInput, FeatureSolution, FeatureSource, FeatureStatus, NEEDS_REASON, SOURCE_LABEL,
   STATUS_LABEL, STATUS_ORDER, productFeaturesService,
 } from '@/services/productFeatures';
+import { MentionTextarea, MentionContent, MentionUser } from '@/components/ui/MentionTextarea';
 
 export const STATUS_CLS: Record<FeatureStatus, string> = {
   suggested: 'text-text-secondary bg-[var(--bg-primary)]',
@@ -161,7 +162,8 @@ function History({ events }: { events: FeatureEvent[] }) {
             {e.text && (
               <div className={cn('mt-1.5 text-[13px] whitespace-pre-wrap break-words rounded-lg px-3 py-2',
                 e.kind === 'status' ? 'bg-accent-blue/5 border-l-2 border-accent-blue text-text-primary' : 'bg-[var(--bg-primary)] text-text-primary')}>
-                {(e.kind === 'status' || e.kind === 'solution_chosen') && <span className="font-semibold">Why: </span>}{e.text}
+                {(e.kind === 'status' || e.kind === 'solution_chosen') && <span className="font-semibold">Why: </span>}
+                <MentionContent text={e.text} />
               </div>
             )}
             {e.kind === 'edited' && Object.entries(e.data?.changes || {}).map(([k, [was, now]]: any) => (
@@ -414,6 +416,19 @@ export function FeaturePanel({ id, areas, onClose, onChanged }: { id: number; ar
   const [editing, setEditing] = useState<FeatureInput | null>(null);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
+  const [mentionUsers, setMentionUsers] = useState<MentionUser[]>([]);
+
+  useEffect(() => {
+    usersService.getUsers().then(u => {
+      setMentionUsers((u || []).map((x: any) => ({
+        id: x.id,
+        name: x.name || x.full_name || x.email,
+        avatar: x.avatar || x.profile_picture,
+        role: x.role,
+        email: x.email
+      })));
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     setF(null); setError(''); setEditing(null);
@@ -514,9 +529,16 @@ export function FeaturePanel({ id, areas, onClose, onChanged }: { id: number; ar
 
             <section>
               <Label>History</Label>
-              <div className="flex gap-2 mb-4">
-                <textarea rows={2} className={input} value={comment} onChange={e => setComment(e.target.value)} placeholder="Add a comment" />
-                <button disabled={busy || !comment.trim()} onClick={async () => { if (await act(() => productFeaturesService.comment(f.id, comment))) setComment(''); }} className={cn(primary, 'self-end')}>Post</button>
+              <div className="flex flex-col gap-2 mb-4">
+                <MentionTextarea
+                  rows={2}
+                  className={cn(input, 'text-xs')}
+                  value={comment}
+                  onChange={setComment}
+                  users={mentionUsers}
+                  placeholder="Add a comment... Type @ to tag teammates"
+                />
+                <button disabled={busy || !comment.trim()} onClick={async () => { if (await act(() => productFeaturesService.comment(f.id, comment))) setComment(''); }} className={cn(primary, 'self-end')}>Post Comment</button>
               </div>
               <History events={f.events} />
             </section>

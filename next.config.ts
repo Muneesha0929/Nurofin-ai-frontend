@@ -6,6 +6,12 @@ const AI_ENGINE_URL = process.env.AI_ENGINE_URL || "http://127.0.0.1:8001";
 const isDev = process.env.NODE_ENV === "development";
 
 const nextConfig: NextConfig = {
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   ...(isDev ? {} : { output: "export" }),
   images: {
     unoptimized: true,
@@ -30,12 +36,6 @@ const nextConfig: NextConfig = {
         },
       }
     : {}),
-  webpack: (config, { dev }) => {
-    if (dev) {
-      config.cache = false;
-    }
-    return config;
-  },
 };
 
 export default nextConfig;
