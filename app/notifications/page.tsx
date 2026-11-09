@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore, Notification } from '@/lib/store';
 import { cn } from '@/utils/cn';
+import { formatISTDateTime } from '@/utils/date';
 import { notificationsService } from '@/services/notifications';
 import { workcenterService } from '@/services/workcenter';
 import { 
@@ -41,10 +42,22 @@ export default function NotificationsPage() {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const extractTaskId = (link?: string): number | null => {
-    if (!link) return null;
-    const match = link.match(/task=(\d+)/);
-    return match ? Number(match[1]) : null;
+  const extractTaskId = (notif: Notification): number | null => {
+    if (notif.link) {
+      const match = notif.link.match(/(?:task[=_]|task_id=|id=|\/tasks\/)(\d+)/i);
+      if (match) return Number(match[1]);
+    }
+    const text = `${notif.title || ''} ${notif.description || ''}`;
+    const textMatch = text.match(/(?:task|follow-up)\s*#?(\d+)/i);
+    if (textMatch) return Number(textMatch[1]);
+    return null;
+  };
+
+  const isTaskRelated = (notif: Notification): boolean => {
+    if (extractTaskId(notif) !== null) return true;
+    if (notif.category === 'tasks') return true;
+    const text = `${notif.title || ''} ${notif.description || ''} ${notif.notification_type || ''}`.toLowerCase();
+    return text.includes('task') || text.includes('follow-up') || text.includes('assigned') || text.includes('tagged');
   };
 
   const isFollowupNotification = (notif: Notification): boolean => {
@@ -94,12 +107,21 @@ export default function NotificationsPage() {
       markNotificationAsRead(notif.id);
       try { notificationsService.markAsRead(Number(notif.id)); } catch {}
     }
+
+    const taskId = extractTaskId(notif);
+    if (taskId) {
+      router.push(`/workcenter?task=${taskId}&tab=updates`);
+      return;
+    }
+
     if (notif.link) {
       let link = notif.link;
       if (link.includes('/workcenter') && !link.includes('tab=')) {
         link = link.includes('?') ? `${link}&tab=updates` : `${link}?tab=updates`;
       }
       router.push(link);
+    } else if (isTaskRelated(notif)) {
+      router.push('/workcenter');
     }
   };
 
@@ -115,7 +137,7 @@ export default function NotificationsPage() {
   };
 
   const handleSubmitQuickReply = async (notif: Notification) => {
-    const taskId = extractTaskId(notif.link);
+    const taskId = extractTaskId(notif);
     if (!taskId || !replyText.trim()) return;
 
     setSubmittingReply(true);
@@ -240,7 +262,8 @@ export default function NotificationsPage() {
             </div>
           ) : (
             filteredNotifs.map((notif) => {
-              const hasTaskLink = Boolean(notif.link && notif.link.includes('task='));
+              const taskId = extractTaskId(notif);
+              const taskRelated = isTaskRelated(notif);
               const isReplying = replyingId === notif.id;
               const isSuccess = successReplyId === notif.id;
 
@@ -265,9 +288,12 @@ export default function NotificationsPage() {
                             <span className="w-2 h-2 rounded-full bg-accent-blue" />
                           )}
                         </div>
-                        <span className="text-[10px] text-text-muted flex-shrink-0 font-mono flex items-center gap-1">
+                        <span 
+                          className="text-[10px] text-text-muted flex-shrink-0 font-mono flex items-center gap-1"
+                          title={notif.created_at ? formatISTDateTime(notif.created_at) : notif.time}
+                        >
                           <Clock className="w-2.5 h-2.5" />
-                          {notif.time || 'Recently'}
+                          {notif.created_at ? formatISTDateTime(notif.created_at) : (notif.time || 'Recently')}
                         </span>
                       </div>
                       <p className="text-[11px] text-text-secondary leading-relaxed">{notif.description}</p>
@@ -302,7 +328,7 @@ export default function NotificationsPage() {
                   )}
 
                   {/* Inline Quick Reply Drawer for Follow-up */}
-                  {isReplying && hasTaskLink && (
+                  {isReplying && taskId && (
                     <div className="p-3 rounded-lg bg-background-primary border border-border-subtle space-y-2.5">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1">
@@ -359,18 +385,16 @@ export default function NotificationsPage() {
 
                   {/* Card Action Buttons */}
                   <div className="flex items-center justify-between pt-1 border-t border-border-subtle/30">
-                    <div className="flex items-center gap-2">
-                      {notif.link && (
-                        <button
-                          onClick={() => handleOpenLink(notif)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent-blue text-white text-[11px] font-bold hover:bg-accent-blue/90 transition-colors"
-                        >
-                          <span>Open & Follow Up</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => handleOpenLink(notif)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent-blue text-white text-[11px] font-bold hover:bg-accent-blue/90 transition-colors"
+                      >
+                        <span>Open & Follow Up</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
 
-                      {hasTaskLink && !isReplying && (
+                      {taskId && !isReplying && (
                         <button
                           onClick={() => {
                             setReplyingId(notif.id);
@@ -428,20 +452,20 @@ export default function NotificationsPage() {
                       <div className="flex-1 min-w-0 space-y-1">
                         <div className="flex items-center justify-between gap-3">
                           <h4 className="font-bold text-text-primary text-xs truncate">{notif.title}</h4>
-                          <span className="text-[9px] text-text-muted flex-shrink-0">{notif.time}</span>
+                          <span className="text-[9px] text-text-muted flex-shrink-0" title={notif.created_at ? formatISTDateTime(notif.created_at) : notif.time}>
+                            {notif.created_at ? formatISTDateTime(notif.created_at) : notif.time}
+                          </span>
                         </div>
                         <p className="text-[11px] text-text-secondary leading-relaxed">{notif.description}</p>
-                        {notif.link && (
-                          <div className="pt-2">
-                            <button
-                              onClick={() => handleOpenLink(notif)}
-                              className="inline-flex items-center gap-1 text-[11px] font-bold text-accent-blue hover:underline"
-                            >
-                              <span>Open & Follow Up</span>
-                              <ArrowRight className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
+                        <div className="pt-2 flex items-center gap-2">
+                          <button
+                            onClick={() => handleOpenLink(notif)}
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-accent-blue hover:underline"
+                          >
+                            <span>Open & Follow Up</span>
+                            <ArrowRight className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                       <div className="flex items-center justify-center w-6 h-6 flex-shrink-0">
                         {!notif.read ? (

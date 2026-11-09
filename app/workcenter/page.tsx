@@ -5,6 +5,7 @@ import { FeatureSelect, TaskFeatureChips, currentFeatureOf, refreshTaskFeatures,
 import { departmentTargetsService } from '@/services/departmentTargets';
 import { ObjectivesBoard } from '@/components/targets/ObjectivesBoard';
 
+import { formatISTDateTime, formatISTDate, formatISTTime, accurateTimeAgo, formatTimestampWithAgo } from '@/utils/date';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { cn } from '@/utils/cn';
 import { useStore } from '@/lib/store';
@@ -129,15 +130,7 @@ const getStatusDot = (s: string) =>
   STATUS_COLS.find(c => c.key === s)?.color ?? 'text-text-muted';
 
 function timeAgo(iso: string | null): string {
-  if (!iso) return '';
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
+  return accurateTimeAgo(iso);
 }
 
 function todayStr(): string {
@@ -1204,7 +1197,7 @@ export default function TaskCenterPage() {
                       <p className="text-[11px] text-text-primary leading-tight font-medium">
                         <span className="font-bold">{act.user_name}</span> {act.description || act.action}
                       </p>
-                      <span className="text-[9px] text-text-muted mt-0.5 block">{timeAgo(act.created_at)}</span>
+                      <span className="text-[9px] text-text-muted mt-0.5 block font-mono">{act.created_at ? `${formatISTDateTime(act.created_at)} (${accurateTimeAgo(act.created_at)})` : ""}</span>
                     </div>
                   </div>
                 ))}
@@ -2438,12 +2431,96 @@ function TaskDetailDialog({
   const [history, setHistory] = useState<WCHistoryEntry[]>([]);
   const [transfers, setTransfers] = useState<WCTransfer[]>([]);
   const [activeTab, setActiveTab] = useState<'details' | 'updates' | 'history' | 'transfers'>(defaultTab || 'details');
+  const lastTaskIdRef = useRef<number | null>(null);
+  const { userProfile } = useStore();
+
+  // Comments / Updates state
+  const [comments, setComments] = useState<TaskComment[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [newCommentText, setNewCommentText] = useState('');
+  const [isFollowupCompleted, setIsFollowupCompleted] = useState(false);
+  const [postingComment, setPostingComment] = useState(false);
+  const [commentFeedback, setCommentFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<{ filename: string; url: string }[]>([]);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [replyingToId, setReplyingToId] = useState<number | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [replyIsCompleted, setReplyIsCompleted] = useState(false);
+  const [postingReply, setPostingReply] = useState(false);
+
+  // Track checked updates count to clear top-right notification pill once user visits updates tab
+  const [viewedCount, setViewedCount] = useState<number>(0);
 
   useEffect(() => {
-    if (defaultTab) {
-      setActiveTab(defaultTab);
+    if (!task) return;
+    try {
+      const stored = Number(localStorage.getItem(`nurofin-viewed-updates:${task.id}`) || 0);
+      setViewedCount(stored);
+    } catch {
+      setViewedCount(0);
     }
-  }, [defaultTab, task?.id]);
+  }, [task?.id]);
+
+  useEffect(() => {
+    if (!task) return;
+    if (activeTab === 'updates' || defaultTab === 'updates') {
+      try {
+        localStorage.setItem(`nurofin-viewed-updates:${task.id}`, String(comments.length));
+      } catch {}
+      setViewedCount(comments.length);
+    }
+  }, [activeTab, defaultTab, task?.id, comments.length]);
+
+  const newUncheckedCount = Math.max(0, comments.length - viewedCount);
+
+  // Check if currently logged in user is tagged in a comment
+  const isCurrentUserTaggedInComment = (commentItem: TaskComment): boolean => {
+    if (!userProfile || !commentItem || !commentItem.content) return false;
+    
+    const content = commentItem.content;
+    if (!content.includes('@')) return false;
+
+    // Names/handles to test for current user
+    const candidates: string[] = [];
+    if (userProfile.name) {
+      const cleanName = userProfile.name.trim();
+      candidates.push(cleanName);
+      const nameParts = cleanName.split(/\s+/).filter(Boolean);
+      if (nameParts.length > 1) {
+        candidates.push(nameParts[0]); // first name, e.g. "Nebisha"
+      }
+    }
+    if (userProfile.email) {
+      const prefix = userProfile.email.split('@')[0].trim();
+      if (prefix) candidates.push(prefix);
+    }
+
+    // Check if current user ID is listed in attachments JSON
+    if (commentItem.attachments) {
+      try {
+        const att = typeof commentItem.attachments === 'string' 
+          ? JSON.parse(commentItem.attachments) 
+          : commentItem.attachments;
+        if (att && Array.isArray(att.tagged_user_ids)) {
+          if (att.tagged_user_ids.some((id: any) => String(id) === String(userProfile.id))) {
+            return true;
+          }
+        }
+      } catch {}
+    }
+
+    // Check @mentions
+    for (const cand of candidates) {
+      if (!cand || cand.length < 2) continue;
+      const escaped = cand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`@${escaped}(?=[\\s,.:;!?)]|$)`, 'i');
+      if (regex.test(content)) {
+        return true;
+      }
+    }
+
+    return false;
+  };
 
   const [loading, setLoading] = useState(false);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
@@ -2456,18 +2533,6 @@ function TaskDetailDialog({
   const [editDescValue, setEditDescValue] = useState(task?.description || '');
   const [savingDesc, setSavingDesc] = useState(false);
 
-  // Comments / Updates state
-  const [comments, setComments] = useState<TaskComment[]>([]);
-  const [loadingComments, setLoadingComments] = useState(false);
-  const [newCommentText, setNewCommentText] = useState('');
-  const [isFollowupCompleted, setIsFollowupCompleted] = useState(false);
-  const [postingComment, setPostingComment] = useState(false);
-  const [attachedFiles, setAttachedFiles] = useState<{ filename: string; url: string }[]>([]);
-  const [uploadingFile, setUploadingFile] = useState(false);
-  const [replyingToId, setReplyingToId] = useState<number | null>(null);
-  const [replyText, setReplyText] = useState('');
-  const [postingReply, setPostingReply] = useState(false);
-
   const loadComments = useCallback(async () => {
     if (!task) return;
     setLoadingComments(true);
@@ -2479,7 +2544,20 @@ function TaskDetailDialog({
     } finally {
       setLoadingComments(false);
     }
-  }, [task]);
+  }, [task?.id]);
+
+  const handleToggleCommentCompletion = async (commentId: number, currentStatus: boolean) => {
+    if (!task) return;
+    try {
+      await workcenterService.updateComment(task.id, commentId, {
+        is_followup_completed: !currentStatus,
+      });
+      await loadComments();
+      if (onRefreshTask) onRefreshTask(task.id);
+    } catch (err) {
+      console.error('Failed to update follow-up status:', err);
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2499,6 +2577,7 @@ function TaskDetailDialog({
   const handlePostComment = async () => {
     if (!newCommentText.trim() || !task) return;
     setPostingComment(true);
+    setCommentFeedback(null);
     try {
       await workcenterService.addComment(task.id, {
         content: newCommentText.trim(),
@@ -2508,10 +2587,16 @@ function TaskDetailDialog({
       setNewCommentText('');
       setIsFollowupCompleted(false);
       setAttachedFiles([]);
-      loadComments();
+      setCommentFeedback({ type: 'success', message: 'Update posted successfully!' });
+      setTimeout(() => setCommentFeedback(null), 3500);
+      await loadComments();
       if (onRefreshTask) onRefreshTask(task.id);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to post update:', err);
+      setCommentFeedback({
+        type: 'error',
+        message: err?.message || 'Failed to post update. Please try again.',
+      });
     } finally {
       setPostingComment(false);
     }
@@ -2524,10 +2609,13 @@ function TaskDetailDialog({
       await workcenterService.addComment(task.id, {
         content: replyText.trim(),
         parent_id: parentId,
+        is_followup_completed: replyIsCompleted,
       });
       setReplyText('');
+      setReplyIsCompleted(false);
       setReplyingToId(null);
-      loadComments();
+      await loadComments();
+      if (onRefreshTask) onRefreshTask(task.id);
     } catch (err) {
       console.error('Failed to post reply:', err);
     } finally {
@@ -2563,13 +2651,26 @@ function TaskDetailDialog({
   };
 
   useEffect(() => {
-    if (!task || !open) return;
+    if (!task || !open) {
+      lastTaskIdRef.current = null;
+      return;
+    }
+
+    const isNewTask = lastTaskIdRef.current !== task.id;
+    lastTaskIdRef.current = task.id;
+
+    if (isNewTask) {
+      setActiveTab(defaultTab || 'details');
+      setIsEditingDescription(false);
+      setEditDescValue(task.description || '');
+      setReplyingToId(null);
+      setAttachedFiles([]);
+      setNewCommentText('');
+      setIsFollowupCompleted(false);
+      setCommentFeedback(null);
+    }
+
     setLoading(true);
-    setActiveTab(defaultTab || 'details');
-    setIsEditingDescription(false);
-    setEditDescValue(task.description || '');
-    setReplyingToId(null);
-    setAttachedFiles([]);
     loadComments();
     Promise.all([
       workcenterService.getHistory(task.id).catch(() => []),
@@ -2579,45 +2680,62 @@ function TaskDetailDialog({
       setTransfers(t);
       setLoading(false);
     });
-  }, [task, open, defaultTab, loadComments]);
+  }, [task?.id, open, defaultTab, loadComments]);
 
   if (!task) return null;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto font-sans text-left">
-        <DialogHeader>
-          <div className="flex justify-between items-start pr-6">
-            <div>
-              <DialogTitle className="text-sm font-bold">{task.title}</DialogTitle>
-              <TaskObjectiveBadge taskId={task.id} />
-              <div className="mt-1.5 flex flex-wrap gap-1.5"><TaskFeatureChips taskId={task.id} size="md" /></div>
+      <DialogContent className="sm:max-w-3xl md:max-w-4xl w-[96vw] max-h-[90vh] flex flex-col p-0 overflow-hidden font-sans text-left bg-background-secondary shadow-2xl border border-border-subtle rounded-xl">
+        <DialogHeader className="p-5 pb-3 border-b border-border-subtle bg-background-secondary/80 flex-shrink-0 pr-12 text-left">
+          <div className="flex justify-between items-start gap-4">
+            <div className="space-y-1.5 min-w-0">
+              <DialogTitle className="text-base sm:text-lg font-bold text-text-primary leading-tight break-words">
+                {task.title}
+              </DialogTitle>
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <TaskObjectiveBadge taskId={task.id} />
+                <TaskFeatureChips taskId={task.id} size="md" />
+              </div>
             </div>
             {task.parent_id && onSelectTask && (
               <button
+                type="button"
                 onClick={() => onSelectTask({ id: task.parent_id! })}
-                className="text-[10px] text-accent-blue hover:underline font-bold flex items-center gap-0.5"
+                className="text-[11px] text-accent-blue hover:underline font-bold flex items-center gap-1 flex-shrink-0 px-2.5 py-1 rounded bg-accent-blue/10 border border-accent-blue/20"
               >
                 ← View Main Task
               </button>
             )}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 mt-1">
-            <DialogDescription className="flex flex-wrap items-center gap-2">
-              <span className={cn("px-2 py-0.5 rounded border text-[9px] font-bold uppercase", getPriorityColor(task.priority))}>{task.priority}</span>
-              <span className="text-[11px] bg-surface-card px-2 py-0.5 rounded border border-border-subtle flex items-center gap-1 font-semibold">
-                <span className={cn("w-1.5 h-1.5 rounded-full inline-block", getStatusDot(task.status))} />
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-2.5 pt-2 border-t border-border-subtle/40">
+            <DialogDescription className="flex flex-wrap items-center gap-2 m-0">
+              <span className={cn("px-2 py-0.5 rounded border text-[9px] font-bold uppercase", getPriorityColor(task.priority))}>
+                {task.priority}
+              </span>
+              <span className="text-[11px] bg-surface-card px-2.5 py-0.5 rounded border border-border-subtle flex items-center gap-1.5 font-semibold text-text-primary">
+                <span className={cn("w-2 h-2 rounded-full inline-block", getStatusDot(task.status))} />
                 {getStatusLabel(task.status)}
               </span>
               {task.project_name && (
-                <span className="text-[11px] text-accent-blue bg-accent-blue/10 px-2 py-0.5 rounded border border-accent-blue/20">{task.project_name}</span>
+                <span className="text-[11px] text-accent-blue bg-accent-blue/10 px-2 py-0.5 rounded border border-accent-blue/20 font-medium">
+                  {task.project_name}
+                </span>
               )}
             </DialogDescription>
             <button
               type="button"
-              onClick={() => setActiveTab('updates')}
+              onClick={() => {
+                setActiveTab('updates');
+                if (task) {
+                  try {
+                    localStorage.setItem(`nurofin-viewed-updates:${task.id}`, String(comments.length));
+                  } catch {}
+                  setViewedCount(comments.length);
+                }
+              }}
               className={cn(
-                "px-3 py-1 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs",
+                "px-3 py-1 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer",
                 activeTab === 'updates'
                   ? "bg-accent-blue text-white ring-2 ring-accent-blue/30"
                   : "bg-accent-blue/15 hover:bg-accent-blue hover:text-white text-accent-blue border border-accent-blue/40"
@@ -2625,22 +2743,22 @@ function TaskDetailDialog({
             >
               <MessageSquare className="w-3.5 h-3.5" />
               <span>Follow-up & Updates</span>
-              {comments.length > 0 && (
+              {activeTab !== 'updates' && newUncheckedCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-accent-blue text-white font-bold ml-0.5">
-                  {comments.length}
+                  {newUncheckedCount}
                 </span>
               )}
             </button>
           </div>
         </DialogHeader>
 
-        <div className="flex border-b border-border-subtle text-[10px] font-bold text-text-muted uppercase tracking-wider mt-2 select-none overflow-x-auto">
+        <div className="flex border-b border-border-subtle text-xs font-bold text-text-muted uppercase tracking-wider px-5 select-none overflow-x-auto flex-shrink-0 bg-background-secondary/30">
           {(['details', 'updates', 'history', 'transfers'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={cn(
-                "px-3 py-2 transition-colors flex items-center gap-1.5 whitespace-nowrap",
+                "px-3.5 py-2.5 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer",
                 activeTab === tab ? "text-accent-blue border-b-2 border-accent-blue" : "hover:text-text-primary"
               )}
             >
@@ -2660,6 +2778,9 @@ function TaskDetailDialog({
             </button>
           ))}
         </div>
+
+        {/* Scrollable Modal Content Container */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-5 space-y-4">
 
         {activeTab === 'details' && (
           <div className="space-y-4 py-3 text-xs">
@@ -2791,7 +2912,7 @@ function TaskDetailDialog({
               </div>
               <div>
                 <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block mb-1">Created</span>
-                <span className="text-[11px] font-semibold">{task.created_at ? timeAgo(task.created_at) : '—'}</span>
+                <span className="text-[11px] font-semibold font-mono">{task.created_at ? `${formatISTDateTime(task.created_at)} (${accurateTimeAgo(task.created_at)})` : "—"}</span>
               </div>
               <div>
                 <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block mb-1">Assigned By</span>
@@ -2837,26 +2958,26 @@ function TaskDetailDialog({
                   )}
                 </div>
 
-                <form onSubmit={handleAddSubtask} className="flex gap-2 items-center mt-2">
+                <form onSubmit={handleAddSubtask} className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center mt-2 bg-background-secondary/40 p-2.5 rounded-lg border border-border-subtle/60">
                   <Input
                     type="text"
                     placeholder="New subtask title..."
                     value={newSubtaskTitle}
                     onChange={e => setNewSubtaskTitle(e.target.value)}
-                    className="h-8 text-xs flex-1"
+                    className="h-8 text-xs flex-1 min-w-0 bg-background-primary"
                     required
                   />
                   <Input
                     type="text"
-                    placeholder="Description..."
+                    placeholder="Description (optional)..."
                     value={newSubtaskDescription}
                     onChange={e => setNewSubtaskDescription(e.target.value)}
-                    className="h-8 text-xs flex-1"
+                    className="h-8 text-xs flex-1 min-w-0 bg-background-primary"
                   />
                   <select
                     value={newSubtaskAssigneeId}
                     onChange={e => setNewSubtaskAssigneeId(e.target.value)}
-                    className="h-8 bg-background-secondary border border-border-subtle rounded px-2 text-[10px] text-text-primary outline-none max-w-[120px]"
+                    className="h-8 bg-background-primary border border-border-subtle rounded px-2 text-[10px] text-text-primary outline-none sm:w-[130px] flex-shrink-0"
                   >
                     <option value="">Teammate...</option>
                     {allUsers.map(u => (
@@ -2866,10 +2987,10 @@ function TaskDetailDialog({
                   <button
                     type="submit"
                     disabled={addingSubtask || !newSubtaskTitle.trim()}
-                    className="h-8 px-3 bg-accent-blue hover:bg-accent-blue-hover text-white text-[10px] font-bold rounded shadow transition-all disabled:opacity-50 flex items-center gap-1"
+                    className="h-8 px-3.5 bg-accent-blue hover:bg-accent-blue-hover text-white text-[10px] font-bold rounded shadow transition-all disabled:opacity-50 flex items-center justify-center gap-1 flex-shrink-0 whitespace-nowrap cursor-pointer"
                   >
                     {addingSubtask ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                    Add
+                    <span>Add</span>
                   </button>
                 </form>
               </div>
@@ -2894,36 +3015,68 @@ function TaskDetailDialog({
 
 
         {activeTab === 'updates' && (
-          <div className="py-3 space-y-4 max-h-[480px] overflow-y-auto pr-1">
+          <div className="space-y-4">
             {/* Tagged Follow-up Helper Banner */}
-            <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-text-primary flex items-start gap-2 text-xs">
+            <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-text-primary flex items-start gap-2.5 text-xs">
               <Sparkles className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" />
               <div>
                 <span className="font-bold text-emerald-500 block">Follow-up & Work Updates</span>
-                <span className="text-[10px] text-text-secondary">
-                  Post your progress below. Tag teammates with @ to notify them. If completing a requested follow-up, check &quot;Mark Follow-up Completed&quot; so the assigner is alerted.
+                <span className="text-[11px] text-text-secondary leading-relaxed">
+                  Open to all collaborators: Any user can post updates, reply to threads, or mark follow-ups completed. Tag teammates with @ to notify them directly.
                 </span>
               </div>
             </div>
 
+            {/* Quick Multi-Follow-up Navigator */}
+            {comments.filter(c => c.is_followup_completed || (c.content && c.content.includes('@'))).length > 0 && (
+              <div className="p-3 bg-background-secondary/60 rounded-lg border border-border-subtle space-y-2">
+                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-text-secondary">
+                  <span className="flex items-center gap-1.5">
+                    <MessageSquare className="w-3 h-3 text-accent-blue" />
+                    Follow-ups on this task ({comments.filter(c => c.is_followup_completed || (c.content && c.content.includes('@'))).length})
+                  </span>
+                  <span className="text-[9px] font-normal normal-case text-text-muted">
+                    Click to view specific follow-up & status
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {comments
+                    .filter(c => c.is_followup_completed || (c.content && c.content.includes('@')))
+                    .map((fItem) => (
+                      <a
+                        key={fItem.id}
+                        href={`#comment-${fItem.id}`}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-semibold border transition-all cursor-pointer",
+                          fItem.is_followup_completed
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                            : "bg-accent-blue/10 text-accent-blue border-accent-blue/30 hover:bg-accent-blue/20"
+                        )}
+                        title={`Follow-up by ${fItem.user_name}: ${fItem.content.substring(0, 60)}`}
+                      >
+                        {fItem.is_followup_completed ? (
+                          <CheckCircle2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
+                        ) : (
+                          <span className="w-2 h-2 rounded-full bg-accent-blue animate-pulse flex-shrink-0" />
+                        )}
+                        <span className="truncate max-w-[130px] font-bold">{fItem.user_name}:</span>
+                        <span className="truncate max-w-[140px] text-text-secondary">{fItem.content.replace(/@\w+/g, '').trim() || fItem.content}</span>
+                        <span className="text-[9px] opacity-75 font-mono">
+                          {fItem.created_at ? formatISTTime(fItem.created_at) : ''}
+                        </span>
+                      </a>
+                    ))}
+                </div>
+              </div>
+            )}
+
             {/* Post New Update / Follow-up Box */}
-            <div className="bg-background-primary p-3 rounded-lg border border-border-subtle/60 space-y-2.5">
+            <div className="bg-background-primary p-3.5 rounded-lg border border-border-subtle/70 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold text-text-secondary uppercase tracking-wider flex items-center gap-1.5">
-                  <MessageSquare className="w-3 h-3 text-accent-blue" />
+                  <MessageSquare className="w-3.5 h-3.5 text-accent-blue" />
                   Post Update or Follow-up
                 </span>
-                <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-bold select-none text-text-secondary hover:text-text-primary">
-                  <input
-                    type="checkbox"
-                    checked={isFollowupCompleted}
-                    onChange={e => setIsFollowupCompleted(e.target.checked)}
-                    className="rounded border-border-subtle text-accent-green focus:ring-0 w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
-                  />
-                  <span className={cn(isFollowupCompleted && "text-emerald-500 font-bold")}>
-                    Mark Follow-up Completed
-                  </span>
-                </label>
               </div>
 
               <MentionTextarea
@@ -2935,10 +3088,20 @@ function TaskDetailDialog({
                 className="w-full text-xs"
               />
 
+              {commentFeedback && (
+                <div className={cn(
+                  "p-2 rounded text-[11px] font-medium flex items-center gap-2",
+                  commentFeedback.type === 'success' ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30" : "bg-accent-red/10 text-accent-red border border-accent-red/30"
+                )}>
+                  {commentFeedback.type === 'success' ? <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />}
+                  <span>{commentFeedback.message}</span>
+                </div>
+              )}
+
               {/* Attachments list & File upload button */}
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="cursor-pointer inline-flex items-center gap-1 px-2 py-1 rounded border border-border-subtle/80 hover:bg-surface-hover text-text-muted hover:text-text-primary text-[10px] font-medium transition-colors">
+                  <label className="cursor-pointer inline-flex items-center gap-1 px-2.5 py-1 rounded border border-border-subtle/80 hover:bg-surface-hover text-text-muted hover:text-text-primary text-[10px] font-medium transition-colors">
                     {uploadingFile ? <Loader2 className="w-3 h-3 animate-spin text-accent-blue" /> : <Paperclip className="w-3 h-3" />}
                     <span>Attach File</span>
                     <input
@@ -2967,10 +3130,10 @@ function TaskDetailDialog({
                   type="button"
                   disabled={postingComment || !newCommentText.trim()}
                   onClick={handlePostComment}
-                  className="px-3 py-1 bg-accent-blue hover:bg-accent-blue-hover text-white text-[10px] font-bold rounded shadow transition-all disabled:opacity-50 flex items-center gap-1"
+                  className="px-3.5 py-1.5 bg-accent-blue hover:bg-accent-blue-hover text-white text-[11px] font-bold rounded shadow transition-all disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
                 >
                   {postingComment ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                  Post
+                  <span>Post Update</span>
                 </button>
               </div>
             </div>
@@ -2988,86 +3151,149 @@ function TaskDetailDialog({
                   const renderCommentNode = (item: TaskComment, isReply = false) => (
                     <div
                       key={item.id}
+                      id={`comment-${item.id}`}
                       className={cn(
-                        "bg-background-primary p-3 rounded-lg border border-border-subtle/40 space-y-2 text-left",
-                        isReply && "ml-5 border-l-2 border-l-accent-blue/40 bg-background-secondary/30",
-                        item.is_followup_completed && "border-emerald-500/30 bg-emerald-500/5"
+                        "bg-background-primary p-3.5 rounded-lg border border-border-subtle/50 space-y-2.5 text-left transition-all",
+                        isReply && "ml-5 sm:ml-7 border-l-2 border-l-accent-blue/50 bg-background-secondary/30",
+                        item.is_followup_completed && "border-emerald-500/30 bg-emerald-500/5 ring-1 ring-emerald-500/20"
                       )}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                      <div className="flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
+                        <div className="flex items-start gap-2.5 min-w-0">
                           {item.user_avatar ? (
-                            <img src={item.user_avatar} className="w-5 h-5 rounded-full object-cover border border-border-subtle" alt={item.user_name} />
+                            <img src={item.user_avatar} className="w-6 h-6 rounded-full object-cover border border-border-subtle flex-shrink-0 mt-0.5" alt={item.user_name} />
                           ) : (
-                            <div className="w-5 h-5 rounded-full bg-accent-blue text-white flex items-center justify-center text-[9px] font-bold">
+                            <div className="w-6 h-6 rounded-full bg-accent-blue text-white flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">
                               {item.user_name?.charAt(0) || 'U'}
                             </div>
                           )}
-                          <span className="font-bold text-[11px] text-text-primary">{item.user_name}</span>
-                          {item.user_role && (
-                            <span className="text-[9px] text-text-muted capitalize">· {item.user_role}</span>
-                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-xs text-text-primary">{item.user_name}</span>
+                              {item.user_role && (
+                                <span className="text-[10px] text-text-muted capitalize">· {item.user_role}</span>
+                              )}
+                            </div>
+                            {item.is_followup_completed ? (
+                              <div className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 mt-1 flex-wrap">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-500 flex-shrink-0" />
+                                <span>Follow-up Completed</span>
+                                {item.completed_by_name && <span className="font-medium text-text-secondary">by {item.completed_by_name}</span>}
+                                {item.completed_at && <span className="font-mono text-text-muted">· {formatISTDateTime(item.completed_at)}</span>}
+                              </div>
+                            ) : (
+                              (item.content?.includes('@') || item.parent_id) && (
+                                <div className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-accent-blue/10 text-accent-blue border border-accent-blue/20 mt-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-accent-blue animate-pulse flex-shrink-0" />
+                                  <span>{isCurrentUserTaggedInComment(item) ? "Pending Follow-up (Tagged to you)" : "Pending Follow-up"}</span>
+                                </div>
+                              )
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {item.is_followup_completed && (
-                            <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
-                              <CheckCircle2 className="w-3 h-3" />
-                              Follow-up Completed
+
+                        {/* Proper Indian Standard Time (IST) Timestamp */}
+                        <div className="flex flex-col items-end text-right flex-shrink-0">
+                          <span className="text-[10px] font-mono font-semibold text-text-primary flex items-center gap-1" title={item.created_at ? formatISTDateTime(item.created_at) : ''}>
+                            <Clock className="w-3 h-3 text-text-muted" />
+                            {item.created_at ? formatISTDateTime(item.created_at) : ''}
+                          </span>
+                          {item.created_at && (
+                            <span className="text-[9px] text-text-muted font-mono">
+                              ({accurateTimeAgo(item.created_at)})
                             </span>
                           )}
-                          <span className="text-[9px] text-text-muted">{item.created_at ? timeAgo(item.created_at) : ''}</span>
                         </div>
                       </div>
 
-                      <div className="text-[11px] text-text-primary leading-relaxed pl-7">
+                      <div className="text-xs text-text-primary leading-relaxed pl-8">
                         <MentionContent text={item.content} users={allUsers} />
                       </div>
 
                       {item.attachments && item.attachments.length > 0 && (
-                        <div className="flex flex-wrap gap-2 pl-7 pt-1">
+                        <div className="flex flex-wrap gap-2 pl-8 pt-1">
                           {item.attachments.map((att: any, idx: number) => (
                             <a
                               key={idx}
                               href={att.url}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-background-secondary hover:bg-surface-hover border border-border-subtle text-[10px] text-accent-blue font-medium transition-colors"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-background-secondary hover:bg-surface-hover border border-border-subtle text-[11px] text-accent-blue font-medium transition-colors"
                             >
                               <Paperclip className="w-3 h-3" />
-                              <span className="truncate max-w-[150px]">{att.name || att.filename || 'Attachment'}</span>
+                              <span className="truncate max-w-[180px]">{att.name || att.filename || 'Attachment'}</span>
                             </a>
                           ))}
                         </div>
                       )}
 
-                      {/* Reply Button and Reply Input */}
-                      <div className="pl-7 pt-1 flex items-center justify-between">
-                        <button
-                          type="button"
-                          onClick={() => setReplyingToId(replyingToId === item.id ? null : item.id)}
-                          className="text-[10px] text-text-muted hover:text-accent-blue font-semibold flex items-center gap-1 transition-colors"
-                        >
-                          <Reply className="w-3 h-3" />
-                          Reply
-                        </button>
+                      {/* Action Row: ONLY show Mark as Completed if CURRENT USER is tagged in THIS update */}
+                      <div className="pl-8 pt-1.5 flex items-center justify-between gap-2 flex-wrap border-t border-border-subtle/30 mt-2">
+                        <div className="flex items-center gap-2">
+                          {isCurrentUserTaggedInComment(item) && (
+                            <label className="flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold select-none text-text-secondary hover:text-text-primary mr-2">
+                              <input
+                                type="checkbox"
+                                checked={!!item.is_followup_completed}
+                                onChange={() => handleToggleCommentCompletion(item.id, !!item.is_followup_completed)}
+                                className="rounded border-border-subtle text-accent-green focus:ring-0 w-3.5 h-3.5 accent-emerald-500 cursor-pointer"
+                              />
+                              <span className={cn(item.is_followup_completed ? "text-emerald-500 font-bold" : "text-text-secondary")}>
+                                {item.is_followup_completed ? "Completed (Click to Reopen)" : "Mark as Completed"}
+                              </span>
+                            </label>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyingToId(replyingToId === item.id ? null : item.id);
+                              setReplyIsCompleted(false);
+                            }}
+                            className="text-[10px] text-text-muted hover:text-accent-blue font-semibold flex items-center gap-1 transition-colors px-2 py-0.5 rounded hover:bg-surface-hover cursor-pointer"
+                          >
+                            <Reply className="w-3 h-3" />
+                            <span>Reply</span>
+                          </button>
+                        </div>
                       </div>
 
                       {replyingToId === item.id && (
-                        <div className="ml-7 mt-2 p-2.5 bg-background-secondary/70 rounded-lg border border-border-subtle/50 space-y-2">
+                        <div className="ml-8 mt-2 p-3 bg-background-secondary/70 rounded-lg border border-border-subtle/50 space-y-2.5">
+                          <div className="flex items-center justify-between text-[10px] text-text-secondary font-semibold">
+                            <span className="flex items-center gap-1">
+                              <Reply className="w-3 h-3 text-accent-blue" />
+                              Replying to <b className="text-text-primary">{item.user_name}</b>
+                            </span>
+                            {isCurrentUserTaggedInComment(item) && (
+                              <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-bold select-none text-text-secondary hover:text-text-primary">
+                                <input
+                                  type="checkbox"
+                                  checked={replyIsCompleted}
+                                  onChange={e => setReplyIsCompleted(e.target.checked)}
+                                  className="rounded border-border-subtle text-accent-green focus:ring-0 w-3 h-3 accent-emerald-500 cursor-pointer"
+                                />
+                                <span className={cn(replyIsCompleted && "text-emerald-500 font-bold")}>
+                                  Mark Follow-up Completed
+                                </span>
+                              </label>
+                            )}
+                          </div>
+
                           <MentionTextarea
                             value={replyText}
                             onChange={setReplyText}
                             users={allUsers}
                             rows={2}
-                            placeholder={`Reply to ${item.user_name}...`}
+                            placeholder={`Reply to ${item.user_name}... Type @ to tag teammates`}
                             className="w-full text-xs"
                             autoFocus
                           />
                           <div className="flex justify-end gap-2">
                             <button
                               type="button"
-                              onClick={() => { setReplyingToId(null); setReplyText(''); }}
-                              className="px-2 py-0.5 text-[10px] font-bold rounded border border-border-subtle hover:bg-surface-hover"
+                              onClick={() => { setReplyingToId(null); setReplyText(''); setReplyIsCompleted(false); }}
+                              className="px-2.5 py-1 text-[10px] font-bold rounded border border-border-subtle hover:bg-surface-hover cursor-pointer"
                             >
                               Cancel
                             </button>
@@ -3075,7 +3301,7 @@ function TaskDetailDialog({
                               type="button"
                               disabled={postingReply || !replyText.trim()}
                               onClick={() => handlePostReply(item.id)}
-                              className="px-2.5 py-0.5 bg-accent-blue hover:bg-accent-blue-hover text-white text-[10px] font-bold rounded disabled:opacity-50 flex items-center gap-1"
+                              className="px-3 py-1 bg-accent-blue hover:bg-accent-blue-hover text-white text-[10px] font-bold rounded disabled:opacity-50 flex items-center gap-1 cursor-pointer"
                             >
                               {postingReply ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
                               Send Reply
@@ -3100,7 +3326,7 @@ function TaskDetailDialog({
         )}
 
         {activeTab === 'history' && (
-          <div className="py-3 space-y-2 max-h-[400px] overflow-y-auto">
+          <div className="space-y-2">
             {loading ? (
               <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-accent-blue" /></div>
             ) : history.length === 0 ? (
@@ -3115,7 +3341,7 @@ function TaskDetailDialog({
                 <div className="flex-1 min-w-0 space-y-0.5">
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-[10px] text-text-primary">{h.user_name}</span>
-                    <span className="text-[9px] text-text-muted">{timeAgo(h.created_at)}</span>
+                    <span className="text-[9px] text-text-muted font-mono">{h.created_at ? `${formatISTDateTime(h.created_at)} (${accurateTimeAgo(h.created_at)})` : ""}</span>
                   </div>
                   <p className="text-[10px] text-text-secondary leading-relaxed font-medium">{h.description || h.action}</p>
                   {h.old_value && h.new_value && (
@@ -3128,7 +3354,7 @@ function TaskDetailDialog({
         )}
 
         {activeTab === 'transfers' && (
-          <div className="py-3 space-y-2 max-h-[400px] overflow-y-auto">
+          <div className="space-y-2">
             {loading ? (
               <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-accent-blue" /></div>
             ) : transfers.length === 0 ? (
@@ -3149,7 +3375,7 @@ function TaskDetailDialog({
                     <div className="w-5 h-5 rounded-full bg-accent-green text-white flex items-center justify-center text-[8px] font-bold">{t.to_user_name?.charAt(0) || '?'}</div>
                   )}
                   <span className="font-bold text-text-primary">{t.to_user_name}</span>
-                  <span className="ml-auto text-[9px] text-text-muted font-bold">{timeAgo(t.created_at)}</span>
+                  <span className="ml-auto text-[9px] text-text-muted font-bold font-mono">{t.created_at ? formatISTDateTime(t.created_at) : ""}</span>
                 </div>
                 {t.reason && <p className="text-[10px] text-text-secondary font-medium">Reason: {t.reason}</p>}
                 {t.remaining_work && <p className="text-[10px] text-text-secondary font-medium">Remaining: {t.remaining_work}</p>}
@@ -3158,22 +3384,59 @@ function TaskDetailDialog({
             ))}
           </div>
         )}
+        </div>
 
-        <DialogFooter className="mt-4 gap-2">
-          <button onClick={() => {
-            window.location.href = `/team-chat?createTaskChat=${task.id}`;
-          }} className="px-3 py-1.5 bg-accent-purple/10 border border-accent-purple/20 text-accent-purple text-[10px] font-bold rounded hover:bg-accent-purple/20 transition-all flex items-center gap-1">
-            <MessageSquare className="w-3.5 h-3.5" /> Discuss Task
-          </button>
-          <button onClick={() => onDelete(task.id)} className="px-3 py-1.5 bg-accent-red/10 border border-accent-red/20 text-accent-red text-[10px] font-bold rounded hover:bg-accent-red/20 transition-all flex items-center gap-1">
-            <Trash className="w-3.5 h-3.5" /> Delete
-          </button>
-          <button onClick={() => { onTransfer(task); onClose(); }} className="px-3 py-1.5 bg-accent-orange/10 border border-accent-orange/20 text-accent-orange text-[10px] font-bold rounded hover:bg-accent-orange/20 transition-all flex items-center gap-1">
-            <ArrowRightLeft className="w-3.5 h-3.5" /> Transfer
-          </button>
-          <button onClick={() => { onEdit(task); onClose(); }} className="px-3 py-1.5 bg-background-primary border border-border-subtle text-text-secondary hover:text-text-primary text-[10px] font-bold rounded transition-all flex items-center gap-1">
-            <Edit className="w-3.5 h-3.5" /> Edit
-          </button>
+        {/* Sticky footer with actions & quick status */}
+        <DialogFooter className="p-3.5 px-5 border-t border-border-subtle bg-background-secondary/80 flex-shrink-0 flex flex-wrap items-center justify-between gap-2 m-0 sm:justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-text-secondary uppercase">Quick Status:</span>
+            <select
+              value={task.status}
+              onChange={e => onStatusChange(task.id, e.target.value)}
+              className="bg-background-primary border border-border-subtle text-[11px] rounded px-2.5 py-1 text-text-primary outline-none cursor-pointer font-medium"
+            >
+              {STATUS_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap ml-auto">
+            <button
+              type="button"
+              onClick={() => {
+                window.location.href = `/team-chat?createTaskChat=${task.id}`;
+              }}
+              className="px-3 py-1.5 bg-accent-purple/10 border border-accent-purple/20 text-accent-purple text-[10px] font-bold rounded hover:bg-accent-purple/20 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Discuss Task</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(task.id)}
+              className="px-3 py-1.5 bg-accent-red/10 border border-accent-red/20 text-accent-red text-[10px] font-bold rounded hover:bg-accent-red/20 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <Trash className="w-3.5 h-3.5" />
+              <span>Delete</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { onTransfer(task); onClose(); }}
+              className="px-3 py-1.5 bg-accent-orange/10 border border-accent-orange/20 text-accent-orange text-[10px] font-bold rounded hover:bg-accent-orange/20 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span>Transfer</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { onEdit(task); onClose(); }}
+              className="px-3 py-1.5 bg-background-primary border border-border-subtle text-text-secondary hover:text-text-primary text-[10px] font-bold rounded transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <Edit className="w-3.5 h-3.5" />
+              <span>Edit</span>
+            </button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

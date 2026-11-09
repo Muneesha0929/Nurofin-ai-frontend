@@ -1,4 +1,5 @@
 import { NotificationItem } from '../types';
+import { formatISTDateTime, accurateTimeAgo } from '../utils/date';
 
 const getHeaders = () => {
   let token = '';
@@ -44,15 +45,12 @@ function mapNotification(backendNotif: any): NotificationItem {
   let timeStr = '';
   if (rawTime) {
     try {
-      const d = new Date(rawTime);
-      const now = new Date();
-      const diffMs = now.getTime() - d.getTime();
-      const diffMin = Math.floor(diffMs / 60000);
-      if (diffMin < 1) timeStr = 'Just now';
-      else if (diffMin < 60) timeStr = `${diffMin}m ago`;
-      else if (diffMin < 1440) timeStr = `${Math.floor(diffMin / 60)}h ago`;
-      else timeStr = d.toLocaleDateString();
-    } catch { timeStr = ''; }
+      const istFormatted = formatISTDateTime(rawTime);
+      const ago = accurateTimeAgo(rawTime);
+      timeStr = ago ? `${istFormatted} (${ago})` : istFormatted;
+    } catch {
+      timeStr = '';
+    }
   }
 
   return {
@@ -60,6 +58,7 @@ function mapNotification(backendNotif: any): NotificationItem {
     title: backendNotif.title || 'Notification',
     description: backendNotif.message || '',
     time: timeStr,
+    created_at: backendNotif.created_at,
     type: displayType,
     read: backendNotif.is_read || false,
     category,

@@ -38,6 +38,7 @@ export interface ProjectActivity {
   action: string;
   target: string;
   time: string;
+  created_at?: string;
 }
 
 export interface Project {
@@ -66,6 +67,7 @@ export interface TaskComment {
   avatar: string;
   text: string;
   time: string;
+  created_at?: string;
 }
 
 export interface Task {
@@ -329,6 +331,7 @@ export interface NotificationItem {
   title: string;
   description: string;
   time: string;
+  created_at?: string;
   type: 'info' | 'success' | 'warning' | 'error';
   read: boolean;
   category: 'general' | 'tasks' | 'meetings' | 'finance' | 'alerts';

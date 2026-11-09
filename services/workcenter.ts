@@ -9,6 +9,8 @@ export interface TaskComment {
   parent_id?: number | null;
   attachments?: { name?: string; filename?: string; url: string; s3_key?: string }[];
   is_followup_completed?: boolean;
+  completed_by_name?: string | null;
+  completed_at?: string | null;
   created_at?: string | null;
   replies?: TaskComment[];
 }
@@ -357,11 +359,28 @@ export const workcenterService = {
       content: string;
       parent_id?: number | null;
       is_followup_completed?: boolean;
+  completed_by_name?: string | null;
+  completed_at?: string | null;
       attachments?: { name?: string; filename?: string; url: string; s3_key?: string }[];
     }
   ) =>
     api<TaskComment>(`${BASE}/${taskId}/comments`, {
       method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateComment: (
+    taskId: number,
+    commentId: number,
+    payload: {
+      content?: string;
+      is_followup_completed?: boolean;
+  completed_by_name?: string | null;
+  completed_at?: string | null;
+    }
+  ) =>
+    api<TaskComment>(`${BASE}/${taskId}/comments/${commentId}`, {
+      method: 'PATCH',
       body: JSON.stringify(payload),
     }),
 

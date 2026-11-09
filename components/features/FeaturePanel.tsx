@@ -16,6 +16,7 @@ import {
   STATUS_LABEL, STATUS_ORDER, productFeaturesService,
 } from '@/services/productFeatures';
 import { MentionTextarea, MentionContent, MentionUser } from '@/components/ui/MentionTextarea';
+import { formatISTDateTime, formatISTDate } from '@/utils/date';
 
 export const STATUS_CLS: Record<FeatureStatus, string> = {
   suggested: 'text-text-secondary bg-[var(--bg-primary)]',
@@ -33,8 +34,8 @@ export const StatusChip = ({ s }: { s: FeatureStatus }) => (
 
 export const fmtDate = (iso?: string | null, time = false) => {
   if (!iso) return '';
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', ...(time ? { hour: 'numeric', minute: '2-digit' } : {}) });
+
+  return time ? formatISTDateTime(iso) : formatISTDate(iso);
 };
 
 const Label = ({ children }: { children: React.ReactNode }) => (

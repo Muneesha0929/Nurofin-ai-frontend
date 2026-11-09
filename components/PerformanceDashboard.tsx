@@ -379,11 +379,10 @@ export default function PerformanceDashboard({
                     initialScoreValue = t.my_score != null ? t.my_score : (tPeer || 0);
                   } else {
                     // Regular peers can only evaluate competency feedback
-                    if (isEvalSection) {
-                      showScoreInput = true;
-                      scoreLabel = "Peer Eval %";
-                      initialScoreValue = t.my_score != null ? t.my_score : (tPeer || 0);
-                    }
+
+                    showScoreInput = !isWcQuarter;
+                    scoreLabel = isEvalSection ? "Peer Eval %" : "Progress %";
+                    initialScoreValue = t.my_score != null ? t.my_score : (tWork || tPeer || 0);
                   }
                 }
 

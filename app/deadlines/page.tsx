@@ -86,7 +86,7 @@ export default function DeadlinesPage() {
       </div>
 
       {panel?.kind === 'objective' && <ObjectivePanel id={panel.id} onClose={() => setPanel(null)} onChanged={refresh} onOpen={id => setPanel({ kind: 'objective', id })} />}
-      {panel?.kind === 'task' && <TaskPanel task={panel.task} canChange={isDirector || String(panel.task.assigned_to_id) === me} onClose={() => setPanel(null)} onChanged={loadTasks} />}
+      {panel?.kind === 'task' && <TaskPanel task={panel.task} canChange={true} onClose={() => setPanel(null)} onChanged={loadTasks} />}
     </div>
   );
 }
