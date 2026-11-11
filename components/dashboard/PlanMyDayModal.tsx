@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, 
   Sun, 
@@ -32,9 +32,9 @@ interface PlanMyDayModalProps {
 export function PlanMyDayModal({
   isOpen,
   onClose,
-  overdueTasks,
-  todayTasks,
-  todayMeetings,
+  overdueTasks = [],
+  todayTasks = [],
+  todayMeetings = [],
   onRefresh,
   currentUserId
 }: PlanMyDayModalProps) {
@@ -42,18 +42,27 @@ export function PlanMyDayModal({
   const [step, setStep] = useState<'overdue' | 'agenda' | 'finish'>('overdue');
   const now = today();
 
-  if (!isOpen) return null;
+  // Reset index & step whenever modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setCurrentOverdueIndex(0);
+      setStep('overdue');
+    }
+  }, [isOpen]);
 
-  // Strictly filter overdue tasks to current user only
-  const myOverdueTasks = React.useMemo(() => {
+  // Strictly filter overdue tasks to current user only - called unconditionally!
+  const myOverdueTasks = useMemo(() => {
+    if (!Array.isArray(overdueTasks)) return [];
     return overdueTasks.filter(t => {
       if (!currentUserId) return true;
       return String(t.assigned_to_id) === String(currentUserId);
     });
   }, [overdueTasks, currentUserId]);
 
-  const currentOverdue = myOverdueTasks[currentOverdueIndex];
+  const currentOverdue = myOverdueTasks[currentOverdueIndex] || null;
   const hasOverdueToReview = myOverdueTasks.length > 0 && currentOverdueIndex < myOverdueTasks.length;
+
+  if (!isOpen) return null;
 
   const handleNextOverdue = () => {
     if (currentOverdueIndex + 1 < myOverdueTasks.length) {
@@ -137,7 +146,7 @@ export function PlanMyDayModal({
         {/* STEP 1: Overdue Sequential Review */}
         {step === 'overdue' && (
           <div className="p-6 flex flex-col items-center text-center">
-            {hasOverdueToReview ? (
+            {hasOverdueToReview && currentOverdue ? (
               <div className="w-full flex flex-col items-center gap-4">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-accent-red bg-accent-red/10 border border-accent-red/20 px-2.5 py-0.5 rounded-full">
                   Overdue Task ({currentOverdueIndex + 1} of {myOverdueTasks.length})
