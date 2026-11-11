@@ -189,6 +189,7 @@ export const meetingsService = {
     if (meeting.date !== undefined) payload.date = meeting.date;
     if (meeting.time !== undefined) payload.start_time = meeting.time;
     if (meeting.type !== undefined) payload.type = meeting.type;
+    if ((meeting as any).status !== undefined) payload.status = (meeting as any).status;
     if (meeting.agenda !== undefined) payload.agenda = meeting.agenda;
     if (meeting.meeting_link !== undefined) payload.meeting_link = meeting.meeting_link;
     if (meeting.location !== undefined) payload.location = meeting.location;

@@ -2,6 +2,21 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { 
+  Sun, 
+  Users, 
+  ChevronDown, 
+  ChevronUp, 
+  Sparkles, 
+  TrendingUp, 
+  Building2, 
+  Target,
+  LayoutDashboard,
+  CheckCircle2,
+  CalendarDays,
+  IndianRupee,
+  Layers
+} from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
 import { DailyCheckinModal } from '@/components/DailyCheckinModal';
@@ -17,142 +32,487 @@ import { leftToday, useMyMeetings } from '@/components/meetings/useMyMeetings';
 import { ObjectivePanel, TaskPanel } from '@/components/SidePanel';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { workcenterService, WCTask } from '@/services/workcenter';
+import { tasksService } from '@/services/tasks';
 import { meetingsService } from '@/services/meetings';
 import { projectsService } from '@/services/projects';
+import { usersService } from '@/services/users';
 import { departmentTargetsService, QuarterOverview } from '@/services/departmentTargets';
-import { Meeting, Project } from '@/types';
+import { Meeting, Project, Task } from '@/types';
 
-/**
- * Overview, laid out like the approved design: quarter pills + greeting, the quarter target,
- * the tiles from the old dashboard, departments, coming up / needs attention, my work, quick notes.
- */
+// Dashboard Components
+import { QuickAddTaskInput, TeammateUser } from '@/components/dashboard/QuickAddTaskInput';
+import { QuickAddMeetingModal } from '@/components/dashboard/QuickAddMeetingModal';
+import { MyDayView } from '@/components/dashboard/MyDayView';
+import { SmartSuggestionsDrawer } from '@/components/dashboard/SmartSuggestionsDrawer';
+import { CeoTeamPulse } from '@/components/dashboard/CeoTeamPulse';
+import { PlanMyDayModal } from '@/components/dashboard/PlanMyDayModal';
+
 export default function DashboardPage() {
   const { userProfile, issues } = useStore();
   const isDirector = ['ceo', 'super_admin'].includes((userProfile?.role || '').toLowerCase());
   const me = String(userProfile?.id || '');
+  const myName = userProfile?.name || 'Executive';
 
+  // State
   const [overview, setOverview] = useState<QuarterOverview | null>(null);
   const [tasks, setTasks] = useState<WCTask[]>([]);
+  const [plannerTasks, setPlannerTasks] = useState<Task[]>([]);
   const [objectives, setObjectives] = useState<Entry[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [teammates, setTeammates] = useState<TeammateUser[]>([]);
+  
+  // CEO View Mode: 'focus' (My Day) vs 'pulse' (Team Pulse)
+  const [viewMode, setViewMode] = useState<'focus' | 'pulse'>('focus');
+
+  // Modals & Panels
+  const [meetingModalOpen, setMeetingModalOpen] = useState(false);
+  const [planMyDayOpen, setPlanMyDayOpen] = useState(false);
   const [panel, setPanel] = useState<{ kind: 'task'; task: WCTask } | { kind: 'objective'; id: number } | null>(null);
   const [checkinOpen, setCheckinOpen] = useState(false);
   const [completing, setCompleting] = useState<number | null>(null);
   const [extended, setExtended] = useState('');
+  const [prefillAssignee, setPrefillAssignee] = useState<TeammateUser | null>(null);
 
-  const loadOverview = useCallback(() => { departmentTargetsService.overview().then(setOverview).catch(() => setOverview(null)); }, []);
-  const loadTasks = useCallback(() => { workcenterService.getTasks({ page_size: 200 }).then(r => setTasks(r.tasks || [])).catch(() => setTasks([])); }, []);
+  // Strategic performance collapsible drawer & tabs
+  const [strategicOpen, setStrategicOpen] = useState(false);
+  const [strategicTab, setStrategicTab] = useState<'targets' | 'departments' | 'runway'>('targets');
+
+  // Data Loading
+  const loadOverview = useCallback(() => { 
+    departmentTargetsService.overview().then(setOverview).catch(() => setOverview(null)); 
+  }, []);
+
+  const loadTasks = useCallback(() => { 
+    workcenterService.getTasks({ page_size: 300 }).then(r => setTasks(r.tasks || [])).catch(() => setTasks([])); 
+  }, []);
+
+  const loadPlannerTasks = useCallback(() => {
+    tasksService.getTasks().then(setPlannerTasks).catch(() => setPlannerTasks([]));
+  }, []);
+
+  const loadMeetings = useCallback(() => {
+    meetingsService.getMeetings().then(m => setMeetings(m || [])).catch(() => {});
+  }, []);
+
+  const loadProjects = useCallback(() => {
+    projectsService.getProjects().then(p => setProjects(p || [])).catch(() => {});
+  }, []);
+
+  const loadTeammates = useCallback(() => {
+    usersService.getUsers().then(users => {
+      setTeammates(users.map(u => ({
+        id: Number(u.id),
+        name: u.name,
+        avatar: u.avatar,
+        role: u.role,
+        department: u.department
+      })));
+    }).catch(() => {});
+  }, []);
+
   const loadObjectives = useCallback(() => {
     const start = isoDay(new Date(Date.now() - 120 * 86400000)), end = isoDay(new Date(Date.now() + 120 * 86400000));
     departmentTargetsService.deadlines(start, end, isDirector).then(items => setObjectives(items.map(fromObjective))).catch(() => setObjectives([]));
   }, [isDirector]);
 
   useEffect(() => {
-    loadOverview(); loadTasks(); setCheckinOpen(true);
-    meetingsService.getMeetings().then(m => setMeetings(m || [])).catch(() => {});
-    projectsService.getProjects().then(p => setProjects(p || [])).catch(() => {});
-  }, [loadOverview, loadTasks]);
-  useEffect(() => { loadObjectives(); }, [loadObjectives]);
+    loadOverview(); 
+    loadTasks(); 
+    loadPlannerTasks();
+    loadMeetings();
+    loadProjects();
+    loadTeammates();
+  }, [loadOverview, loadTasks, loadPlannerTasks, loadMeetings, loadProjects, loadTeammates]);
 
-  // The Director sees everyone's deadlines; everybody else sees their own.
-  const entries = useMemo(() => [
-    ...objectives,
-    ...tasks.map(t => fromTask(t, me)).filter((e): e is Entry => !!e).filter(e => isDirector || e.mine),
-  ], [objectives, tasks, me, isDirector]);
+  useEffect(() => { 
+    loadObjectives(); 
+  }, [loadObjectives]);
 
-  const now = today(), soon = isoDay(new Date(Date.now() + 14 * 86400000));
-  const comingUp = entries.filter(e => !e.done && e.date >= now && e.date <= soon).sort((a, b) => a.date.localeCompare(b.date));
-  const late = entries.filter(e => e.overdue).sort((a, b) => a.date.localeCompare(b.date));
-  const myOpenTasks = tasks.filter(t => t.status !== 'completed' && (isDirector || String(t.assigned_to_id) === me));
-  const { meetings: calendar } = useMyMeetings();
-  const meetingsLeftToday = leftToday(calendar).length;
-  const todaysMeetings = meetings.filter(m => m.date === now && (isDirector || m.attendees?.includes(userProfile?.name) || m.owner_name === userProfile?.name));
-  const activeProjects = projects.filter(p => ['active', 'in progress'].includes((p.status || '').toLowerCase()) && (isDirector || p.members?.some(m => m.name === userProfile?.name)));
-  const openIssues = (issues || []).filter(i => i.status !== 'closed' && (isDirector || i.assigneeName === userProfile?.name || i.reporterName === userProfile?.name));
-
-  const refresh = () => { loadOverview(); loadTasks(); loadObjectives(); };
-  const open = (e: Entry) => setPanel(e.kind === 'task' && e.task ? { kind: 'task', task: e.task } : { kind: 'objective', id: e.id });
-  const taskStatus = async (e: Entry, status: string) => {
-    if (status === 'completed') { setCompleting(e.id); return; }
-    try { await workcenterService.updateStatus(e.id, status); } finally { loadTasks(); }
-  };
-  const objectiveProgress = async (e: Entry, p: number) => {
-    try { await departmentTargetsService.updateObjective(e.id, { progress: p }); } finally { refresh(); }
+  const refreshAll = () => {
+    loadOverview();
+    loadTasks();
+    loadPlannerTasks();
+    loadMeetings();
+    loadObjectives();
   };
 
-  const tiles = [
-    { label: isDirector ? 'Open tasks' : 'My open tasks', value: myOpenTasks.length, href: '/workcenter?status=pending', tone: 'blue' },
-    { label: 'Overdue', value: late.length, href: '/deadlines', tone: 'red' },
-    { label: 'Due in 14 days', value: comingUp.length, href: '/deadlines', tone: 'blue' },
-    { label: 'Meetings left today', value: Math.max(meetingsLeftToday, 0), href: '/meetings', tone: 'blue' },
-    { label: 'Active projects', value: activeProjects.length, href: '/projects', tone: 'blue' },
-    { label: 'Pending issues', value: openIssues.length, href: '/issues', tone: 'orange' },
-  ];
+  // 1-Click Task Complete handler
+  const handleTaskComplete = async (taskId: number) => {
+    try {
+      await workcenterService.updateStatus(taskId, 'completed');
+      loadTasks();
+      loadPlannerTasks();
+    } catch (err) {
+      console.error('Failed to complete task:', err);
+    }
+  };
+
+  // CEO Assign Task handler: switch to Focus mode and prefill assignee in quick add
+  const handleAssignToTeammate = (user: TeammateUser) => {
+    setPrefillAssignee(user);
+    setViewMode('focus');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Flatten tasks and subtasks into a unified structure so subtasks created under parents reflect everywhere!
+  const allFlattenedTasks = useMemo(() => {
+    const map = new Map<number, WCTask>();
+
+    const traverseWCTask = (t: any, parentTitle?: string) => {
+      if (!t || !t.id) return;
+      const idNum = Number(t.id);
+      if (!map.has(idNum)) {
+        map.set(idNum, {
+          ...t,
+          id: idNum,
+          parent_title: t.parent_title || parentTitle,
+          deadline: t.deadline || t.scheduled_date || null
+        });
+      }
+      if (t.subtasks && Array.isArray(t.subtasks)) {
+        t.subtasks.forEach((st: any) => {
+          traverseWCTask({
+            ...st,
+            project_id: st.project_id || t.project_id,
+            project_name: st.project_name || t.project_name,
+            deadline: st.deadline || t.deadline
+          }, t.title);
+        });
+      }
+    };
+
+    tasks.forEach(root => traverseWCTask(root));
+
+    // Also incorporate plannerTasks to guarantee 100% coverage across flat & hierarchical tasks
+    if (plannerTasks && Array.isArray(plannerTasks)) {
+      plannerTasks.forEach((pt: any) => {
+        if (!pt || !pt.id) return;
+        const idNum = Number(pt.id);
+        if (!map.has(idNum)) {
+          map.set(idNum, {
+            id: idNum,
+            title: pt.title || 'Untitled',
+            description: pt.description || null,
+            status: pt.status || 'todo',
+            priority: pt.priority || 'medium',
+            deadline: pt.dueDate || pt.deadline || pt.scheduledDate || null,
+            scheduled_date: pt.scheduledDate || pt.scheduled_date || null,
+            start_date: pt.start_date || null,
+            estimated_hours: pt.extended_time || null,
+            progress: 0,
+            assigned_to_id: pt.assignedTo?.id ? Number(pt.assignedTo.id) : (pt.assigneeId ? Number(pt.assigneeId) : null),
+            assigned_to_name: pt.assignedTo?.name || null,
+            assigned_to_avatar: pt.assignedTo?.avatar || null,
+            assigned_by_id: null,
+            assigned_by_name: null,
+            reviewer_id: null,
+            reviewer_name: null,
+            project_id: pt.projectId ? Number(pt.projectId) : null,
+            project_name: null,
+            parent_id: pt.parentId ? Number(pt.parentId) : null,
+            quarter_id: null,
+            meeting_id: pt.meetingId ? Number(pt.meetingId) : null,
+            subtasks: [],
+            created_at: pt.createdAt || null
+          });
+        } else {
+          const existing = map.get(idNum)!;
+          if (pt.scheduledDate && !existing.scheduled_date) existing.scheduled_date = pt.scheduledDate;
+          if (pt.dueDate && !existing.deadline) existing.deadline = pt.dueDate;
+        }
+      });
+    }
+
+    return Array.from(map.values());
+  }, [tasks, plannerTasks]);
+
+  const now = today();
+  const getTaskDueDate = (t: any): string | null => {
+    const raw = t.deadline || t.scheduled_date || null;
+    return raw ? raw.slice(0, 10) : null;
+  };
+  const myOverdueTasks = allFlattenedTasks.filter(t => {
+    const isMine = String(t.assigned_to_id) === me;
+    const dDate = getTaskDueDate(t);
+    return isMine && Boolean(dDate && dDate < now) && t.status !== 'completed' && t.status !== 'done';
+  });
+  const overdueTasks = isDirector
+    ? allFlattenedTasks.filter(t => {
+        const dDate = getTaskDueDate(t);
+        return Boolean(dDate && dDate < now) && t.status !== 'completed' && t.status !== 'done';
+      })
+    : myOverdueTasks;
+  const todayTasks = allFlattenedTasks.filter(t => {
+    const isMine = String(t.assigned_to_id) === me;
+    const dDate = getTaskDueDate(t);
+    return isMine && dDate === now;
+  });
+  const todayMeetings = meetings.filter(m => m.date === now && (isDirector || m.attendees?.includes(myName) || String(m.owner_id) === me));
 
   return (
-    <div className="p-6 flex flex-col gap-6 bg-background-primary min-h-screen text-text-primary normal-case">
-      <DailyCheckinModal isOpen={checkinOpen} onClose={() => setCheckinOpen(false)} overdueTasks={tasks.filter((t: any) => t.status === 'overdue')} yesterdayMeetings={[]} onTasksUpdate={() => {}} />
-
-      <div className="flex flex-col gap-3">
-        {overview && <QuarterPills quarter={overview.quarter} />}
-        <Greeting name={userProfile?.name} />
-      </div>
-      <NextMeeting />
-
-      {overview && <NewTargetBanners data={overview} />}
-      {overview && (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-stretch">
-          <div className="xl:col-span-2"><QuarterHero data={overview} onChange={headline => setOverview({ ...overview, headline })} /></div>
-          <MonthlyTargets data={overview} onChange={loadOverview} />
+    <div className="p-4 sm:p-6 flex flex-col gap-6 bg-background-primary min-h-screen text-text-primary normal-case">
+      {/* 1. TOP EXECUTIVE HEADER */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-border-subtle/60">
+        <div>
+          <Greeting name={userProfile?.name} />
+          <p className="text-xs text-text-secondary mt-0.5">
+            Plan your day, execute your top priorities, and stay aligned with the team.
+          </p>
         </div>
-      )}
 
-      {(userProfile?.role || '').toLowerCase() === 'ceo' && <RunwayCard />}
+        {/* Action Controls */}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* CEO Mode Switcher (Focus vs Team Pulse) */}
+          {isDirector && (
+            <div className="flex items-center bg-background-secondary p-1 rounded-2xl border border-border-subtle shadow-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('focus')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer',
+                  viewMode === 'focus' 
+                    ? 'bg-accent-blue text-white shadow-xs' 
+                    : 'text-text-secondary hover:text-text-primary'
+                )}
+              >
+                <Sun size={13} />
+                <span>My Focus</span>
+              </button>
 
-      <section>
-        <SectionHead title="From the current dashboard" />
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2.5">
-          {tiles.map(t => (
-            <Link key={t.label} href={t.href} className="flex items-center gap-3 px-3.5 py-3 bg-background-secondary border border-border-subtle rounded-xl hover:border-border-active transition-colors">
-              <span className={cn('w-2 h-8 rounded shrink-0', t.tone === 'red' ? 'bg-accent-red' : t.tone === 'orange' ? 'bg-accent-orange' : 'bg-accent-blue/20')} />
-              <span><b className="block text-[22px] leading-none font-extrabold">{t.value}</b><span className="text-[12px] text-text-secondary">{t.label}</span></span>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      {overview && <CompanyTargets data={overview} onChange={loadOverview} />}
-
-      {overview && (
-        <section>
-          <SectionHead title={`Departments · ${overview.quarter.short}`} right={<span className="text-[12.5px] text-text-secondary">Click a department for its targets, objectives and past quarters</span>} />
-          {overview.departments.length ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3.5">
-              {overview.departments.map(d => <DeptCard key={d.id} d={d} quarter={overview.quarter} />)}
+              <button
+                type="button"
+                onClick={() => setViewMode('pulse')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer',
+                  viewMode === 'pulse' 
+                    ? 'bg-accent-blue text-white shadow-xs' 
+                    : 'text-text-secondary hover:text-text-primary'
+                )}
+              >
+                <Users size={13} />
+                <span>Team Pulse</span>
+              </button>
             </div>
-          ) : (
-            <Panel className="p-8 text-center text-[13.5px] text-text-secondary">
-              {isDirector ? <>No departments yet. <Link href="/departments" className="text-accent-blue font-semibold">Create the first one</Link>.</> : 'You are not part of a department yet. The Director adds people to departments.'}
-            </Panel>
           )}
-        </section>
+
+          {/* Plan My Day Morning Ritual Button */}
+          <button
+            type="button"
+            onClick={() => setPlanMyDayOpen(true)}
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-2xl bg-background-secondary hover:bg-background-secondary/80 border border-border-subtle hover:border-accent-blue text-text-primary text-xs font-semibold transition-all cursor-pointer shadow-xs"
+          >
+            <Sparkles size={13} className="text-accent-blue" />
+            <span>Plan My Day</span>
+            {overdueTasks.length > 0 && (
+              <span className="w-4 h-4 rounded-full bg-accent-red text-white text-[10px] font-bold flex items-center justify-center">
+                {overdueTasks.length}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* 2. CORE WORKSPACE: 2-Column Canvas OR CEO Team Pulse */}
+      {viewMode === 'pulse' && isDirector ? (
+        <CeoTeamPulse
+          teammates={teammates}
+          tasks={allFlattenedTasks}
+          meetings={meetings}
+          onOpenTaskPanel={t => setPanel({ kind: 'task', task: t })}
+          onAssignToTeammate={handleAssignToTeammate}
+        />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* LEFT: "My Day" Agenda & Smart Quick-Add */}
+          <div className="lg:col-span-8 space-y-6">
+            <MyDayView
+              tasks={allFlattenedTasks}
+              allTasks={allFlattenedTasks}
+              meetings={meetings}
+              currentUserId={me}
+              currentUserName={myName}
+              isDirector={isDirector}
+              projects={projects}
+              teammates={teammates}
+              onOpenTaskPanel={t => setPanel({ kind: 'task', task: t })}
+              onRefresh={refreshAll}
+              onOpenMeetingModal={() => setMeetingModalOpen(true)}
+              onCompleteTask={handleTaskComplete}
+              prefillAssignee={prefillAssignee}
+            />
+          </div>
+
+          {/* RIGHT: Smart Suggestions & Overdue Drawer */}
+          <div className="lg:col-span-4 space-y-4">
+            <SmartSuggestionsDrawer
+              tasks={allFlattenedTasks}
+              currentUserId={me}
+              isDirector={isDirector}
+              onOpenTaskPanel={t => setPanel({ kind: 'task', task: t })}
+              onRefresh={refreshAll}
+              onCompleteTask={handleTaskComplete}
+            />
+          </div>
+        </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
-        <ListCard title="Coming up" right={<Link href="/deadlines" className="text-[12.5px] font-semibold text-accent-blue">Open calendar →</Link>}
-          empty={calendar.length ? '' : 'Nothing due in the next 14 days.'} items={comingUp.slice(0, 7)} onOpen={open} top={<UpcomingMeetings />} />
-        <ListCard title="Needs attention" right={<span className="text-[12.5px] text-text-secondary">{late.length} overdue</span>}
-          empty="Nothing overdue." items={late.slice(0, 7)} onOpen={open} />
+      {/* 3. STRATEGIC OVERVIEW & QUARTERLY PERFORMANCE (Compact Drawer) */}
+      <div className="mt-4 pt-3 border-t border-border-subtle/70">
+        <button
+          type="button"
+          onClick={() => setStrategicOpen(!strategicOpen)}
+          className="w-full flex items-center justify-between px-4 py-2.5 bg-background-secondary border border-border-subtle hover:border-accent-blue/40 rounded-xl transition-all cursor-pointer group shadow-2xs"
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="w-6 h-6 rounded-lg bg-accent-blue/10 text-accent-blue flex items-center justify-center shrink-0">
+              <TrendingUp size={13} />
+            </span>
+            <div className="text-left">
+              <h3 className="text-xs font-bold text-text-primary group-hover:text-accent-blue transition-colors">
+                Strategic Performance & Company Targets {overview ? `(${overview.quarter.short})` : ''}
+              </h3>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 text-[11px] font-semibold text-text-secondary group-hover:text-text-primary">
+            <span>{strategicOpen ? 'Collapse' : 'Expand Strategic View'}</span>
+            {strategicOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </div>
+        </button>
+
+        {strategicOpen && (
+          <div className="mt-3 p-4 bg-background-secondary/40 border border-border-subtle rounded-2xl space-y-4 animate-in fade-in duration-150">
+            {/* Compact Sub-Tab Switcher */}
+            <div className="flex items-center justify-between gap-3 pb-2 border-b border-border-subtle/50 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setStrategicTab('targets')}
+                  className={cn(
+                    'flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer',
+                    strategicTab === 'targets' 
+                      ? 'bg-accent-blue text-white shadow-2xs' 
+                      : 'hover:bg-background-primary text-text-secondary'
+                  )}
+                >
+                  <Target size={12} />
+                  <span>Targets & Objectives</span>
+                </button>
+
+                {overview && overview.departments.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setStrategicTab('departments')}
+                    className={cn(
+                      'flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer',
+                      strategicTab === 'departments' 
+                        ? 'bg-accent-blue text-white shadow-2xs' 
+                        : 'hover:bg-background-primary text-text-secondary'
+                    )}
+                  >
+                    <Building2 size={12} />
+                    <span>Departments ({overview.departments.length})</span>
+                  </button>
+                )}
+
+                {(userProfile?.role || '').toLowerCase() === 'ceo' && (
+                  <button
+                    type="button"
+                    onClick={() => setStrategicTab('runway')}
+                    className={cn(
+                      'flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer',
+                      strategicTab === 'runway' 
+                        ? 'bg-accent-blue text-white shadow-2xs' 
+                        : 'hover:bg-background-primary text-text-secondary'
+                    )}
+                  >
+                    <IndianRupee size={12} />
+                    <span>Runway</span>
+                  </button>
+                )}
+              </div>
+
+              {overview && <QuarterPills quarter={overview.quarter} />}
+            </div>
+
+            {/* TAB 1: Targets & Objectives (Compact View) */}
+            {strategicTab === 'targets' && (
+              <div className="space-y-4">
+                {overview && <NewTargetBanners data={overview} />}
+                {overview && (
+                  <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 items-stretch">
+                    <div className="xl:col-span-2">
+                      <QuarterHero data={overview} onChange={headline => setOverview({ ...overview, headline })} />
+                    </div>
+                    <MonthlyTargets data={overview} onChange={loadOverview} />
+                  </div>
+                )}
+                {overview && <CompanyTargets data={overview} onChange={loadOverview} />}
+              </div>
+            )}
+
+            {/* TAB 2: Departments Grid */}
+            {strategicTab === 'departments' && overview && (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
+                {overview.departments.map(d => <DeptCard key={d.id} d={d} quarter={overview.quarter} />)}
+              </div>
+            )}
+
+            {/* TAB 3: Runway */}
+            {strategicTab === 'runway' && (userProfile?.role || '').toLowerCase() === 'ceo' && (
+              <div className="max-w-xl">
+                <RunwayCard />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
-        <MyWork entries={entries} onOpen={open} onTaskStatus={taskStatus} onObjectiveProgress={objectiveProgress} />
-        <QuickNotes userId={me} />
-      </div>
+      {/* 4. MODALS & SLIDE PANELS */}
+      <QuickAddMeetingModal
+        isOpen={meetingModalOpen}
+        onClose={() => setMeetingModalOpen(false)}
+        onCreated={refreshAll}
+        teammates={teammates}
+        currentUserId={me}
+      />
 
-      {panel?.kind === 'objective' && <ObjectivePanel id={panel.id} onClose={() => setPanel(null)} onChanged={refresh} onOpen={id => setPanel({ kind: 'objective', id })} />}
-      {panel?.kind === 'task' && <TaskPanel task={panel.task} canChange={true} onClose={() => setPanel(null)} onChanged={loadTasks} />}
+      <PlanMyDayModal
+        isOpen={planMyDayOpen}
+        onClose={() => setPlanMyDayOpen(false)}
+        overdueTasks={myOverdueTasks}
+        currentUserId={me}
+        todayTasks={todayTasks}
+        todayMeetings={todayMeetings}
+        onRefresh={refreshAll}
+      />
+
+      <DailyCheckinModal 
+        isOpen={checkinOpen} 
+        onClose={() => setCheckinOpen(false)} 
+        overdueTasks={tasks.filter((t: any) => t.status === 'overdue')} 
+        yesterdayMeetings={[]} 
+        onTasksUpdate={() => {}} 
+      />
+
+      {panel?.kind === 'objective' && (
+        <ObjectivePanel 
+          id={panel.id} 
+          onClose={() => setPanel(null)} 
+          onChanged={refreshAll} 
+          onOpen={id => setPanel({ kind: 'objective', id })} 
+        />
+      )}
+
+      {panel?.kind === 'task' && (
+        <TaskPanel 
+          task={panel.task} 
+          canChange={true} 
+          onClose={() => setPanel(null)} 
+          onChanged={loadTasks} 
+        />
+      )}
 
       <CompleteTaskModal
         isOpen={completing !== null}
@@ -162,25 +522,18 @@ export default function DashboardPage() {
         onSubmit={async (extendedTime, completionDate) => {
           if (completing === null) return;
           const ext = parseFloat(extendedTime);
-          try { await workcenterService.updateTask(completing, { status: 'completed', extended_time: isNaN(ext) ? undefined : ext, actual_completion_date: completionDate }); }
-          finally { setCompleting(null); loadTasks(); }
+          try { 
+            await workcenterService.updateTask(completing, { 
+              status: 'completed', 
+              extended_time: isNaN(ext) ? undefined : ext, 
+              actual_completion_date: completionDate 
+            }); 
+          } finally { 
+            setCompleting(null); 
+            loadTasks(); 
+          }
         }}
       />
     </div>
-  );
-}
-
-const SectionHead = ({ title, right }: { title: string; right?: React.ReactNode }) => (
-  <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-    <h2 className="text-[18px] font-extrabold text-text-primary">{title}</h2>{right}
-  </div>
-);
-
-function ListCard({ title, right, items, empty, onOpen, top }: { title: string; right: React.ReactNode; items: Entry[]; empty: string; onOpen: (e: Entry) => void; top?: React.ReactNode }) {
-  return (
-    <Panel className="overflow-hidden">
-      <div className="flex items-baseline justify-between px-4 pt-4 pb-2"><h2 className="text-[18px] font-extrabold">{title}</h2>{right}</div>
-      <div className="px-4 pb-2">{top}{items.length ? items.map(e => <EntryRow key={e.key} e={e} onOpen={onOpen} />) : empty ? <div className="py-3 text-[13px] text-text-secondary">{empty}</div> : null}</div>
-    </Panel>
   );
 }

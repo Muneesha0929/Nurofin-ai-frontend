@@ -62,6 +62,9 @@ export interface WCTask {
   meeting_id: number | null;
   actual_completion_date?: string | null;
   extended_time?: number | null;
+  scheduled_date?: string | null;
+  scheduled_start_time?: string | null;
+  scheduled_end_time?: string | null;
   subtasks: {
     id: number;
     title: string;
@@ -207,6 +210,9 @@ export interface CreateTaskPayload {
   deadline?: string;
   start_date?: string;
   estimated_hours?: number;
+  scheduled_date?: string;
+  scheduled_start_time?: string;
+  scheduled_end_time?: string;
 }
 
 export interface UpdateTaskPayload {

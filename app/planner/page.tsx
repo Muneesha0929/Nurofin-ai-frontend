@@ -359,8 +359,22 @@ export default function PlannerPage() {
     setNewTaskDueDate(new Date().toISOString().split('T')[0]);
   }, []);
 
+  // Synchronize selectedUserId when userProfile or teammates load
   useEffect(() => {
-    if (selectedUserId) {
+    if (currentUserId && (!selectedUserId || selectedUserId === 0)) {
+      setSelectedUserId(currentUserId);
+    }
+  }, [currentUserId, selectedUserId]);
+
+  useEffect(() => {
+    if ((!selectedUserId || selectedUserId === 0) && teammates.length > 0) {
+      const foundMe = teammates.find(t => t.id === currentUserId);
+      setSelectedUserId(foundMe ? foundMe.id : teammates[0].id);
+    }
+  }, [teammates, currentUserId, selectedUserId]);
+
+  useEffect(() => {
+    if (selectedUserId && selectedUserId !== 0) {
       loadSchedule();
       if (teammates.length > 0) {
         loadTasks();
@@ -512,6 +526,11 @@ export default function PlannerPage() {
       alert("Please fill in all required fields (title, start date, end date, start time, end time).");
       return;
     }
+    if (newEventType === 'meeting' && newEventParticipants.length === 0) {
+      alert("Please select at least one participant for the meeting.");
+      setShowParticipants(true);
+      return;
+    }
     if (conflictData) {
       alert("Please resolve the scheduling conflict by selecting an alternative time before adding the event.");
       return;
@@ -540,6 +559,7 @@ export default function PlannerPage() {
           time: newEventStartTime,
           end_time: newEventEndTime,
           type: newEventType,
+          participant_ids: newEventParticipants,
           participants: newEventParticipants.map(String) as any,
           project_id: newEventTaskId !== 'none' ? (allTasks.find(t => String(t.id) === newEventTaskId)?.projectId || (newEventProjectId !== 'none' ? newEventProjectId : undefined)) : (newEventProjectId !== 'none' ? newEventProjectId : undefined),
           task_id: newEventTaskId !== 'none' ? newEventTaskId : undefined
@@ -641,16 +661,15 @@ export default function PlannerPage() {
     e.preventDefault();
     if (!selectedTaskId || !taskScheduleDate || !taskScheduleStartTime || !taskScheduleEndTime) return;
     if (scheduleTaskConflictData) {
-      alert("Please resolve the scheduling conflict by selecting an alternative time before scheduling the task.");
-      return;
+      const proceed = window.confirm(`Scheduling Notice: ${scheduleTaskConflictData.message || 'There may be a scheduling conflict.'}\n\nDo you want to save this schedule anyway?`);
+      if (!proceed) return;
     }
     if (isSchedulingTask) return;
     setIsSchedulingTask(true);
     try {
-      const task = tasks.find(t => t.id === selectedTaskId);
-      if (!task) return;
+      const task = tasks.find(t => String(t.id) === String(selectedTaskId)) || allTasks.find(t => String(t.id) === String(selectedTaskId));
       
-      if (task.source === 'issue') {
+      if (task?.source === 'issue') {
         await issuesService.updateIssue(Number(selectedTaskId), {
           scheduled_date: taskScheduleDate,
           scheduled_start_time: taskScheduleStartTime,
@@ -658,7 +677,6 @@ export default function PlannerPage() {
         } as any);
       } else {
         await tasksService.updateTask(selectedTaskId, {
-          ...task,
           scheduledDate: taskScheduleDate,
           scheduledStartTime: taskScheduleStartTime,
           scheduledEndTime: taskScheduleEndTime
@@ -667,10 +685,14 @@ export default function PlannerPage() {
       
       setScheduleTaskOpen(false);
       setSelectedTaskId(null);
-      loadTasks();
-      loadSchedule(); // Refresh timeline events
+      setScheduleTaskConflictData(null);
+      await loadTasks();
+      await loadSchedule();
     } catch (error) {
       console.error('Failed to schedule task:', error);
+      alert('Failed to save task schedule. Please try again.');
+    } finally {
+      setIsSchedulingTask(false);
     }
   };
 
@@ -1349,7 +1371,11 @@ export default function PlannerPage() {
                 <label className="text-[10px] text-text-secondary font-bold uppercase tracking-wider">Event Type</label>
                 <select
                   value={newEventType}
-                  onChange={e => setNewEventType(e.target.value)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setNewEventType(val);
+                    if (val === "meeting") setShowParticipants(true);
+                  }}
                   className="w-full h-10 bg-background-primary border border-border-subtle rounded-lg px-3 text-sm text-text-primary focus:border-accent-blue transition-all"
                 >
                   <option value="meeting">Meeting</option>
@@ -1391,7 +1417,7 @@ export default function PlannerPage() {
               </div>
               <div className="space-y-1.5 sm:col-span-6">
                 <button type="button" onClick={() => setShowParticipants(!showParticipants)} className="flex items-center gap-2 text-[10px] text-text-secondary font-bold uppercase tracking-wider hover:text-text-primary transition-colors">
-                  Participants (Optional)
+                  {newEventType === "meeting" ? "Participants (Required for Meetings) *" : "Participants (Optional)"}
                   {showParticipants ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                 </button>
                 <AnimatePresence>
