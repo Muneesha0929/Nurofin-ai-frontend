@@ -10,6 +10,7 @@ import { cn } from '@/utils/cn';
 import { Issue } from '@/types';
 import { issuesService } from '@/services/issues';
 import { usersService } from '@/services/users';
+import { BuildTrackBadge, BuildTrackDetails } from '@/components/issues/BuildTrack';
 import { projectsService } from '@/services/projects';
 import { UserProfile } from '@/types';
 import {
@@ -69,7 +70,7 @@ function IssueCenterPage() {
   const [submitting, setSubmitting] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [severityFilter, setSeverityFilter] = useState('all');
-  const [viewFilter, setViewFilter] = useState<'all' | 'mine' | 'assigned'>('all');
+  const [viewFilter, setViewFilter] = useState<'all' | 'mine' | 'assigned' | 'buildtrack'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   
   const searchParams = useSearchParams();
@@ -336,6 +337,7 @@ function IssueCenterPage() {
       (issue.reporterName || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesView =
       viewFilter === 'all' ? true :
+      viewFilter === 'buildtrack' ? !!issue.external :
       viewFilter === 'mine' ? (issue.reporterId && issue.reporterId === currentUserId) :
       (issue.assigneeId && issue.assigneeId === currentUserId);
     return matchesStatus && matchesSeverity && matchesSearch && matchesView;
@@ -424,6 +426,7 @@ function IssueCenterPage() {
               <option value="all">All Issues</option>
               <option value="mine">Reported by Me</option>
               <option value="assigned">Assigned to Me</option>
+              <option value="buildtrack">From Build-Track</option>
             </select>
           </div>
 
@@ -497,6 +500,7 @@ function IssueCenterPage() {
                   <div className="space-y-1">
                     <span className="flex items-center gap-1.5">
                       {issue.title}
+                      {issue.external ? <BuildTrackBadge /> : null}
                       {issue.followupCount ? (
                         <span className="flex items-center gap-0.5 text-accent-blue text-[10px] font-bold">
                           <MessageSquare className="w-3 h-3" /> {issue.followupCount}
@@ -782,6 +786,10 @@ function IssueCenterPage() {
                   <span className="flex items-center gap-1 mt-0.5 font-bold"><Calendar className="w-3 h-3" /> {selectedIssue.deadline || '—'}</span>
                 </div>
               </div>
+
+              {selectedIssue.external && (
+                <BuildTrackDetails issueId={parseInt(selectedIssue.id)} onEnlarge={setPreviewImage} />
+              )}
 
               <div className="space-y-1.5">
                 <label className="text-2xs font-bold text-text-secondary uppercase">Update Status</label>

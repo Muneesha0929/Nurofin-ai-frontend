@@ -30,13 +30,15 @@ function mapIssue(raw: any): Issue {
     assigneeName: raw.assigned_user?.name,
     assigneeAvatar: raw.assigned_user?.avatar || undefined,
     reporterId: raw.reported_by ? String(raw.reported_by.id) : undefined,
-    reporterName: raw.reported_by?.name,
+    // Build-Track reports have no CoS user as reporter: show the person (and company) who sent it.
+    reporterName: raw.reported_by?.name ?? (raw.external?.reporter_name ? `${raw.external.reporter_name}${raw.external.company ? ` (${raw.external.company})` : ''}` : undefined),
     reporterAvatar: raw.reported_by?.avatar || undefined,
     followupCount: raw.followup_count || 0,
     followups: (raw.followups || []).map(mapFollowup),
     assignmentStatus: raw.assignment_status || undefined,
     assignedUserId: raw.assigned_user_id ? String(raw.assigned_user_id) : undefined,
     attachments: raw.attachments || [],
+    external: raw.external || null,
   };
 }
 
