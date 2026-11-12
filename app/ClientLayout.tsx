@@ -5,6 +5,7 @@ import Sidebar from '@/components/layout/Sidebar';
 import Topbar from '@/components/layout/Topbar';
 import GlobalChat from '@/components/layout/GlobalChat';
 import GlobalAssignmentPopup from '@/components/layout/GlobalAssignmentPopup';
+import GlobalQuickAddBar from '@/components/layout/GlobalQuickAddBar';
 import { MeetingReminder } from '@/components/meetings/MeetingWidgets';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
@@ -299,9 +300,11 @@ export default function ClientLayout({
           <Topbar />
 
           {/* Core Content Area */}
-          <main className="flex-1 pt-[5.5rem] p-6 overflow-y-auto overflow-x-auto scrollbar-thin min-h-screen min-w-0">
+          <main className="flex-1 pt-[5.5rem] p-6 pb-28 overflow-y-auto overflow-x-auto scrollbar-thin min-h-screen min-w-0">
             {children}
           </main>
+          {/* Global Task Adding Option (Docked at Bottom of Every Page) */}
+          <GlobalQuickAddBar />
           {/* Floating AI Helper overlay */}
           <GlobalChat />
           <GlobalAssignmentPopup />

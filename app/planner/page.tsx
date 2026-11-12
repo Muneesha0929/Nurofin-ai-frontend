@@ -24,6 +24,7 @@ import {
   Globe,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Briefcase,
   Sunrise,
   Moon,
@@ -31,7 +32,8 @@ import {
   ChevronDown,
   MessageCircle,
   X,
-  Calendar
+  Calendar,
+  Repeat
 } from 'lucide-react';
 import { meetingsService } from '@/services/meetings';
 import { plannerService, PlannerUser, ScheduleEvent } from '@/services/planner';
@@ -82,6 +84,9 @@ export default function PlannerPage() {
   const [selectedTaskDetails, setSelectedTaskDetails] = useState<any>(null);
   const [newEventType, setNewEventType] = useState('meeting');
   const [newEventOpen, setNewEventOpen] = useState(false);
+  const [newEventRecurrence, setNewEventRecurrence] = useState<'none' | 'daily' | 'weekdays' | 'weekly' | 'custom'>('none');
+  const [newEventDays, setNewEventDays] = useState<string[]>(['mon', 'wed', 'fri']);
+  const [newEventRepeatWeeks, setNewEventRepeatWeeks] = useState<number>(2);
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   const [isSchedulingTask, setIsSchedulingTask] = useState(false);
   const [unscheduledSlotOpen, setUnscheduledSlotOpen] = useState(false);
@@ -112,6 +117,8 @@ export default function PlannerPage() {
 
   const [completeTaskOpen, setCompleteTaskOpen] = useState(false);
   const [taskExtendedTime, setTaskExtendedTime] = useState('');
+  const [dragOverHour, setDragOverHour] = useState<number | null>(null);
+  const [overlapAlertMessage, setOverlapAlertMessage] = useState<string | null>(null);
 
   const isOwnSchedule = selectedUserId === currentUserId;
 
@@ -305,9 +312,8 @@ export default function PlannerPage() {
       setAllTasks(data);
       
       const userTasks = data.filter(t => 
-        (String(t.assignedTo?.id) === String(selectedUserId) ||
-        String(t.assigneeId) === String(selectedUserId)) &&
-        (!t.has_subtasks) // Only show leaf tasks (tasks with no subtasks)
+        String(t.assignedTo?.id) === String(selectedUserId) ||
+        String(t.assigneeId) === String(selectedUserId)
       );
       
       setTasks(userTasks);
@@ -536,54 +542,103 @@ export default function PlannerPage() {
       return;
     }
     try {
-      if (newEventType === 'task') {
-        await tasksService.createTask({
-          title: newEventTitle,
-          description: '',
-          status: 'in_progress',
-          priority: 'medium',
-          startDate: newEventStartDate,
-          dueDate: newEventEndDate,
-          scheduledDate: newEventStartDate,
-          scheduledStartTime: newEventStartTime,
-          scheduledEndTime: newEventEndTime,
-          assigneeId: selectedUserId.toString(),
-          projectId: newEventTaskId !== 'none' ? (allTasks.find(t => String(t.id) === newEventTaskId)?.projectId || (newEventProjectId !== 'none' ? newEventProjectId : undefined)) : (newEventProjectId !== 'none' ? newEventProjectId : undefined),
-          parentId: newEventTaskId !== 'none' ? newEventTaskId : undefined
-        } as any);
-        loadTasks();
-      } else {
-        const newEvent = await meetingsService.createMeeting({
-          title: newEventTitle,
-          date: newEventStartDate,
-          time: newEventStartTime,
-          end_time: newEventEndTime,
-          type: newEventType,
-          participant_ids: newEventParticipants,
-          participants: newEventParticipants.map(String) as any,
-          project_id: newEventTaskId !== 'none' ? (allTasks.find(t => String(t.id) === newEventTaskId)?.projectId || (newEventProjectId !== 'none' ? newEventProjectId : undefined)) : (newEventProjectId !== 'none' ? newEventProjectId : undefined),
-          task_id: newEventTaskId !== 'none' ? newEventTaskId : undefined
-        });
-        if (newEventTaskId !== 'none') {
-          const parentTask = allTasks.find(t => String(t.id) === newEventTaskId);
-          const resolvedProjectId = parentTask?.projectId || (newEventProjectId !== 'none' ? newEventProjectId : undefined);
+      // Calculate all recurrence dates if repeating (Google Meet style)
+      const datesToSchedule: string[] = [newEventStartDate];
+      const maxDays = newEventRepeatWeeks * 7;
+      const startDt = new Date(newEventStartDate + 'T12:00:00');
 
+      if (newEventRecurrence === 'daily') {
+        for (let i = 1; i < maxDays; i++) {
+          const nextD = new Date(startDt);
+          nextD.setDate(startDt.getDate() + i);
+          datesToSchedule.push(nextD.toISOString().split('T')[0]);
+        }
+      } else if (newEventRecurrence === 'weekdays') {
+        for (let i = 1; i < maxDays; i++) {
+          const nextD = new Date(startDt);
+          nextD.setDate(startDt.getDate() + i);
+          const day = nextD.getDay();
+          if (day >= 1 && day <= 5) {
+            datesToSchedule.push(nextD.toISOString().split('T')[0]);
+          }
+        }
+      } else if (newEventRecurrence === 'weekly') {
+        for (let i = 1; i < newEventRepeatWeeks; i++) {
+          const nextD = new Date(startDt);
+          nextD.setDate(startDt.getDate() + (i * 7));
+          datesToSchedule.push(nextD.toISOString().split('T')[0]);
+        }
+      } else if (newEventRecurrence === 'custom') {
+        const dayMap: { [k: string]: number } = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+        const selectedNums = newEventDays.map(d => dayMap[d.toLowerCase()]);
+        for (let i = 1; i < maxDays; i++) {
+          const nextD = new Date(startDt);
+          nextD.setDate(startDt.getDate() + i);
+          if (selectedNums.includes(nextD.getDay())) {
+            datesToSchedule.push(nextD.toISOString().split('T')[0]);
+          }
+        }
+      }
+
+      if (newEventType === 'task') {
+        for (const d of datesToSchedule) {
           await tasksService.createTask({
             title: newEventTitle,
-            description: `[${newEventType.toUpperCase()}] Scheduled in Planner`,
+            description: newEventRecurrence !== 'none' ? `[Recurring Task: ${newEventRecurrence}]` : '',
             status: 'in_progress',
             priority: 'medium',
-            startDate: newEventStartDate,
-            dueDate: newEventEndDate,
-            scheduledDate: newEventStartDate,
+            startDate: d,
+            dueDate: d,
+            scheduledDate: d,
             scheduledStartTime: newEventStartTime,
             scheduledEndTime: newEventEndTime,
             assigneeId: selectedUserId.toString(),
-            projectId: resolvedProjectId,
-            parentId: newEventTaskId,
-            meetingId: newEvent?.id
+            projectId: newEventTaskId !== 'none' ? (allTasks.find(t => String(t.id) === newEventTaskId)?.projectId || (newEventProjectId !== 'none' ? newEventProjectId : undefined)) : (newEventProjectId !== 'none' ? newEventProjectId : undefined),
+            parentId: newEventTaskId !== 'none' ? newEventTaskId : undefined
           } as any);
+        }
+        await loadTasks();
+      } else {
+        const createdEvents: any[] = [];
+        for (const d of datesToSchedule) {
+          const newEvent = await meetingsService.createMeeting({
+            title: newEventTitle,
+            date: d,
+            time: newEventStartTime,
+            end_time: newEventEndTime,
+            type: newEventType,
+            participant_ids: newEventParticipants,
+            participants: newEventParticipants.map(String) as any,
+            project_id: newEventTaskId !== 'none' ? (allTasks.find(t => String(t.id) === newEventTaskId)?.projectId || (newEventProjectId !== 'none' ? newEventProjectId : undefined)) : (newEventProjectId !== 'none' ? newEventProjectId : undefined),
+            task_id: newEventTaskId !== 'none' ? newEventTaskId : undefined,
+            is_recurring: newEventRecurrence !== 'none',
+            recurrence_rule: newEventRecurrence === 'custom' ? `custom:${newEventDays.join(',')}` : newEventRecurrence,
+          });
+          createdEvents.push(newEvent);
 
+          if (newEventTaskId !== 'none') {
+            const parentTask = allTasks.find(t => String(t.id) === newEventTaskId);
+            const resolvedProjectId = parentTask?.projectId || (newEventProjectId !== 'none' ? newEventProjectId : undefined);
+
+            await tasksService.createTask({
+              title: newEventTitle,
+              description: `[${newEventType.toUpperCase()}] Scheduled in Planner`,
+              status: 'in_progress',
+              priority: 'medium',
+              startDate: d,
+              dueDate: d,
+              scheduledDate: d,
+              scheduledStartTime: newEventStartTime,
+              scheduledEndTime: newEventEndTime,
+              assigneeId: selectedUserId.toString(),
+              projectId: resolvedProjectId,
+              parentId: newEventTaskId,
+              meetingId: newEvent?.id
+            } as any);
+          }
+        }
+
+        if (newEventTaskId !== 'none') {
           await tasksService.updateTask(newEventTaskId, {
             scheduledDate: newEventStartDate,
             scheduledStartTime: newEventStartTime,
@@ -591,10 +646,11 @@ export default function PlannerPage() {
           });
           await loadTasks();
         }
-        setLocalEvents([...localEvents, { ...newEvent, source: 'nurofin' }]);
+        setLocalEvents([...localEvents, ...createdEvents.map(ev => ({ ...ev, source: 'nurofin' }))]);
       }
       setNewEventTitle('');
       setNewEventParticipants([]);
+      setNewEventRecurrence('none');
       setNewEventOpen(false);
       loadSchedule();
     } catch (error: any) {
@@ -659,7 +715,17 @@ export default function PlannerPage() {
 
   const handleScheduleTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTaskId || !taskScheduleDate || !taskScheduleStartTime || !taskScheduleEndTime) return;
+    if (!selectedTaskId || !taskScheduleDate || !taskScheduleStartTime) return;
+    const computedEnd = taskScheduleEndTime || (() => {
+      try {
+        const parts = taskScheduleStartTime.split(':');
+        const endH = (parseInt(parts[0], 10) + 1).toString().padStart(2, '0');
+        return `${endH}:${parts[1] || '00'}`;
+      } catch (e) {
+        return '11:00';
+      }
+    })();
+
     if (scheduleTaskConflictData) {
       const proceed = window.confirm(`Scheduling Notice: ${scheduleTaskConflictData.message || 'There may be a scheduling conflict.'}\n\nDo you want to save this schedule anyway?`);
       if (!proceed) return;
@@ -673,13 +739,13 @@ export default function PlannerPage() {
         await issuesService.updateIssue(Number(selectedTaskId), {
           scheduled_date: taskScheduleDate,
           scheduled_start_time: taskScheduleStartTime,
-          scheduled_end_time: taskScheduleEndTime
+          scheduled_end_time: computedEnd
         } as any);
       } else {
         await tasksService.updateTask(selectedTaskId, {
           scheduledDate: taskScheduleDate,
           scheduledStartTime: taskScheduleStartTime,
-          scheduledEndTime: taskScheduleEndTime
+          scheduledEndTime: computedEnd
         });
       }
       
@@ -795,6 +861,102 @@ export default function PlannerPage() {
 
   const prevSelectedDateRef = useRef(selectedDate.getTime());
   const hasInitializedPopup = useRef(false);
+
+  // Drag Auto-Scroll: Continuously scrolls the main content window & timeline container when dragging near screen edges
+  // GUARANTEE: Never scrolls the left sidebar nav element and NEVER sticks across hour borders!
+  useEffect(() => {
+    let scrollRafId: number | null = null;
+    let scrollVelocity = 0;
+
+    const performScroll = () => {
+      if (scrollVelocity !== 0) {
+        // 1. Scroll window directly
+        window.scrollBy({ top: scrollVelocity, behavior: 'auto' });
+
+        // 2. Direct scroll on documentElement and body
+        if (document.documentElement) {
+          document.documentElement.scrollTop += scrollVelocity;
+        }
+        if (document.body) {
+          document.body.scrollTop += scrollVelocity;
+        }
+
+        // 3. Scroll the main layout container and any inner timeline containers
+        const mainEl = document.querySelector('main');
+        if (mainEl) {
+          mainEl.scrollTop += scrollVelocity;
+
+          // Only scroll inner containers strictly inside main (e.g. team schedule timeline)
+          const innerScrollables = mainEl.querySelectorAll<HTMLElement>('.overflow-y-auto');
+          innerScrollables.forEach(c => {
+            c.scrollTop += scrollVelocity;
+          });
+        }
+
+        scrollRafId = requestAnimationFrame(performScroll);
+      } else {
+        scrollRafId = null;
+      }
+    };
+
+    const handleWindowDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      const mainEl = document.querySelector('main');
+      if (!mainEl) return;
+      const mainRect = mainEl.getBoundingClientRect();
+
+      // If cursor is over the left sidebar (left of main content area), NEVER scroll!
+      if (e.clientX < mainRect.left) {
+        scrollVelocity = 0;
+        return;
+      }
+
+      const edgeThreshold = 200; // Generous 200px threshold for immediate, smooth response
+      const viewportHeight = window.innerHeight;
+
+      if (e.clientY < edgeThreshold) {
+        // Dragging near top edge -> scroll up
+        const intensity = (edgeThreshold - Math.max(0, e.clientY)) / edgeThreshold;
+        scrollVelocity = -Math.max(10, Math.round(intensity * 40));
+        if (!scrollRafId) scrollRafId = requestAnimationFrame(performScroll);
+      } else if (e.clientY > viewportHeight - edgeThreshold) {
+        // Dragging near bottom edge -> scroll down
+        const intensity = (e.clientY - (viewportHeight - edgeThreshold)) / edgeThreshold;
+        scrollVelocity = Math.max(10, Math.round(intensity * 40));
+        if (!scrollRafId) scrollRafId = requestAnimationFrame(performScroll);
+      } else {
+        scrollVelocity = 0;
+      }
+    };
+
+    const stopScroll = () => {
+      scrollVelocity = 0;
+      if (scrollRafId) {
+        cancelAnimationFrame(scrollRafId);
+        scrollRafId = null;
+      }
+    };
+
+    window.addEventListener('dragover', handleWindowDragOver);
+    window.addEventListener('dragend', stopScroll);
+    window.addEventListener('drop', stopScroll);
+
+    return () => {
+      window.removeEventListener('dragover', handleWindowDragOver);
+      window.removeEventListener('dragend', stopScroll);
+      window.removeEventListener('drop', stopScroll);
+      if (scrollRafId) cancelAnimationFrame(scrollRafId);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleGlobalTaskCreated = () => {
+      loadTasks();
+      loadSchedule();
+    };
+    window.addEventListener('task:created', handleGlobalTaskCreated);
+    return () => window.removeEventListener('task:created', handleGlobalTaskCreated);
+  }, [loadTasks, loadSchedule]);
 
   useEffect(() => {
     if (activeTab !== 'day' || tasks.length === 0) return;
@@ -926,8 +1088,7 @@ export default function PlannerPage() {
            isDateMatch = t.scheduledDate === dateStr || !!(!t.scheduledDate && t.dueDate && t.dueDate.startsWith(dateStr));
         }
         
-        const isLeaf = !parentIds.has(t.id);
-        return isTargetUser && isDateMatch && isLeaf;
+        return isTargetUser && isDateMatch;
       })
       .map(t => {
         let taskDate = t.scheduledDate || (t.dueDate ? t.dueDate.split('T')[0] : dateStr);
@@ -1009,6 +1170,69 @@ export default function PlannerPage() {
       return new Date(e.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
     return e.start_time || '';
+  };
+
+  const formatAmPm = (hourNum: number) => {
+    const ampm = hourNum >= 12 ? 'PM' : 'AM';
+    let h = hourNum % 12;
+    if (h === 0) h = 12;
+    return `${h}:00 ${ampm}`;
+  };
+
+  const handleDropOnHour = async (hourNum: number, e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverHour(null);
+    const rawData = e.dataTransfer.getData('application/json');
+    if (!rawData) return;
+    try {
+      const { id, source, title } = JSON.parse(rawData);
+      if (!id) return;
+
+      const dateStr = formatDateStr(selectedDate);
+      const startHour = hourNum;
+      const endHour = (startHour + 1) % 24;
+      const startStr = `${startHour.toString().padStart(2, '0')}:00`;
+      const endStr = `${endHour.toString().padStart(2, '0')}:00`;
+
+      // Check for overlap in this hour slot
+      const currentDayEvents = getEventsForDate(dateStr);
+      const overlapping = currentDayEvents.filter(ev => {
+        if (String(ev.id) === String(id)) return false;
+        const startH = getEventHour(ev);
+        const endH = getEventEndHour(ev);
+        if (startH === null) return false;
+        if (endH !== null && endH > startH) {
+          return hourNum >= startH && hourNum < endH;
+        }
+        return startH === hourNum;
+      });
+
+      if (overlapping.length > 0) {
+        const titles = overlapping.map(o => `"${o.title}"`).join(', ');
+        setOverlapAlertMessage(`⚠️ Overlapping Schedule: ${titles} is already scheduled at ${formatAmPm(hourNum)}. "${title}" has been moved here with an overlapping time.`);
+      } else {
+        setOverlapAlertMessage(null);
+      }
+
+      if (source === 'issue' || source === 'nurofin_issue') {
+        await issuesService.updateIssue(Number(id), {
+          scheduled_date: dateStr,
+          scheduled_start_time: startStr,
+          scheduled_end_time: endStr
+        } as any);
+      } else {
+        await tasksService.updateTask(id, {
+          scheduledDate: dateStr,
+          scheduledStartTime: startStr,
+          scheduledEndTime: endStr
+        });
+      }
+
+      await loadTasks();
+      await loadSchedule();
+    } catch (err) {
+      console.error('Failed to handle task drop:', err);
+    }
   };
 
   const selectedUserInfo = getSelectedUser();
@@ -1415,6 +1639,84 @@ export default function PlannerPage() {
                   ))}
                 </select>
               </div>
+
+              {/* REPEAT / RECURRENCE (Google Meet Style) */}
+              <div className="space-y-2.5 sm:col-span-6 bg-background-secondary/60 border border-border-subtle p-3.5 rounded-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label className="text-[10px] text-text-secondary font-bold uppercase tracking-wider flex items-center gap-1.5">
+                    <Repeat className="w-3.5 h-3.5 text-accent-blue" />
+                    <span>Repeat Schedule (Google Meet Style)</span>
+                  </label>
+                  <select
+                    value={newEventRecurrence}
+                    onChange={e => setNewEventRecurrence(e.target.value as any)}
+                    className="px-2.5 py-1.5 bg-background-primary border border-border-subtle rounded-lg text-xs text-text-primary outline-none focus:border-accent-blue cursor-pointer"
+                  >
+                    <option value="none">Does not repeat</option>
+                    <option value="daily">Daily (Every day)</option>
+                    <option value="weekdays">Every weekday (Monday to Friday)</option>
+                    <option value="weekly">Weekly on this day</option>
+                    <option value="custom">Custom particular days...</option>
+                  </select>
+                </div>
+
+                {newEventRecurrence === 'custom' && (
+                  <div className="space-y-1.5 pt-2 border-t border-border-subtle/50">
+                    <span className="text-[10px] font-bold text-text-secondary uppercase tracking-wider block">
+                      Select Days of the Week:
+                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[
+                        { key: 'mon', label: 'Mon' },
+                        { key: 'tue', label: 'Tue' },
+                        { key: 'wed', label: 'Wed' },
+                        { key: 'thu', label: 'Thu' },
+                        { key: 'fri', label: 'Fri' },
+                        { key: 'sat', label: 'Sat' },
+                        { key: 'sun', label: 'Sun' },
+                      ].map(d => {
+                        const isSelected = newEventDays.includes(d.key);
+                        return (
+                          <button
+                            key={d.key}
+                            type="button"
+                            onClick={() => {
+                              setNewEventDays(prev => 
+                                isSelected ? prev.filter(k => k !== d.key) : [...prev, d.key]
+                              );
+                            }}
+                            className={cn(
+                              'w-9 h-7 rounded-lg text-xs font-semibold transition-all cursor-pointer border text-center',
+                              isSelected
+                                ? 'bg-accent-blue text-white border-accent-blue shadow-2xs font-bold'
+                                : 'bg-background-primary border-border-subtle text-text-secondary hover:text-text-primary'
+                            )}
+                          >
+                            {d.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {newEventRecurrence !== 'none' && (
+                  <div className="flex items-center justify-between pt-2 border-t border-border-subtle/40 text-xs">
+                    <span className="text-[11px] text-text-secondary font-medium">Repeat for:</span>
+                    <select
+                      value={newEventRepeatWeeks}
+                      onChange={e => setNewEventRepeatWeeks(Number(e.target.value))}
+                      className="px-2 py-1 bg-background-primary border border-border-subtle rounded-md text-[11px] text-text-primary outline-none cursor-pointer"
+                    >
+                      <option value={1}>1 week</option>
+                      <option value={2}>2 weeks (Recommended)</option>
+                      <option value={4}>4 weeks (1 Month)</option>
+                      <option value={8}>8 weeks (2 Months)</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-1.5 sm:col-span-6">
                 <button type="button" onClick={() => setShowParticipants(!showParticipants)} className="flex items-center gap-2 text-[10px] text-text-secondary font-bold uppercase tracking-wider hover:text-text-primary transition-colors">
                   {newEventType === "meeting" ? "Participants (Required for Meetings) *" : "Participants (Optional)"}
@@ -1719,6 +2021,22 @@ export default function PlannerPage() {
                     </button>
                 </h3>
 
+                {overlapAlertMessage && (
+                  <div className="flex items-center justify-between p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-600 dark:text-amber-400 text-xs font-semibold animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>{overlapAlertMessage}</span>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={() => setOverlapAlertMessage(null)}
+                      className="p-1 hover:bg-amber-500/20 rounded-md transition-colors cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 {scheduleLoading ? (
                   <div className="flex flex-col items-center justify-center py-20 text-text-muted">
                     <div className="animate-spin w-8 h-8 border-4 border-accent-blue border-t-transparent rounded-full mb-4"></div>
@@ -1804,7 +2122,17 @@ export default function PlannerPage() {
                     return (
                       <div 
                         key={idx} 
-                        className={`${bgColor} ${textColor} backdrop-blur ${isCompact ? 'p-1.5' : 'p-4'} rounded-xl border ${borderColor} hover:shadow-md transition-all flex flex-col ${isCompact ? '' : 'sm:flex-row sm:items-center'} justify-between ${isCompact ? 'gap-0.5' : 'gap-4'} group ${isTask || evt.source === 'google_calendar' || evt.source === 'nurofin' ? 'cursor-pointer' : ''}`}
+                        draggable={isTask && isOwnSchedule}
+                        onDragStart={(e) => {
+                          if (!isTask || !isOwnSchedule) return;
+                          e.dataTransfer.setData('application/json', JSON.stringify({
+                            id: evt.id,
+                            source: evt.source,
+                            title: evt.title,
+                          }));
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        className={`${bgColor} ${textColor} backdrop-blur ${isCompact ? 'p-1.5' : 'p-4'} rounded-xl border ${borderColor} hover:shadow-md transition-all flex flex-col ${isCompact ? '' : 'sm:flex-row sm:items-center'} justify-between ${isCompact ? 'gap-0.5' : 'gap-4'} group ${isTask || evt.source === 'google_calendar' || evt.source === 'nurofin' ? 'cursor-pointer' : ''} ${isTask && isOwnSchedule ? 'cursor-grab active:cursor-grabbing' : ''}`}
                         onClick={() => {
                           if (isTask) {
                             const fullTask = allTasks.find(t => String(t.id) === String(evt.id));
@@ -1929,7 +2257,18 @@ export default function PlannerPage() {
                               return startH === hourNum;
                             });
                             return (
-                              <div key={hourNum} className="grid border-b border-border-subtle/40 py-4 last:border-0 hover:bg-surface-hover/30 transition-colors" style={{ gridTemplateColumns: `4rem repeat(${teammates.length}, minmax(0, 1fr))` }}>
+                              <div 
+                                key={hourNum} 
+                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                onDragEnter={() => setDragOverHour(hourNum as number)}
+                                onDragLeave={() => { if (dragOverHour === hourNum) setDragOverHour(null); }}
+                                onDrop={(e) => handleDropOnHour(hourNum as number, e)}
+                                className={cn(
+                                  "grid border-b border-border-subtle/40 py-4 last:border-0 hover:bg-surface-hover/30 transition-colors p-1 rounded-lg",
+                                  dragOverHour === hourNum && "bg-accent-blue/10 ring-1 ring-accent-blue"
+                                )} 
+                                style={{ gridTemplateColumns: `4rem repeat(${teammates.length}, minmax(0, 1fr))` }}
+                              >
                                 <div className="font-mono text-text-secondary font-bold text-sm pt-2 text-right pr-2">
                                   {formatAmPm(hourNum as number)}
                                 </div>
@@ -1975,7 +2314,18 @@ export default function PlannerPage() {
                             });
 
                             return (
-                              <motion.div variants={itemVariants} key={hourNum} className="flex gap-5 items-start text-xs border-b border-border-subtle/40 pb-4 last:border-0 last:pb-0">
+                              <motion.div 
+                                variants={itemVariants} 
+                                key={hourNum} 
+                                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                onDragEnter={() => setDragOverHour(hourNum as number)}
+                                onDragLeave={() => { if (dragOverHour === hourNum) setDragOverHour(null); }}
+                                onDrop={(e) => handleDropOnHour(hourNum as number, e)}
+                                className={cn(
+                                  "flex gap-5 items-start text-xs border-b border-border-subtle/40 pb-4 last:border-0 last:pb-0 p-2 rounded-xl transition-all",
+                                  dragOverHour === hourNum && "bg-accent-blue/10 ring-2 ring-accent-blue/40 ring-dashed"
+                                )}
+                              >
                                 <span className="font-mono text-text-secondary font-bold text-sm w-16 pt-2">{formatAmPm(hourNum as number)}</span>
                                 {hourEvents.length > 0 ? (
                                   <div className="flex-1 space-y-3">
@@ -1983,7 +2333,7 @@ export default function PlannerPage() {
                                   </div>
                                 ) : (
                                   <div className="flex-1 border border-dashed border-border-subtle p-4 rounded-xl text-text-muted italic bg-background-primary/30 flex items-center justify-center opacity-50 text-xs font-medium relative group hover:opacity-100 hover:bg-surface-hover/50 transition-all">
-                                    No events scheduled
+                                    Drop task here to reschedule, or click +
                                     {isOwnSchedule && (
                                       <button 
                                         onClick={() => {

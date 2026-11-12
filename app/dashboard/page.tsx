@@ -40,7 +40,7 @@ import { departmentTargetsService, QuarterOverview } from '@/services/department
 import { Meeting, Project, Task } from '@/types';
 
 // Dashboard Components
-import { QuickAddTaskInput, TeammateUser } from '@/components/dashboard/QuickAddTaskInput';
+import { TeammateUser } from '@/components/dashboard/QuickAddTaskInput';
 import { QuickAddMeetingModal } from '@/components/dashboard/QuickAddMeetingModal';
 import { MyDayView } from '@/components/dashboard/MyDayView';
 import { SmartSuggestionsDrawer } from '@/components/dashboard/SmartSuggestionsDrawer';
@@ -137,15 +137,18 @@ export default function DashboardPage() {
     loadObjectives();
   };
 
-  // 1-Click Task Complete handler
-  const handleTaskComplete = async (taskId: number) => {
-    try {
-      await workcenterService.updateStatus(taskId, 'completed');
-      loadTasks();
-      loadPlannerTasks();
-    } catch (err) {
-      console.error('Failed to complete task:', err);
-    }
+  useEffect(() => {
+    const handleTaskCreated = () => {
+      refreshAll();
+    };
+    window.addEventListener('task:created', handleTaskCreated);
+    return () => window.removeEventListener('task:created', handleTaskCreated);
+  }, []);
+
+  // Open Complete Task modal with Extended Time options
+  const handleTaskComplete = (taskId: number) => {
+    setExtended('');
+    setCompleting(taskId);
   };
 
   // CEO Assign Task handler: switch to Focus mode and prefill assignee in quick add
@@ -167,7 +170,10 @@ export default function DashboardPage() {
           ...t,
           id: idNum,
           parent_title: t.parent_title || parentTitle,
-          deadline: t.deadline || t.scheduled_date || null
+          deadline: t.deadline || t.scheduled_date || null,
+          scheduled_date: t.scheduled_date || t.scheduledDate || (t.deadline ? t.deadline.slice(0, 10) : null),
+          scheduled_start_time: t.scheduled_start_time || t.scheduledStartTime || t.start_time || null,
+          scheduled_end_time: t.scheduled_end_time || t.scheduledEndTime || t.end_time || null,
         });
       }
       if (t.subtasks && Array.isArray(t.subtasks)) {
@@ -176,7 +182,10 @@ export default function DashboardPage() {
             ...st,
             project_id: st.project_id || t.project_id,
             project_name: st.project_name || t.project_name,
-            deadline: st.deadline || t.deadline
+            deadline: st.deadline || t.deadline,
+            scheduled_date: st.scheduled_date || t.scheduled_date,
+            scheduled_start_time: st.scheduled_start_time || t.scheduled_start_time,
+            scheduled_end_time: st.scheduled_end_time || t.scheduled_end_time,
           }, t.title);
         });
       }
@@ -198,6 +207,8 @@ export default function DashboardPage() {
             priority: pt.priority || 'medium',
             deadline: pt.dueDate || pt.deadline || pt.scheduledDate || null,
             scheduled_date: pt.scheduledDate || pt.scheduled_date || null,
+            scheduled_start_time: pt.scheduledStartTime || pt.scheduled_start_time || pt.start_time || null,
+            scheduled_end_time: pt.scheduledEndTime || pt.scheduled_end_time || pt.end_time || null,
             start_date: pt.start_date || null,
             estimated_hours: pt.extended_time || null,
             progress: 0,
@@ -220,6 +231,10 @@ export default function DashboardPage() {
           const existing = map.get(idNum)!;
           if (pt.scheduledDate && !existing.scheduled_date) existing.scheduled_date = pt.scheduledDate;
           if (pt.dueDate && !existing.deadline) existing.deadline = pt.dueDate;
+          const sTime = pt.scheduledStartTime || pt.scheduled_start_time || pt.start_time;
+          const eTime = pt.scheduledEndTime || pt.scheduled_end_time || pt.end_time;
+          if (sTime) existing.scheduled_start_time = sTime;
+          if (eTime) existing.scheduled_end_time = eTime;
         }
       });
     }
@@ -251,7 +266,7 @@ export default function DashboardPage() {
   const todayMeetings = meetings.filter(m => m.date === now && (isDirector || m.attendees?.includes(myName) || String(m.owner_id) === me));
 
   return (
-    <div className="p-4 sm:p-6 flex flex-col gap-6 bg-background-primary min-h-screen text-text-primary normal-case">
+    <div className="max-w-7xl mx-auto w-full p-4 sm:p-6 flex flex-col gap-6 bg-background-primary text-text-primary normal-case">
       {/* 1. TOP EXECUTIVE HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-border-subtle/60">
         <div>
@@ -531,6 +546,7 @@ export default function DashboardPage() {
           } finally { 
             setCompleting(null); 
             loadTasks(); 
+            loadPlannerTasks();
           }
         }}
       />

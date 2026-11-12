@@ -307,6 +307,14 @@ export default function TaskCenterPage() {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    const handleGlobalTaskCreated = () => {
+      loadData();
+    };
+    window.addEventListener('task:created', handleGlobalTaskCreated);
+    return () => window.removeEventListener('task:created', handleGlobalTaskCreated);
+  }, [loadData]);
+
   // Load performance detail when selected
   useEffect(() => {
     if (perfViewUser) {

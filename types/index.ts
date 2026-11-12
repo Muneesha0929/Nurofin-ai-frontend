@@ -142,6 +142,7 @@ export interface Meeting {
   title: string;
   date: string;
   time: string;
+  end_time?: string;
   duration: string;
   attendees: string[];
   notes?: string;

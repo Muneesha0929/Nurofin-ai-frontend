@@ -18,6 +18,7 @@ import { cn } from '@/utils/cn';
 import { WCTask, workcenterService } from '@/services/workcenter';
 import { Meeting } from '@/types';
 import { today, isoDay } from './Widgets';
+import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 
 interface PlanMyDayModalProps {
   isOpen: boolean;
@@ -40,6 +41,8 @@ export function PlanMyDayModal({
 }: PlanMyDayModalProps) {
   const [currentOverdueIndex, setCurrentOverdueIndex] = useState(0);
   const [step, setStep] = useState<'overdue' | 'agenda' | 'finish'>('overdue');
+  const [completingTaskId, setCompletingTaskId] = useState<number | null>(null);
+  const [extendedTime, setExtendedTime] = useState<string>('');
   const now = today();
 
   // Reset index & step whenever modal opens
@@ -107,15 +110,28 @@ export function PlanMyDayModal({
     handleNextOverdue();
   };
 
-  const handleDone = async () => {
+  const handleDone = () => {
     if (!currentOverdue) return;
+    setCompletingTaskId(currentOverdue.id);
+  };
+
+  const handleConfirmCompletion = async (extVal: string, completionDate: string) => {
+    if (!completingTaskId) return;
+    const ext = parseFloat(extVal);
     try {
-      await workcenterService.updateStatus(currentOverdue.id, 'completed');
+      await workcenterService.updateTask(completingTaskId, {
+        status: 'completed',
+        extended_time: isNaN(ext) ? undefined : ext,
+        actual_completion_date: completionDate
+      });
       onRefresh();
     } catch (err) {
-      console.error(err);
+      console.error('Failed to complete task in Plan My Day:', err);
+    } finally {
+      setCompletingTaskId(null);
+      setExtendedTime('');
+      handleNextOverdue();
     }
-    handleNextOverdue();
   };
 
   return (
@@ -287,6 +303,14 @@ export function PlanMyDayModal({
           </div>
         )}
       </div>
+
+      <CompleteTaskModal
+        isOpen={completingTaskId !== null}
+        onClose={() => setCompletingTaskId(null)}
+        onSubmit={handleConfirmCompletion}
+        taskExtendedTime={extendedTime}
+        setTaskExtendedTime={setExtendedTime}
+      />
     </div>
   );
 }

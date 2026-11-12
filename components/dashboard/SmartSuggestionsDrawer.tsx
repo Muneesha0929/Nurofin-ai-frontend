@@ -37,6 +37,7 @@ export function SmartSuggestionsDrawer({
   const [reschedulingId, setReschedulingId] = useState<number | null>(null);
   const [scope, setScope] = useState<'mine' | 'team'>('mine');
   const [completingIds, setCompletingIds] = useState<Set<number>>(new Set());
+  const [addedTodayIds, setAddedTodayIds] = useState<Set<number>>(new Set());
   const now = today();
 
   const getDueDate = (t: WCTask): string | null => {
@@ -76,13 +77,29 @@ export function SmartSuggestionsDrawer({
     }, 450);
   };
 
-  // Quick 1-Click Action: Move Overdue to Today
+  // Quick 1-Click Action: Move Overdue or Suggested to Today (sets deadline & scheduled_date)
   const handleDoToday = async (taskId: number) => {
     try {
-      await workcenterService.updateTask(taskId, { deadline: now });
-      onRefresh();
+      setAddedTodayIds(prev => new Set(prev).add(taskId));
+      await workcenterService.updateTask(taskId, { 
+        deadline: now,
+        scheduled_date: now 
+      });
+      setTimeout(() => {
+        onRefresh();
+        setAddedTodayIds(prev => {
+          const next = new Set(prev);
+          next.delete(taskId);
+          return next;
+        });
+      }, 400);
     } catch (err) {
       console.error('Failed to move task to today:', err);
+      setAddedTodayIds(prev => {
+        const next = new Set(prev);
+        next.delete(taskId);
+        return next;
+      });
     }
   };
 
@@ -90,7 +107,10 @@ export function SmartSuggestionsDrawer({
   const handleTomorrow = async (taskId: number) => {
     try {
       const tomorrow = isoDay(new Date(Date.now() + 86400000));
-      await workcenterService.updateTask(taskId, { deadline: tomorrow });
+      await workcenterService.updateTask(taskId, { 
+        deadline: tomorrow,
+        scheduled_date: tomorrow 
+      });
       onRefresh();
     } catch (err) {
       console.error('Failed to move task to tomorrow:', err);
@@ -163,30 +183,44 @@ export function SmartSuggestionsDrawer({
               return (
                 <div 
                   key={t.id}
-                  className="p-3 bg-background-primary/80 border border-border-subtle rounded-xl hover:border-accent-red/40 transition-all flex flex-col gap-2"
+                  className="p-3 bg-background-primary/80 border border-border-subtle rounded-xl hover:border-accent-red/40 transition-all flex flex-col gap-2 min-w-0 overflow-hidden"
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start justify-between gap-2 min-w-0">
                     <button
                       type="button"
                       onClick={() => onOpenTaskPanel(t)}
-                      className="text-xs font-semibold text-text-primary hover:text-accent-red text-left line-clamp-1 transition-colors cursor-pointer"
+                      className="text-xs font-semibold text-text-primary hover:text-accent-red text-left break-words whitespace-normal flex-1 transition-colors cursor-pointer"
                     >
                       {t.title}
                     </button>
-                    <span className="text-[9.5px] font-bold text-accent-red shrink-0 whitespace-nowrap bg-accent-red/10 px-1.5 py-0.5 rounded">
+                    <span className="text-[9.5px] font-bold text-accent-red shrink-0 whitespace-nowrap bg-accent-red/10 px-1.5 py-0.5 rounded ml-1">
                       {daysDiff}d overdue
                     </span>
                   </div>
 
                   {/* 1-Click Action Buttons */}
-                  <div className="flex items-center gap-1.5 pt-1 border-t border-border-subtle/50 text-[11px]">
+                  <div className="flex items-center flex-wrap gap-1.5 pt-1 border-t border-border-subtle/50 text-[11px]">
                     <button
                       type="button"
                       onClick={() => handleDoToday(t.id)}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-accent-blue/10 hover:bg-accent-blue hover:text-white text-accent-blue font-semibold transition-all cursor-pointer shadow-2xs"
-                      title="Move to My Day"
+                      disabled={addedTodayIds.has(t.id)}
+                      className={cn(
+                        "flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-2xs",
+                        addedTodayIds.has(t.id)
+                          ? "bg-emerald-500 text-white"
+                          : "bg-accent-blue/10 hover:bg-accent-blue hover:text-white text-accent-blue"
+                      )}
+                      title="Schedule for Today and add to My Day"
                     >
-                      <Sun size={11} /> Do Today
+                      {addedTodayIds.has(t.id) ? (
+                        <>
+                          <Check size={11} strokeWidth={3} /> Added!
+                        </>
+                      ) : (
+                        <>
+                          <Sun size={11} /> Do Today
+                        </>
+                      )}
                     </button>
 
                     <button
@@ -244,17 +278,17 @@ export function SmartSuggestionsDrawer({
             {suggestedTasks.map(t => (
               <div 
                 key={t.id}
-                className="flex items-center justify-between gap-2 p-2.5 bg-background-primary/60 border border-border-subtle rounded-xl hover:border-accent-blue/40 transition-colors"
+                className="flex items-center justify-between gap-2.5 p-2.5 bg-background-primary/60 border border-border-subtle rounded-xl hover:border-accent-blue/40 transition-colors min-w-0 overflow-hidden"
               >
                 <div className="min-w-0 flex-1">
                   <button
                     type="button"
                     onClick={() => onOpenTaskPanel(t)}
-                    className="text-xs font-medium text-text-primary hover:text-accent-blue truncate block text-left transition-colors cursor-pointer"
+                    className="text-xs font-medium text-text-primary hover:text-accent-blue break-words whitespace-normal block text-left transition-colors cursor-pointer leading-snug"
                   >
                     {t.title}
                   </button>
-                  <span className="text-[10px] text-text-secondary">
+                  <span className="text-[10px] text-text-secondary block break-words whitespace-normal mt-0.5">
                     Due {t.deadline?.slice(5)} {t.project_name ? `· ${t.project_name}` : ''}
                   </span>
                 </div>
@@ -262,10 +296,26 @@ export function SmartSuggestionsDrawer({
                 <button
                   type="button"
                   onClick={() => handleDoToday(t.id)}
-                  title="Add to My Day"
-                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-accent-blue/10 hover:bg-accent-blue hover:text-white text-accent-blue text-[11px] font-semibold transition-all cursor-pointer shrink-0"
+                  title="Schedule for Today and pull into My Day"
+                  disabled={addedTodayIds.has(t.id)}
+                  className={cn(
+                    "flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer shrink-0 self-center shadow-2xs",
+                    addedTodayIds.has(t.id)
+                      ? "bg-emerald-500 text-white"
+                      : "bg-accent-blue/10 hover:bg-accent-blue hover:text-white text-accent-blue"
+                  )}
                 >
-                  <Plus size={11} /> Today
+                  {addedTodayIds.has(t.id) ? (
+                    <>
+                      <Check size={11} strokeWidth={3} />
+                      <span>Added!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus size={11} />
+                      <span>Today</span>
+                    </>
+                  )}
                 </button>
               </div>
             ))}

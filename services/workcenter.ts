@@ -228,6 +228,9 @@ export interface UpdateTaskPayload {
   progress?: number;
   actual_completion_date?: string | null;
   extended_time?: number;
+  scheduled_date?: string | null;
+  scheduled_start_time?: string | null;
+  scheduled_end_time?: string | null;
 }
 
 export const workcenterService = {
