@@ -62,6 +62,7 @@ function mapFollowup(raw: any): IssueFollowup {
       id: '',
       issue_id: '',
       user_id: '',
+      user_name: '',
       message: '',
       created_at: '',
     };
