@@ -222,6 +222,8 @@ export interface Issue {
   assignmentStatus?: string;
   assignedUserId?: string;
   attachments?: string[];
+  /** Set when the issue was raised from Build-Track ("Report a problem"). */
+  external?: { source: string; external_id: string; reporter_name?: string; company?: string; screen_name?: string } | null;
 }
 
 export type FinanceRecordType = 'budget' | 'expense' | 'salary' | 'vendor_payment' | 'renewal' | 'revenue' | 'other';
