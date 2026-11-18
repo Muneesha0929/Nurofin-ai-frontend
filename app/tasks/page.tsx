@@ -7,6 +7,7 @@ import * as z from 'zod';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
 import { tasksService } from '@/services/tasks';
+import { issuesService } from '@/services/issues';
 import { projectsService } from '@/services/projects';
 import { usersService } from '@/services/users';
 import { Task, TaskStatus, TaskPriority, Project, UserProfile as UserType } from '@/types';
@@ -57,6 +58,7 @@ export default function TaskCenterPage() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [isIssue, setIsIssue] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,8 +124,32 @@ export default function TaskCenterPage() {
       }
       await tasksService.updateTask(completingTaskId, updateData);
       changeTaskStatus(completingTaskId, 'completed');
+
+      // Sync to Issue if completing task is an issue
+      const completingTask = tasks.find(t => String(t.id) === String(completingTaskId));
+      if (completingTask) {
+        let issueId: number | null = null;
+        const src = (completingTask as any).source;
+        if (typeof src === 'string' && src.startsWith('issue:')) {
+          issueId = parseInt(src.split(':')[1], 10);
+        }
+        if (!issueId && (completingTask.title?.startsWith('[Issue]') || (completingTask as any).is_issue)) {
+          const cleanTitle = completingTask.title.replace(/^\[Issue\]\s*/i, '').trim().toLowerCase();
+          const allIssues = (await issuesService.getIssues().catch(() => ({ issues: [] }))).issues || [];
+          const matched = allIssues.find((i: any) => i.title.trim().toLowerCase() === cleanTitle);
+          if (matched) issueId = parseInt(matched.id, 10);
+        }
+        if (issueId && !isNaN(issueId)) {
+          await issuesService.updateStatus(issueId, 'resolved').catch(err => console.error('Failed to sync resolved status to issue:', err));
+        }
+      }
+
       setCompleteTaskOpen(false);
       setCompletingTaskId(null);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('issue:updated'));
+        window.dispatchEvent(new CustomEvent('task:created'));
+      }
     } catch (error) {
       console.error('Failed to complete task:', error);
     }
@@ -157,6 +183,7 @@ export default function TaskCenterPage() {
   // Create task modal
   const handleOpenCreate = () => {
     setEditMode(false);
+    setIsIssue(false);
     reset({
       title: '',
       description: '',
@@ -171,6 +198,7 @@ export default function TaskCenterPage() {
   const handleOpenEdit = (task: Task) => {
     setEditMode(true);
     setSelectedTask(task);
+    setIsIssue(Boolean(task.title?.startsWith('[Issue]') || (task as any).source === 'issue' || (task as any).is_issue));
     reset({
       title: task.title,
       description: task.description,
@@ -190,7 +218,25 @@ export default function TaskCenterPage() {
       const selectedProj = availableProjects.find(p => p.id === data.projectId);
       const projectName = selectedProj ? selectedProj.name : undefined;
 
-      const selectedUser = availableUsers.find(u => u.id === data.assigneeId);
+      const isIssueMode = isIssue || data.title.includes('!') || data.title.startsWith('[Issue]');
+      const cleanTitle = data.title.replace(/^\[Issue\]\s*/i, '').replace(/!\s*/g, '').trim();
+      const finalTitle = isIssueMode ? `[Issue] ${cleanTitle}` : data.title;
+
+      let finalAssigneeId = data.assigneeId ? parseInt(data.assigneeId) : undefined;
+      // If issue and unassigned, auto-assign to a non-CEO user!
+      if (isIssueMode && !finalAssigneeId) {
+        const nonCeoUsers = availableUsers.filter(u => {
+          const role = String((u as any).role || '').toLowerCase();
+          const name = String(u.name || '').toLowerCase();
+          const isCeo = role === 'ceo' || role === 'super_admin' || role === 'admin' || Number(u.id) === 1 || name.includes('ceo') || name.includes('vincent');
+          return !isCeo;
+        });
+        if (nonCeoUsers.length > 0) {
+          finalAssigneeId = parseInt(nonCeoUsers[0].id);
+        }
+      }
+
+      const selectedUser = finalAssigneeId ? availableUsers.find(u => Number(u.id) === finalAssigneeId) : null;
       const assignedTo = selectedUser ? {
         name: selectedUser.name,
         avatar: selectedUser.avatar
@@ -201,8 +247,13 @@ export default function TaskCenterPage() {
 
       const payload = {
         ...data,
+        title: finalTitle,
+        priority: isIssueMode ? 'high' : data.priority,
         projectName,
         assignedTo,
+        assigneeId: finalAssigneeId ? String(finalAssigneeId) : undefined,
+        source: isIssueMode ? 'issue' : undefined,
+        is_issue: isIssueMode ? true : undefined,
       };
 
       if (editMode && selectedTask) {
@@ -211,6 +262,26 @@ export default function TaskCenterPage() {
       } else {
         const created = await tasksService.createTask(payload as any);
         addTask(created);
+
+        // Sync to Issue Center if created as an issue!
+        if (isIssueMode) {
+          try {
+            await issuesService.createIssue({
+              title: cleanTitle,
+              description: data.description || `Reported from Task Center: ${cleanTitle}`,
+              priority: (data.priority as any) || 'high',
+              category: 'Bug',
+              deadline: data.dueDate || undefined,
+              project_id: data.projectId ? parseInt(data.projectId) : undefined,
+              assigned_user_id: finalAssigneeId || undefined,
+            });
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('issue:created'));
+            }
+          } catch (issueErr) {
+            console.error('Failed to sync to issue center:', issueErr);
+          }
+        }
       }
       setModalOpen(false);
     } catch (err) {
@@ -680,6 +751,22 @@ export default function TaskCenterPage() {
                 <option value="blocked">On Hold</option>
                 <option value="done">Done</option>
               </select>
+            </div>
+
+            {/* Flag as Issue Toggle */}
+            <div className="flex items-center gap-2 pt-1 pb-1">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-text-primary">
+                <input
+                  type="checkbox"
+                  checked={isIssue}
+                  onChange={e => setIsIssue(e.target.checked)}
+                  className="w-4 h-4 rounded text-amber-500 focus:ring-amber-400 border-border-subtle cursor-pointer"
+                />
+                <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                  <AlertCircle size={14} className="stroke-[2.5]" />
+                  <span>Flag as Issue (!) - Auto-syncs to Issue Center</span>
+                </span>
+              </label>
             </div>
 
             <DialogFooter className="pt-2">

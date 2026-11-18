@@ -13,10 +13,12 @@ import {
   Check, 
   CheckSquare,
   Video, 
-  UserCheck
+  UserCheck,
+  AlertCircle
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { workcenterService, WCTask } from '@/services/workcenter';
+import { issuesService } from '@/services/issues';
 import { Project, Task, Meeting } from '@/types';
 import { today, isoDay } from './Widgets';
 
@@ -84,6 +86,10 @@ export function QuickAddTaskInput({
   const [activeTrigger, setActiveTrigger] = useState<'project' | 'subtask' | 'assignee' | null>(null);
   const [triggerQuery, setTriggerQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+
+  // Issue mode toggle (!)
+  const [isIssue, setIsIssue] = useState(false);
+  const [autoAssignNotice, setAutoAssignNotice] = useState<string | null>(null);
 
   const [isMounted, setIsMounted] = useState(false);
 
@@ -169,6 +175,42 @@ export function QuickAddTaskInput({
 
   const isSlotOccupied = (startH: number) => {
     return checkOccupantSlot(startH, startH + 1).occupied;
+  };
+
+  // Find who is free at target date and hour slot (for auto-assigning issues; strictly excludes CEO)
+  const findFreeTeammate = (targetDate: string, sH: number, eH: number): TeammateUser | null => {
+    if (!teammates || teammates.length === 0) return null;
+
+    // Filter out CEO accounts for auto-assigning
+    const eligibleTeammates = teammates.filter(u => {
+      const role = String(u.role || '').toLowerCase();
+      const name = String(u.name || '').toLowerCase();
+      const isCeo = role === 'ceo' || role === 'super_admin' || role === 'admin' || Number(u.id) === 1 || name.includes('ceo') || name.includes('vincent');
+      return !isCeo;
+    });
+
+    if (eligibleTeammates.length === 0) return null;
+
+    const scored = eligibleTeammates.map(u => {
+      const occ = checkOccupantSlot(sH, eH, targetDate, u.id);
+      const isFree = !occ.occupied;
+      const activeCount = (allTasks || []).filter(t => {
+        if (t.status === 'completed' || t.status === 'done' || t.status === 'closed' || t.status === 'resolved') return false;
+        const uid = t.assigned_to_id || t.assigneeId || t.assignedTo?.id;
+        return String(uid) === String(u.id);
+      }).length;
+      return { teammate: u, isFree, activeCount };
+    });
+
+    // 1. Prefer teammates who are free at this hour, with the lowest active task count
+    const freeCandidates = scored.filter(s => s.isFree).sort((a, b) => a.activeCount - b.activeCount);
+    if (freeCandidates.length > 0) {
+      return freeCandidates[0].teammate;
+    }
+
+    // 2. If nobody is free at this hour, pick the teammate with the lowest total active tasks
+    const sorted = scored.sort((a, b) => a.activeCount - b.activeCount);
+    return sorted[0]?.teammate || null;
   };
 
   // Auto-suggest next free hour slot on initial load or changes if selected slot is occupied
@@ -347,8 +389,15 @@ export function QuickAddTaskInput({
       setActiveTrigger('assignee');
       setTriggerQuery(currentWord.slice(1));
       setHighlightedIndex(0);
+    } else if (currentWord.startsWith('!')) {
+      setIsIssue(true);
+      setActiveTrigger(null);
     } else {
       setActiveTrigger(null);
+    }
+
+    if (val.includes('!') && !isIssue) {
+      setIsIssue(true);
     }
   };
 
@@ -431,27 +480,44 @@ export function QuickAddTaskInput({
 
   // Submit task creation (handles conflict checking & next available slot prompts)
   const handleSubmit = async (overrideStart?: string, overrideEnd?: string, overrideSlot?: string) => {
-    const cleanTitle = text
+    const isIssueMode = isIssue || text.includes('!');
+
+    let cleanTitle = text
       .replace(/#\S+/g, '')
       .replace(/~\S+/g, '')
       .replace(/@\S+/g, '')
+      .replace(/^!\s*/, '')
+      .replace(/\s+!\s*/g, ' ')
       .trim();
 
     if (!cleanTitle) return;
-
-    // Rule: Default assignee is current user if no @ assignee chosen
-    const finalAssigneeId = selectedAssigneeId || (currentUserId ? parseInt(currentUserId, 10) : undefined);
-    const targetDate = (deadline || today()).slice(0, 10);
 
     const [defaultStart, defaultEnd] = selectedTimeSlot ? selectedTimeSlot.split(' - ') : ['10:00', '11:00'];
     const startT = overrideStart || defaultStart || '10:00';
     const endT = overrideEnd || defaultEnd || '11:00';
     const currentSlot = overrideSlot || selectedTimeSlot || `${startT} - ${endT}`;
+    const targetDate = (deadline || today()).slice(0, 10);
+    const startH = parseInt(startT.split(':')[0], 10);
+    const endH = parseInt(endT.split(':')[0], 10);
+
+    let finalAssigneeId: number | undefined = selectedAssigneeId || undefined;
+    let autoAssignedName = '';
+
+    // If creating an Issue and no @ assignee was explicitly chosen: auto-assign to someone free at that time!
+    if (isIssueMode && !finalAssigneeId) {
+      const freeTeammate = findFreeTeammate(targetDate, startH, endH);
+      if (freeTeammate) {
+        finalAssigneeId = freeTeammate.id;
+        autoAssignedName = freeTeammate.name;
+      } else if (currentUserId) {
+        finalAssigneeId = parseInt(currentUserId, 10);
+      }
+    } else if (!finalAssigneeId) {
+      finalAssigneeId = currentUserId ? parseInt(currentUserId, 10) : undefined;
+    }
 
     // If no override provided, check if current slot is already occupied by a task or meeting for this user on this date
     if (!overrideStart) {
-      const startH = parseInt(startT.split(':')[0], 10);
-      const endH = parseInt(endT.split(':')[0], 10);
       const occupant = checkOccupantSlot(startH, endH, targetDate, finalAssigneeId);
 
       if (occupant.occupied) {
@@ -491,8 +557,34 @@ export function QuickAddTaskInput({
 
     setIsSubmitting(true);
     try {
+      let createdIssueId: number | null = null;
+      // Sync to Issue Center if created as an issue!
+      if (isIssueMode) {
+        try {
+          const issueRes: any = await issuesService.createIssue({
+            title: cleanTitle,
+            description: `Reported issue: ${cleanTitle}`,
+            priority: 'high',
+            category: 'Bug',
+            deadline: targetDate,
+            project_id: selectedProjectId || undefined,
+            assigned_user_id: finalAssigneeId || undefined,
+          });
+          createdIssueId = issueRes?.data?.id || issueRes?.id || null;
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('issue:created'));
+          }
+        } catch (issueErr) {
+          console.error('Failed to sync to issue center:', issueErr);
+        }
+      }
+
+      const finalTitle = isIssueMode && !cleanTitle.startsWith('[Issue]') 
+        ? `[Issue] ${cleanTitle}` 
+        : cleanTitle;
+
       await workcenterService.createTask({
-        title: cleanTitle,
+        title: finalTitle,
         deadline: targetDate,
         scheduled_date: targetDate,
         scheduled_start_time: startT,
@@ -500,8 +592,15 @@ export function QuickAddTaskInput({
         project_id: selectedProjectId || undefined,
         parent_id: selectedParentTaskId || undefined,
         assigned_to_id: finalAssigneeId,
-        priority: 'medium',
-      });
+        priority: isIssueMode ? 'high' : 'medium',
+        source: isIssueMode ? (createdIssueId ? `issue:${createdIssueId}` : 'issue') : undefined,
+        is_issue: isIssueMode ? true : undefined,
+      } as any);
+
+      if (autoAssignedName) {
+        setAutoAssignNotice(`⚠️ Issue auto-assigned to ${autoAssignedName} (Free at ${currentSlot})`);
+        setTimeout(() => setAutoAssignNotice(null), 5000);
+      }
 
       // Automatically advance selectedTimeSlot for sequential quick adds to the next free slot!
       const finalEndH = parseHour(endT.split(':')[0]) % 24;
@@ -522,6 +621,7 @@ export function QuickAddTaskInput({
       setSelectedProjectId(null);
       setSelectedParentTaskId(null);
       setSelectedAssigneeId(null);
+      setIsIssue(false);
       setDeadline(today());
       setActiveTrigger(null);
       setConflictPrompt(null);
@@ -558,6 +658,14 @@ export function QuickAddTaskInput({
       )}
       style={{ backgroundColor: 'var(--bg-secondary)', opacity: 1 }}
     >
+      {/* Auto-assign Notification Toast */}
+      {autoAssignNotice && (
+        <div className="mb-2.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-semibold flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
+          <AlertCircle size={14} className="shrink-0 text-amber-500" />
+          <span>{autoAssignNotice}</span>
+        </div>
+      )}
+
       {/* Input row */}
       <div className="flex items-center gap-2.5">
         <span className={cn(
@@ -574,7 +682,7 @@ export function QuickAddTaskInput({
           value={text}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder={isDocked ? "Quick add task anywhere... (# project, ~ subtask, @ teammate)" : "What would you like to achieve today? Use #project, ~subtask, @assignee..."}
+          placeholder={isDocked ? "Quick add task anywhere... (# project, ~ subtask, @ teammate, ! issue)" : "What would you like to achieve today? Use #project, ~subtask, @assignee, !issue..."}
           className="flex-1 bg-transparent border-0 outline-none text-[13.5px] sm:text-[14.5px] placeholder:text-text-secondary/60 text-text-primary"
           disabled={isSubmitting}
         />
@@ -708,6 +816,36 @@ export function QuickAddTaskInput({
             >
               <UserCheck size={12} className={activeTrigger === 'assignee' ? "text-white stroke-[2.5]" : "text-emerald-500 stroke-[2.5]"} />
               <span>Assigned: <span className="underline decoration-dotted">Myself (@)</span></span>
+            </button>
+          )}
+
+          {/* Issue Mode Toggle Chip / Button */}
+          {isIssue ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold text-xs shadow-xs animate-in fade-in">
+              <AlertCircle size={12} className="stroke-[2.5] text-amber-500" />
+              <span>Issue (!)</span>
+              <button 
+                type="button" 
+                onClick={() => setIsIssue(false)} 
+                className="hover:text-accent-red ml-0.5 cursor-pointer text-text-secondary hover:text-red-500"
+                title="Remove Issue flag"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setIsIssue(true);
+                inputRef.current?.focus();
+              }}
+              style={{ backgroundColor: 'var(--surface-card)' }}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-amber-500/50"
+              title="Flag as Issue (!) - Auto-assigns to free teammate if unassigned"
+            >
+              <AlertCircle size={12} className="text-amber-500 stroke-[2.5]" />
+              <span>Issue (!)</span>
             </button>
           )}
         </div>

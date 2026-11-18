@@ -21,14 +21,17 @@ import {
   Sparkles,
   CalendarCheck,
   Flame,
-  AlertCircle
+  AlertCircle,
+  Edit3
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { WCTask, workcenterService } from '@/services/workcenter';
+import { issuesService } from '@/services/issues';
 import { meetingsService } from '@/services/meetings';
 import { Meeting, Project } from '@/types';
 import { today, isoDay } from './Widgets';
 import { TeammateUser } from './QuickAddTaskInput';
+import { EditMeetingModal } from './EditMeetingModal';
 
 interface MyDayViewProps {
   allTasks?: (WCTask | any)[];
@@ -63,7 +66,8 @@ export function MyDayView({
 }: MyDayViewProps) {
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [activeMenuTaskId, setActiveMenuTaskId] = useState<number | null>(null);
-  const [activeMenuMeetingId, setActiveMenuMeetingId] = useState<string | null>(null);
+  const [activeMenuMeetingId, setActiveMenuMeetingId] = useState<string | number | null>(null);
+  const [editingMeeting, setEditingMeeting] = useState<Meeting | null>(null);
   const [rescheduleTaskId, setRescheduleTaskId] = useState<number | null>(null);
   const [completingTaskIds, setCompletingTaskIds] = useState<Set<number>>(new Set());
   const [timingTask, setTimingTask] = useState<WCTask | null>(null);
@@ -89,17 +93,23 @@ export function MyDayView({
     return false;
   }).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
 
+  const isDone = (status?: string) => ['completed', 'done', 'resolved', 'closed'].includes(String(status || '').toLowerCase());
+
   // Filter today's tasks:
-  // Deadline or scheduled date is today, and assigned to current user (or isDirector viewing own)
+  // Deadline or scheduled date is today, and assigned to current user (or isDirector, or issue task)
   const todaysTasks = tasks.filter(t => {
-    const isMine = String(t.assigned_to_id) === String(currentUserId);
+    const isIssueTask = (t as any).source?.startsWith('issue') || (t as any).is_issue || t.title?.startsWith('[Issue]');
+    const isMine = isDirector || 
+      String(t.assigned_to_id) === String(currentUserId) || 
+      String(t.assigned_by_id) === String(currentUserId) ||
+      isIssueTask;
     const dateToCheck = (t.scheduled_date || t.deadline || '')?.slice(0, 10);
-    const isToday = dateToCheck === now;
+    const isToday = !dateToCheck || dateToCheck === now;
     return isMine && isToday;
   });
 
-  const activeTasks = todaysTasks.filter(t => t.status !== 'completed' && t.status !== 'done');
-  const completedTasks = todaysTasks.filter(t => t.status === 'completed' || t.status === 'done');
+  const activeTasks = todaysTasks.filter(t => !isDone(t.status));
+  const completedTasks = todaysTasks.filter(t => isDone(t.status));
 
   const totalCount = todaysTasks.length + todaysMeetings.length;
   const doneCount = completedTasks.length + todaysMeetings.filter(m => m.status === 'completed').length;
@@ -125,12 +135,43 @@ export function MyDayView({
   };
 
   // Handle Meeting Status Change (Joined / Completed)
-  const handleUpdateMeetingStatus = async (meetingId: string, status: string) => {
+  const handleUpdateMeetingStatus = async (meetingId: string | number, status: string) => {
     try {
       await meetingsService.updateMeeting(meetingId, { status } as any);
       onRefresh();
     } catch (err) {
       console.error('Failed to update meeting status:', err);
+    }
+  };
+
+  // Handle Quick Reschedule for a meeting
+  const handleRescheduleMeeting = async (meetingId: string | number, targetDate: string) => {
+    try {
+      await meetingsService.updateMeeting(meetingId, { date: targetDate });
+      setActiveMenuMeetingId(null);
+      onRefresh();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('meeting:updated'));
+        window.dispatchEvent(new CustomEvent('task:created'));
+      }
+    } catch (err) {
+      console.error('Failed to reschedule meeting:', err);
+    }
+  };
+
+  // Handle Delete / Cancel meeting
+  const handleDeleteMeeting = async (meetingId: string | number) => {
+    if (!confirm('Are you sure you want to cancel and delete this meeting?')) return;
+    try {
+      await meetingsService.deleteMeeting(meetingId);
+      setActiveMenuMeetingId(null);
+      onRefresh();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('meeting:updated'));
+        window.dispatchEvent(new CustomEvent('task:created'));
+      }
+    } catch (err) {
+      console.error('Failed to delete meeting:', err);
     }
   };
 
@@ -269,7 +310,27 @@ export function MyDayView({
   const handleRestoreTask = async (taskId: number) => {
     try {
       await workcenterService.updateStatus(taskId, 'in_progress');
+      // If linked to an issue, also update issue status
+      const targetTask = (allTasks || tasks).find(t => Number(t.id) === Number(taskId));
+      if (targetTask) {
+        let issueId: number | null = null;
+        const src = (targetTask as any).source;
+        if (typeof src === 'string' && src.startsWith('issue:')) {
+          issueId = parseInt(src.split(':')[1], 10);
+        }
+        if (issueId && !isNaN(issueId)) {
+          try {
+            await issuesService.updateStatus(issueId, 'in_progress');
+          } catch (syncErr) {
+            console.error('Failed to sync restore to issue:', syncErr);
+          }
+        }
+      }
       onRefresh();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('issue:updated'));
+        window.dispatchEvent(new CustomEvent('task:created'));
+      }
     } catch (err) {
       console.error('Failed to restore task:', err);
     }
@@ -512,6 +573,102 @@ export function MyDayView({
                         Reopen
                       </button>
                     )}
+
+                    {/* Edit Meeting Button */}
+                    <button
+                      type="button"
+                      onClick={() => setEditingMeeting(m)}
+                      title="Edit meeting details and timing"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-border-subtle hover:border-accent-blue hover:text-accent-blue text-xs font-medium text-text-secondary transition-all cursor-pointer"
+                    >
+                      <Edit3 size={13} />
+                      <span className="hidden lg:inline">Edit</span>
+                    </button>
+
+                    {/* 3-dots More Actions Menu */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setActiveMenuMeetingId(activeMenuMeetingId === m.id ? null : m.id)}
+                        className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded-xl transition-colors cursor-pointer"
+                        title="More options"
+                      >
+                        <MoreVertical size={14} />
+                      </button>
+
+                      {activeMenuMeetingId === m.id && (
+                        <div 
+                          className="absolute right-0 top-full mt-1.5 z-40 w-48 bg-background-secondary border border-border-subtle rounded-xl shadow-2xl p-1.5 flex flex-col gap-0.5 animate-in fade-in duration-100"
+                          style={{ backgroundColor: 'var(--bg-secondary)', opacity: 1 }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingMeeting(m);
+                              setActiveMenuMeetingId(null);
+                            }}
+                            className="w-full text-left px-2.5 py-1.5 text-xs text-text-primary hover:bg-accent-blue/10 hover:text-accent-blue rounded-lg transition-colors cursor-pointer flex items-center gap-2"
+                          >
+                            <Edit3 size={12} className="text-accent-blue" />
+                            <span>Edit / Reschedule Details</span>
+                          </button>
+
+                          {m.meeting_link && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(m.meeting_link || '');
+                                setActiveMenuMeetingId(null);
+                                alert('Meeting link copied to clipboard!');
+                              }}
+                              className="w-full text-left px-2.5 py-1.5 text-xs text-text-primary hover:bg-accent-blue/10 hover:text-accent-blue rounded-lg transition-colors cursor-pointer flex items-center gap-2"
+                            >
+                              <ExternalLink size={12} className="text-accent-blue" />
+                              <span>Copy Meeting Link</span>
+                            </button>
+                          )}
+
+                          <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-text-secondary border-t border-border-subtle mt-0.5 pt-1">
+                            Quick Reschedule
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const d = new Date(Date.now() + 86400000);
+                              handleRescheduleMeeting(m.id, isoDay(d));
+                            }}
+                            className="w-full text-left px-2.5 py-1.5 text-xs text-text-primary hover:bg-accent-blue/10 hover:text-accent-blue rounded-lg transition-colors cursor-pointer flex items-center gap-2"
+                          >
+                            <Calendar size={12} className="text-accent-blue" />
+                            <span>Reschedule to Tomorrow</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const d = new Date();
+                              d.setDate(d.getDate() + ((7 - d.getDay() + 1) % 7 || 7));
+                              handleRescheduleMeeting(m.id, isoDay(d));
+                            }}
+                            className="w-full text-left px-2.5 py-1.5 text-xs text-text-primary hover:bg-accent-blue/10 hover:text-accent-blue rounded-lg transition-colors cursor-pointer flex items-center gap-2"
+                          >
+                            <CalendarCheck size={12} className="text-accent-blue" />
+                            <span>Reschedule to Next Mon</span>
+                          </button>
+
+                          <div className="border-t border-border-subtle my-0.5" />
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMeeting(m.id)}
+                            className="w-full text-left px-2.5 py-1.5 text-xs text-accent-red hover:bg-accent-red/10 rounded-lg transition-colors cursor-pointer font-medium flex items-center gap-2"
+                          >
+                            <X size={12} />
+                            <span>Cancel / Delete Meeting</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -555,6 +712,8 @@ export function MyDayView({
               const hasProject = Boolean(t.project_name);
               const isSubtask = Boolean(t.parent_id);
               const isCompleting = completingTaskIds.has(t.id);
+              const isIssue = (t as any).source === 'issue' || (t as any).is_issue || t.title.startsWith('[Issue]');
+              const displayTitle = t.title.replace(/^\[Issue\]\s*/i, '');
 
               return (
                 <div
@@ -570,7 +729,7 @@ export function MyDayView({
                       type="button"
                       onClick={() => handleCheckTask(t.id)}
                       className="mt-0.5 text-text-secondary hover:text-accent-blue transition-colors cursor-pointer shrink-0"
-                      title="Mark as completed"
+                      title={isIssue ? "Resolve issue" : "Mark as completed"}
                     >
                       {isCompleting ? (
                         <span className="w-[18px] h-[18px] rounded-full bg-accent-blue text-white flex items-center justify-center animate-in zoom-in-75 duration-150 shadow-xs">
@@ -591,8 +750,15 @@ export function MyDayView({
                             isCompleting && "line-through text-text-secondary/60 opacity-60"
                           )}
                         >
-                          {t.title}
+                          {displayTitle}
                         </button>
+
+                        {/* Issue Badge */}
+                        {isIssue && (
+                          <span className="text-[9.5px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1 shrink-0">
+                            <AlertCircle size={10} className="stroke-[2.5]" /> Issue
+                          </span>
+                        )}
 
                         {/* Priority Pill */}
                         {['high', 'critical'].includes(t.priority?.toLowerCase()) && (
@@ -751,29 +917,39 @@ export function MyDayView({
 
           {completedExpanded && (
             <div className="space-y-1.5 mt-2">
-              {completedTasks.map(t => (
-                <div
-                  key={t.id}
-                  className="flex items-center justify-between gap-3 p-2.5 bg-background-secondary/40 border border-border-subtle/60 rounded-xl text-text-secondary"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => handleRestoreTask(t.id)}
-                      className="text-emerald-500 hover:text-text-secondary transition-colors cursor-pointer shrink-0"
-                      title="Click to restore"
-                    >
-                      <CheckCircle2 size={16} />
-                    </button>
-                    <span className="text-xs line-through text-text-secondary truncate">
-                      {t.title}
-                    </span>
+              {completedTasks.map(t => {
+                const isIssue = (t as any).source === 'issue' || (t as any).is_issue || t.title.startsWith('[Issue]');
+                const displayTitle = t.title.replace(/^\[Issue\]\s*/i, '');
+                return (
+                  <div
+                    key={t.id}
+                    className="flex items-center justify-between gap-3 p-2.5 bg-background-secondary/40 border border-border-subtle/60 rounded-xl text-text-secondary"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => handleRestoreTask(t.id)}
+                        className="text-emerald-500 hover:text-text-secondary transition-colors cursor-pointer shrink-0"
+                        title={isIssue ? "Click to reopen issue" : "Click to restore"}
+                      >
+                        <CheckCircle2 size={16} />
+                      </button>
+                      <span className="text-xs line-through text-text-secondary truncate">
+                        {displayTitle}
+                      </span>
+                    </div>
+                    {isIssue ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
+                        ✔ Resolved
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-text-secondary shrink-0">
+                        Done
+                      </span>
+                    )}
                   </div>
-                  <span className="text-[10px] text-text-secondary shrink-0">
-                    Done
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -961,6 +1137,16 @@ export function MyDayView({
 
         return typeof document !== 'undefined' ? createPortal(modalEl, document.body) : modalEl;
       })()}
+
+      {/* EDIT / RESCHEDULE MEETING MODAL */}
+      <EditMeetingModal
+        isOpen={!!editingMeeting}
+        onClose={() => setEditingMeeting(null)}
+        onUpdated={onRefresh}
+        meeting={editingMeeting}
+        teammates={teammates}
+        currentUserId={currentUserId}
+      />
     </div>
   );
 }

@@ -32,6 +32,7 @@ import { leftToday, useMyMeetings } from '@/components/meetings/useMyMeetings';
 import { ObjectivePanel, TaskPanel } from '@/components/SidePanel';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { workcenterService, WCTask } from '@/services/workcenter';
+import { issuesService } from '@/services/issues';
 import { tasksService } from '@/services/tasks';
 import { meetingsService } from '@/services/meetings';
 import { projectsService } from '@/services/projects';
@@ -138,11 +139,17 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    const handleTaskCreated = () => {
+    const handleRefresh = () => {
       refreshAll();
     };
-    window.addEventListener('task:created', handleTaskCreated);
-    return () => window.removeEventListener('task:created', handleTaskCreated);
+    window.addEventListener('task:created', handleRefresh);
+    window.addEventListener('issue:updated', handleRefresh);
+    window.addEventListener('issue:created', handleRefresh);
+    return () => {
+      window.removeEventListener('task:created', handleRefresh);
+      window.removeEventListener('issue:updated', handleRefresh);
+      window.removeEventListener('issue:created', handleRefresh);
+    };
   }, []);
 
   // Open Complete Task modal with Extended Time options
@@ -243,6 +250,7 @@ export default function DashboardPage() {
   }, [tasks, plannerTasks]);
 
   const now = today();
+  const isTaskDone = (status?: string) => ['completed', 'done', 'resolved', 'closed'].includes(String(status || '').toLowerCase());
   const getTaskDueDate = (t: any): string | null => {
     const raw = t.deadline || t.scheduled_date || null;
     return raw ? raw.slice(0, 10) : null;
@@ -250,12 +258,12 @@ export default function DashboardPage() {
   const myOverdueTasks = allFlattenedTasks.filter(t => {
     const isMine = String(t.assigned_to_id) === me;
     const dDate = getTaskDueDate(t);
-    return isMine && Boolean(dDate && dDate < now) && t.status !== 'completed' && t.status !== 'done';
+    return isMine && Boolean(dDate && dDate < now) && !isTaskDone(t.status);
   });
   const overdueTasks = isDirector
     ? allFlattenedTasks.filter(t => {
         const dDate = getTaskDueDate(t);
-        return Boolean(dDate && dDate < now) && t.status !== 'completed' && t.status !== 'done';
+        return Boolean(dDate && dDate < now) && !isTaskDone(t.status);
       })
     : myOverdueTasks;
   const todayTasks = allFlattenedTasks.filter(t => {
@@ -529,27 +537,55 @@ export default function DashboardPage() {
         />
       )}
 
-      <CompleteTaskModal
-        isOpen={completing !== null}
-        onClose={() => setCompleting(null)}
-        taskExtendedTime={extended}
-        setTaskExtendedTime={setExtended}
-        onSubmit={async (extendedTime, completionDate) => {
-          if (completing === null) return;
-          const ext = parseFloat(extendedTime);
-          try { 
-            await workcenterService.updateTask(completing, { 
-              status: 'completed', 
-              extended_time: isNaN(ext) ? undefined : ext, 
-              actual_completion_date: completionDate 
-            }); 
-          } finally { 
-            setCompleting(null); 
-            loadTasks(); 
-            loadPlannerTasks();
-          }
-        }}
-      />
+      {(() => {
+        const completingTask = completing ? allFlattenedTasks.find(t => Number(t.id) === Number(completing)) : null;
+        const isIssue = Boolean(completingTask && ((completingTask as any).source === 'issue' || (completingTask as any).source?.startsWith('issue:') || (completingTask as any).is_issue || completingTask.title.startsWith('[Issue]')));
+        return (
+          <CompleteTaskModal
+            isOpen={completing !== null}
+            onClose={() => setCompleting(null)}
+            taskExtendedTime={extended}
+            setTaskExtendedTime={setExtended}
+            isIssue={isIssue}
+            onSubmit={async (extendedTime, completionDate) => {
+              if (completing === null) return;
+              const ext = parseFloat(extendedTime);
+              try { 
+                await workcenterService.updateTask(completing, { 
+                  status: 'completed', 
+                  extended_time: isNaN(ext) ? undefined : ext, 
+                  actual_completion_date: completionDate 
+                }); 
+
+                // Two-way sync: update corresponding Issue to resolved!
+                if (completingTask) {
+                  let issueId: number | null = null;
+                  const src = (completingTask as any).source;
+                  if (typeof src === 'string' && src.startsWith('issue:')) {
+                    issueId = parseInt(src.split(':')[1], 10);
+                  }
+                  if (!issueId && isIssue) {
+                    const cleanTitle = completingTask.title.replace(/^\[Issue\]\s*/i, '').trim().toLowerCase();
+                    const allIssues = issues?.length ? issues : ((await issuesService.getIssues().catch(() => ({ issues: [] }))).issues || []);
+                    const matched = allIssues.find((i: any) => i.title.trim().toLowerCase() === cleanTitle);
+                    if (matched) issueId = parseInt(matched.id, 10);
+                  }
+                  if (issueId && !isNaN(issueId)) {
+                    await issuesService.updateStatus(issueId, 'resolved').catch(err => console.error('Failed to sync resolved status to issue:', err));
+                  }
+                }
+              } finally { 
+                setCompleting(null); 
+                refreshAll();
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('issue:updated'));
+                  window.dispatchEvent(new CustomEvent('task:created'));
+                }
+              }
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

@@ -90,46 +90,148 @@ export function useMeetingBadge() {
   return { count: left.length, soon };
 }
 
-const SEEN_KEY = 'nurofin-meeting-reminded';
-/** Pops up 10 minutes before a meeting, once per meeting, anywhere in the app. */
+const SEEN_KEY = 'nurofin-meeting-reminded-stages';
+/** Pops up 30 minutes, 15 minutes before a meeting, or when it starts, anywhere in the app. */
 export function MeetingReminder() {
   const { meetings, tick } = useMyMeetings();
-  const [shown, setShown] = useState<MyMeeting | null>(null);
-  const seen = useRef<Set<string>>(new Set());
+  const [shown, setShown] = useState<{ meeting: MyMeeting; stage: '30m' | '15m' | 'now'; minsRemaining: number } | null>(null);
+  const seenStages = useRef<Set<string>>(new Set());
+  const snoozedUntil = useRef<number>(0);
+
   useEffect(() => {
-    try { seen.current = new Set(JSON.parse(sessionStorage.getItem(SEEN_KEY) || '[]')); } catch { /* private mode */ }
+    try { 
+      seenStages.current = new Set(JSON.parse(sessionStorage.getItem(SEEN_KEY) || '[]')); 
+    } catch { /* private mode */ }
   }, []);
+
   useEffect(() => {
     if (shown) return;
     const now = Date.now();
-    const next = meetings.find(m => {
-      if (m.all_day || seen.current.has(m.id)) return false;
+    if (now < snoozedUntil.current) return;
+
+    for (const m of meetings) {
+      if (m.all_day) continue;
       const s = new Date(m.start).getTime();
-      return s - now <= 10 * 60000 && now < s + 5 * 60000;   // from 10 min before to 5 min after it starts
-    });
-    if (next) {
-      setShown(next);
-      seen.current.add(next.id);
-      try { sessionStorage.setItem(SEEN_KEY, JSON.stringify([...seen.current])); } catch { /* ignore */ }
+      const diffMins = Math.round((s - now) / 60000);
+
+      // 1. "30 minutes before" reminder
+      if (diffMins > 15 && diffMins <= 30) {
+        const key = `${m.id}-30m`;
+        if (!seenStages.current.has(key)) {
+          setShown({ meeting: m, stage: '30m', minsRemaining: diffMins });
+          seenStages.current.add(key);
+          try { sessionStorage.setItem(SEEN_KEY, JSON.stringify([...seenStages.current])); } catch {}
+          break;
+        }
+      }
+
+      // 2. "15 minutes before" reminder (starting soon)
+      if (diffMins > 0 && diffMins <= 15) {
+        const key = `${m.id}-15m`;
+        if (!seenStages.current.has(key)) {
+          setShown({ meeting: m, stage: '15m', minsRemaining: diffMins });
+          seenStages.current.add(key);
+          try { sessionStorage.setItem(SEEN_KEY, JSON.stringify([...seenStages.current])); } catch {}
+          break;
+        }
+      }
+
+      // 3. "Starting now / Live" reminder
+      if (diffMins <= 0 && diffMins >= -10) {
+        const key = `${m.id}-now`;
+        if (!seenStages.current.has(key)) {
+          setShown({ meeting: m, stage: 'now', minsRemaining: 0 });
+          seenStages.current.add(key);
+          try { sessionStorage.setItem(SEEN_KEY, JSON.stringify([...seenStages.current])); } catch {}
+          break;
+        }
+      }
     }
   }, [meetings, tick, shown]);
+
+  const handleSnooze = () => {
+    snoozedUntil.current = Date.now() + 5 * 60 * 1000;
+    setShown(null);
+  };
+
+  const handleDismiss = () => {
+    setShown(null);
+  };
+
   return (
     <AnimatePresence>
       {shown && (
-        <motion.div role="alert" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }}
-          className="fixed z-[80] right-5 bottom-24 w-[320px] max-w-[calc(100vw-40px)] bg-background-secondary border border-border-subtle rounded-2xl shadow-[0_16px_40px_rgba(14,23,38,.18)] p-4 normal-case">
+        <motion.div 
+          role="alert" 
+          initial={{ opacity: 0, y: 20, scale: 0.95 }} 
+          animate={{ opacity: 1, y: 0, scale: 1 }} 
+          exit={{ opacity: 0, y: 20, scale: 0.95 }}
+          style={{ backgroundColor: 'var(--bg-secondary)' }}
+          className="fixed z-[100] right-5 bottom-24 w-[340px] max-w-[calc(100vw-40px)] bg-background-secondary border-2 border-accent-blue/40 rounded-3xl shadow-2xl p-4 normal-case animate-in fade-in duration-150"
+        >
           <div className="flex items-start gap-3">
-            <span className="w-9 h-9 rounded-xl bg-accent-blue/10 text-accent-blue grid place-items-center shrink-0"><Bell className="w-[18px] h-[18px]" /></span>
+            <span className={cn(
+              "w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 shadow-xs",
+              shown.stage === 'now' 
+                ? "bg-emerald-500 text-white animate-pulse" 
+                : shown.stage === '15m'
+                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  : "bg-accent-blue/15 text-accent-blue"
+            )}>
+              <Bell className="w-[18px] h-[18px]" />
+            </span>
             <div className="flex-1 min-w-0">
-              <p className="text-[12px] font-semibold text-accent-blue">{untilText(shown) === 'now' ? 'Starting now' : `Starts ${untilText(shown)}`}</p>
-              <p className="text-[14.5px] font-bold text-text-primary leading-snug">{shown.title}</p>
-              <p className="text-[12px] text-text-secondary">{timeOf(shown.start)} · {shown.location || SOURCE_LABEL[shown.source]}</p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className={cn(
+                  "text-[10.5px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md",
+                  shown.stage === 'now'
+                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                    : shown.stage === '15m'
+                      ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                      : "bg-accent-blue/15 text-accent-blue border border-accent-blue/30"
+                )}>
+                  {shown.stage === 'now' ? '🔴 Live Now' : `In ${shown.minsRemaining} mins`}
+                </span>
+                <span className="text-[11px] font-medium text-text-secondary">
+                  {shown.stage === '30m' ? 'Upcoming (30m alert)' : shown.stage === '15m' ? 'Starting soon!' : 'Join call'}
+                </span>
+              </div>
+              <p className="text-[14px] font-bold text-text-primary leading-snug mt-1 truncate">
+                {shown.meeting.title}
+              </p>
+              <p className="text-[11.5px] text-text-secondary mt-0.5">
+                {timeOf(shown.meeting.start)} · {shown.meeting.location || SOURCE_LABEL[shown.meeting.source]}
+              </p>
             </div>
-            <button onClick={() => setShown(null)} aria-label="Close" className="text-text-secondary hover:text-text-primary"><X className="w-4 h-4" /></button>
+            <button 
+              onClick={handleDismiss} 
+              aria-label="Close" 
+              className="text-text-secondary hover:text-text-primary p-1 rounded-lg hover:bg-background-primary transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <div className="flex justify-end gap-2 mt-3">
-            <button onClick={() => setShown(null)} className="px-3 py-1.5 text-[12.5px] font-semibold text-text-secondary">Dismiss</button>
-            <span onClick={() => setShown(null)}><JoinOrOpen m={shown} /></span>
+
+          <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-border-subtle">
+            <button 
+              type="button"
+              onClick={handleSnooze} 
+              className="text-[11.5px] font-semibold text-text-secondary hover:text-text-primary px-2.5 py-1 rounded-lg hover:bg-background-primary transition-colors cursor-pointer"
+            >
+              Snooze (5m)
+            </button>
+            <div className="flex items-center gap-1.5">
+              <button 
+                type="button"
+                onClick={handleDismiss} 
+                className="px-2.5 py-1 text-[11.5px] font-semibold text-text-secondary hover:text-text-primary rounded-lg transition-colors cursor-pointer"
+              >
+                Dismiss
+              </button>
+              <span onClick={handleDismiss}>
+                <JoinOrOpen m={shown.meeting} />
+              </span>
+            </div>
           </div>
         </motion.div>
       )}

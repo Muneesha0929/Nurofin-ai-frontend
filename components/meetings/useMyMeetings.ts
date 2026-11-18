@@ -57,8 +57,17 @@ export function useMyMeetings() {
       const every = setInterval(() => load(), 5 * 60 * 1000);
       const minute = setInterval(() => useMeetingsStore.setState(s => ({ tick: s.tick + 1 })), 60 * 1000);
       const onFocus = () => document.visibilityState === 'visible' && load();
+      const onFresh = () => load(true);
       document.addEventListener('visibilitychange', onFocus);
-      stop = () => { clearInterval(every); clearInterval(minute); document.removeEventListener('visibilitychange', onFocus); };
+      window.addEventListener('task:created', onFresh);
+      window.addEventListener('meeting:updated', onFresh);
+      stop = () => { 
+        clearInterval(every); 
+        clearInterval(minute); 
+        document.removeEventListener('visibilitychange', onFocus); 
+        window.removeEventListener('task:created', onFresh);
+        window.removeEventListener('meeting:updated', onFresh);
+      };
     }
     return () => { users -= 1; if (users === 0 && stop) { stop(); stop = null; } };
   }, []);

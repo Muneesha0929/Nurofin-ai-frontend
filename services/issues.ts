@@ -14,22 +14,36 @@ const getHeaders = () => {
 const BASE = '/api/v1/issues';
 
 function mapIssue(raw: any): Issue {
+  if (!raw) {
+    return {
+      id: '',
+      title: '',
+      description: '',
+      status: 'open',
+      severity: 'medium',
+      createdAt: '',
+      assignedTo: 'Unassigned',
+      followupCount: 0,
+      followups: [],
+      attachments: [],
+    };
+  }
   return {
-    id: String(raw.id),
+    id: String(raw.id ?? ''),
     title: raw.title || '',
     description: raw.description || '',
     status: raw.status || 'open',
     severity: raw.priority || raw.severity || 'medium',
     createdAt: raw.created_at ? String(raw.created_at) : '',
-    assignedTo: raw.assigned_user?.name || 'Unassigned',
+    assignedTo: raw.assigned_user?.name || (raw.assigned_user_id ? `User ${raw.assigned_user_id}` : 'Unassigned'),
     category: raw.category || undefined,
     deadline: raw.deadline || undefined,
     projectId: raw.project_id ? String(raw.project_id) : undefined,
     projectName: raw.project?.name,
-    assigneeId: raw.assigned_user ? String(raw.assigned_user.id) : undefined,
+    assigneeId: raw.assigned_user ? String(raw.assigned_user.id) : (raw.assigned_user_id ? String(raw.assigned_user_id) : undefined),
     assigneeName: raw.assigned_user?.name,
     assigneeAvatar: raw.assigned_user?.avatar || undefined,
-    reporterId: raw.reported_by ? String(raw.reported_by.id) : undefined,
+    reporterId: raw.reported_by ? String(raw.reported_by.id) : (raw.reported_by_id ? String(raw.reported_by_id) : undefined),
     reporterName: raw.reported_by?.name,
     reporterAvatar: raw.reported_by?.avatar || undefined,
     followupCount: raw.followup_count || 0,
@@ -41,10 +55,19 @@ function mapIssue(raw: any): Issue {
 }
 
 function mapFollowup(raw: any): IssueFollowup {
+  if (!raw) {
+    return {
+      id: '',
+      issue_id: '',
+      user_id: '',
+      message: '',
+      created_at: '',
+    };
+  }
   return {
-    id: String(raw.id),
-    issue_id: String(raw.issue_id),
-    user_id: String(raw.user_id),
+    id: String(raw.id ?? ''),
+    issue_id: String(raw.issue_id ?? ''),
+    user_id: String(raw.user_id ?? ''),
     user_name: raw.user_name || '',
     user_avatar: raw.user_avatar || undefined,
     message: raw.message || '',
@@ -92,8 +115,10 @@ export const issuesService = {
 
   getIssue: async (issueId: number): Promise<Issue> => {
     const res = await fetch(`${BASE}/${issueId}`, { headers: getHeaders() });
-    if (!res.ok) throw new Error('Failed to fetch issue');
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.success === false) {
+      throw new Error(json.message || json.detail || 'Failed to fetch issue');
+    }
     return mapIssue(json.data);
   },
 
@@ -103,11 +128,10 @@ export const issuesService = {
       headers: getHeaders(),
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Failed to report issue' }));
-      throw new Error(err.detail || err.message || 'Failed to report issue');
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.success === false) {
+      throw new Error(json.message || json.detail || 'Failed to report issue');
     }
-    const json = await res.json();
     return mapIssue(json.data);
   },
 
@@ -117,11 +141,10 @@ export const issuesService = {
       headers: getHeaders(),
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Failed to update issue' }));
-      throw new Error(err.detail || err.message || 'Failed to update issue');
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.success === false) {
+      throw new Error(json.message || json.detail || 'Failed to update issue');
     }
-    const json = await res.json();
     return mapIssue(json.data);
   },
 
@@ -130,11 +153,10 @@ export const issuesService = {
       method: 'PUT',
       headers: getHeaders(),
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Failed to update status' }));
-      throw new Error(err.detail || err.message || 'Failed to update status');
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.success === false) {
+      throw new Error(json.message || json.detail || 'Failed to update status');
     }
-    const json = await res.json();
     return mapIssue(json.data);
   },
 
@@ -143,8 +165,10 @@ export const issuesService = {
       method: 'PUT',
       headers: getHeaders(),
     });
-    if (!res.ok) throw new Error('Failed to update issue status');
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.success === false) {
+      throw new Error(json.message || json.detail || 'Failed to update issue status');
+    }
     return mapIssue(json.data);
   },
 
@@ -153,8 +177,10 @@ export const issuesService = {
       method: 'POST',
       headers: getHeaders(),
     });
-    if (!res.ok) throw new Error('Failed to accept issue');
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.success === false) {
+      throw new Error(json.message || json.detail || 'Failed to accept issue');
+    }
     return mapIssue(json.data);
   },
 
@@ -163,8 +189,10 @@ export const issuesService = {
       method: 'POST',
       headers: getHeaders(),
     });
-    if (!res.ok) throw new Error('Failed to decline issue');
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.success === false) {
+      throw new Error(json.message || json.detail || 'Failed to decline issue');
+    }
     return mapIssue(json.data);
   },
 
@@ -174,8 +202,10 @@ export const issuesService = {
       headers: getHeaders(),
       body: JSON.stringify({ user_id: userId, reason: reason || '' })
     });
-    if (!res.ok) throw new Error('Failed to transfer issue');
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.success === false) {
+      throw new Error(json.message || json.detail || 'Failed to transfer issue');
+    }
     return mapIssue(json.data);
   },
 

@@ -9,6 +9,7 @@ import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
 import { Issue } from '@/types';
 import { issuesService } from '@/services/issues';
+import { workcenterService } from '@/services/workcenter';
 import { usersService } from '@/services/users';
 import { projectsService } from '@/services/projects';
 import { UserProfile } from '@/types';
@@ -175,7 +176,7 @@ function IssueCenterPage() {
           attachments: data.attachments || undefined,
         } as any);
       } else {
-        await issuesService.createIssue({
+        const createdRes: any = await issuesService.createIssue({
           title: data.title,
           description: data.description,
           priority: data.severity,
@@ -185,6 +186,29 @@ function IssueCenterPage() {
           project_id: data.project_id ? parseInt(data.project_id) : undefined,
           attachments: data.attachments || undefined,
         });
+
+        // Two-way sync: create corresponding task in workcenter
+        try {
+          const createdIssueId = createdRes?.data?.id || createdRes?.id;
+          await workcenterService.createTask({
+            title: `[Issue] ${data.title}`,
+            description: data.description,
+            priority: data.severity === 'critical' ? 'critical' : data.severity === 'high' ? 'high' : 'medium',
+            deadline: data.deadline || new Date().toISOString().slice(0, 10),
+            scheduled_date: data.deadline || new Date().toISOString().slice(0, 10),
+            project_id: data.project_id ? parseInt(data.project_id) : undefined,
+            assigned_to_id: data.assigned_user_id ? parseInt(data.assigned_user_id) : undefined,
+            source: createdIssueId ? `issue:${createdIssueId}` : 'issue',
+            is_issue: true,
+          } as any);
+        } catch (taskErr) {
+          console.error('Failed to create matching task for issue:', taskErr);
+        }
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('task:created'));
+          window.dispatchEvent(new CustomEvent('issue:created'));
+        }
       }
       reset({
         title: '',
@@ -209,10 +233,39 @@ function IssueCenterPage() {
   const handleStatusChange = async (issue: Issue, newStatus: string) => {
     try {
       await issuesService.updateStatus(parseInt(issue.id), newStatus);
+
+      // Two-way sync: update corresponding task in workcenter
+      try {
+        const isResolvedOrClosed = ['resolved', 'closed'].includes(newStatus);
+        const taskTargetStatus = isResolvedOrClosed ? 'completed' : 'in_progress';
+        const tasksRes = await workcenterService.getTasks({ page_size: 200 });
+        const allWcTasks = tasksRes.tasks || [];
+        const cleanIssueTitle = issue.title.trim().toLowerCase();
+        
+        const matchingTask = allWcTasks.find(t => {
+          const sourceMatch = (t as any).source === `issue:${issue.id}`;
+          const titleMatch = t.title.replace(/^\[Issue\]\s*/i, '').trim().toLowerCase() === cleanIssueTitle;
+          return sourceMatch || titleMatch;
+        });
+
+        if (matchingTask) {
+          await workcenterService.updateTask(matchingTask.id, {
+            status: taskTargetStatus,
+            actual_completion_date: isResolvedOrClosed ? new Date().toISOString().slice(0, 10) : undefined
+          });
+        }
+      } catch (syncErr) {
+        console.error('Failed to sync status to task:', syncErr);
+      }
+
       await loadData();
       if (selectedIssue && selectedIssue.id === issue.id) {
         const fresh = await issuesService.getIssue(parseInt(issue.id));
         setSelectedIssue(fresh);
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('task:created'));
+        window.dispatchEvent(new CustomEvent('issue:updated'));
       }
     } catch (err: any) {
       alert(err.message || 'Failed to update status');
@@ -234,6 +287,7 @@ function IssueCenterPage() {
   };
 
   const handleAssignmentAction = async (issue: Issue, action: 'accept' | 'decline' | 'transfer') => {
+    if (!issue || !issue.id) return;
     try {
       if (action === 'transfer') {
         setTransferOpen(true);
@@ -245,7 +299,12 @@ function IssueCenterPage() {
       }
       
       await loadData();
+      setPendingAssignment(null);
       setDetailOpen(false);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('issue:updated'));
+        window.dispatchEvent(new CustomEvent('task:created'));
+      }
     } catch (err: any) {
       alert(err.message || 'Action failed');
     }

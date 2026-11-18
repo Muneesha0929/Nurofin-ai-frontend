@@ -22,10 +22,10 @@ export default function GlobalAssignmentPopup() {
   const currentUserId = userProfile?.id ? String(userProfile.id) : '';
 
   const checkPendingAssignments = useCallback(async () => {
-    if (!currentUserId) return;
+    if (!currentUserId || isNaN(parseInt(currentUserId))) return;
     try {
       const { issues } = await issuesService.getIssues({ assigned_user_id: parseInt(currentUserId) });
-      const pending = issues.find(i => (i as any).assignmentStatus === 'pending_acceptance');
+      const pending = issues.find(i => (i as any).assignmentStatus === 'pending_acceptance' && String((i as any).assignedUserId || (i as any).assigned_user_id) === currentUserId);
       if (pending && !pendingAssignment) {
         setPendingAssignment(pending);
       } else if (!pending) {
@@ -43,6 +43,7 @@ export default function GlobalAssignmentPopup() {
   }, [checkPendingAssignments]);
 
   const handleAssignmentAction = async (issue: Issue, action: 'accept' | 'decline') => {
+    if (!issue || !issue.id) return;
     try {
       if (action === 'accept') {
         await issuesService.acceptIssue(parseInt(issue.id));
@@ -53,8 +54,9 @@ export default function GlobalAssignmentPopup() {
       setPendingAssignment(null);
       await checkPendingAssignments();
       
-      if (window.location.pathname !== '/issues') {
-        router.push('/issues');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('issue:updated'));
+        window.dispatchEvent(new CustomEvent('task:created'));
       }
     } catch (err: any) {
       alert(err.message || 'Action failed');

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { WCTask, workcenterService } from '@/services/workcenter';
+import { issuesService } from '@/services/issues';
 import { Meeting } from '@/types';
 import { today, isoDay } from './Widgets';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
@@ -118,13 +119,36 @@ export function PlanMyDayModal({
   const handleConfirmCompletion = async (extVal: string, completionDate: string) => {
     if (!completingTaskId) return;
     const ext = parseFloat(extVal);
+    const completedTask = (overdueTasks || []).find(t => Number(t.id) === Number(completingTaskId));
     try {
       await workcenterService.updateTask(completingTaskId, {
         status: 'completed',
         extended_time: isNaN(ext) ? undefined : ext,
         actual_completion_date: completionDate
       });
+
+      if (completedTask) {
+        let issueId: number | null = null;
+        const src = (completedTask as any).source;
+        if (typeof src === 'string' && src.startsWith('issue:')) {
+          issueId = parseInt(src.split(':')[1], 10);
+        }
+        if (!issueId && ((completedTask as any).is_issue || completedTask.title?.startsWith('[Issue]'))) {
+          const cleanTitle = completedTask.title.replace(/^\[Issue\]\s*/i, '').trim().toLowerCase();
+          const allIssues = (await issuesService.getIssues().catch(() => ({ issues: [] }))).issues || [];
+          const matched = allIssues.find((i: any) => i.title.trim().toLowerCase() === cleanTitle);
+          if (matched) issueId = parseInt(matched.id, 10);
+        }
+        if (issueId && !isNaN(issueId)) {
+          await issuesService.updateStatus(issueId, 'resolved').catch(err => console.error('Failed to sync resolved status to issue:', err));
+        }
+      }
+
       onRefresh();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('issue:updated'));
+        window.dispatchEvent(new CustomEvent('task:created'));
+      }
     } catch (err) {
       console.error('Failed to complete task in Plan My Day:', err);
     } finally {
@@ -304,13 +328,26 @@ export function PlanMyDayModal({
         )}
       </div>
 
-      <CompleteTaskModal
-        isOpen={completingTaskId !== null}
-        onClose={() => setCompletingTaskId(null)}
-        onSubmit={handleConfirmCompletion}
-        taskExtendedTime={extendedTime}
-        setTaskExtendedTime={setExtendedTime}
-      />
+      {(() => {
+        const foundTask = completingTaskId 
+          ? [...overdueTasks, ...todayTasks].find(t => Number(t.id) === Number(completingTaskId))
+          : null;
+        const isIssue = Boolean(
+          foundTask?.title?.startsWith('[Issue]') ||
+          (foundTask as any)?.source === 'issue' ||
+          (foundTask as any)?.is_issue
+        );
+        return (
+          <CompleteTaskModal
+            isOpen={completingTaskId !== null}
+            onClose={() => setCompletingTaskId(null)}
+            onSubmit={handleConfirmCompletion}
+            taskExtendedTime={extendedTime}
+            setTaskExtendedTime={setExtendedTime}
+            isIssue={isIssue}
+          />
+        );
+      })()}
     </div>
   );
 }

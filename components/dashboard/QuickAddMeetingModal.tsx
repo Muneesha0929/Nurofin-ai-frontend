@@ -329,6 +329,9 @@ export function QuickAddMeetingModal({
                   <option value={2}>2 weeks (Recommended)</option>
                   <option value={4}>4 weeks (1 Month)</option>
                   <option value={8}>8 weeks (2 Months)</option>
+                  <option value={12}>12 weeks (3 Months)</option>
+                  <option value={26}>26 weeks (6 Months)</option>
+                  <option value={52}>52 weeks (1 Year)</option>
                 </select>
               </div>
             )}

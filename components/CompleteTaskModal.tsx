@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { CheckCircle2, Clock } from 'lucide-react';
+import { CheckCircle2, Clock, AlertCircle } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 interface CompleteTaskModalProps {
@@ -10,6 +10,7 @@ interface CompleteTaskModalProps {
   onSubmit: (extendedTime: string, completionDate: string) => void;
   taskExtendedTime: string;
   setTaskExtendedTime: (val: string) => void;
+  isIssue?: boolean;
 }
 
 export function CompleteTaskModal({
@@ -18,6 +19,7 @@ export function CompleteTaskModal({
   onSubmit,
   taskExtendedTime,
   setTaskExtendedTime,
+  isIssue = false,
 }: CompleteTaskModalProps) {
   const [completionDate, setCompletionDate] = useState(new Date().toISOString().split('T')[0]);
   const [mounted, setMounted] = useState(false);
@@ -49,7 +51,17 @@ export function CompleteTaskModal({
         className="bg-surface-card border border-border-subtle rounded-xl p-6 shadow-2xl w-full max-w-sm flex flex-col gap-4 relative z-[10060]"
       >
         <h3 className="text-lg font-bold text-text-primary flex items-center gap-2">
-          <CheckCircle2 className="w-5 h-5 text-accent-green" /> Complete Task
+          {isIssue ? (
+            <>
+              <AlertCircle className="w-5 h-5 text-amber-500" />
+              <span>Resolve Issue</span>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="w-5 h-5 text-accent-green" />
+              <span>Complete Task</span>
+            </>
+          )}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
@@ -112,9 +124,14 @@ export function CompleteTaskModal({
             </button>
             <button
               type="submit"
-              className="px-6 h-10 bg-green-500 hover:bg-green-600 text-white font-bold rounded-lg shadow-md transition-all text-xs cursor-pointer"
+              className={cn(
+                "px-6 h-10 text-white font-bold rounded-lg shadow-md transition-all text-xs cursor-pointer",
+                isIssue 
+                  ? "bg-amber-600 hover:bg-amber-700" 
+                  : "bg-green-500 hover:bg-green-600"
+              )}
             >
-              Mark Complete
+              {isIssue ? 'Mark as Resolved' : 'Mark Complete'}
             </button>
           </div>
         </form>
