@@ -129,6 +129,7 @@ export const meetingsService = {
     if (sort) params.set('sort', sort);
     if (status) params.set('status', status);
     if (targetUserId) params.set('target_user_id', String(targetUserId));
+    params.set('limit', '500');
     const qs = params.toString();
     const url = `/api/v1/meetings/${qs ? `?${qs}` : ''}`;
     const res = await fetch(url, { headers: getHeaders() });
@@ -207,8 +208,9 @@ export const meetingsService = {
     return mapMeeting(json.data);
   },
 
-  deleteMeeting: async (id: number | string): Promise<void> => {
-    const res = await fetch(`/api/v1/meetings/${id}`, {
+  deleteMeeting: async (id: number | string, deleteSeries: boolean = true): Promise<void> => {
+    const url = `/api/v1/meetings/${id}${deleteSeries ? '?delete_series=true' : '?delete_series=false'}`;
+    const res = await fetch(url, {
       method: 'DELETE',
       headers: getHeaders()
     });

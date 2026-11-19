@@ -47,22 +47,40 @@ export function MeetingRow({ m, showDay }: { m: MyMeeting; showDay?: boolean }) 
   );
 }
 
-/** One line under the greeting: the next meeting today, with Join. Nothing when the day is clear. */
+/** One line under the greeting: the next meeting today, with Join. If today is clear/completed, shows tomorrow's scheduled meeting. */
 export function NextMeeting() {
   const { meetings } = useMyMeetings();
   const left = leftToday(meetings);
   const next = left[0];
-  if (!next) return null;
-  const until = untilText(next);
+  if (next) {
+    const until = untilText(next);
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 bg-background-secondary border border-border-subtle rounded-xl px-4 py-3 normal-case">
+        <span className="w-8 h-8 rounded-lg bg-accent-blue/10 text-accent-blue grid place-items-center shrink-0"><CalendarClock className="w-[18px] h-[18px]" /></span>
+        <span className="flex-1 min-w-0 text-[14px] text-text-secondary">
+          {until === 'now' ? <b className="text-accent-green font-semibold">Happening now: </b> : <span>Next meeting {until && <b className="text-accent-blue font-semibold">{until}</b>}: </span>}
+          <b className="text-text-primary font-semibold">{next.title}</b> at {timeOf(next.start)}
+          {left.length > 1 && <span className="text-text-secondary"> · {left.length - 1} more today</span>}
+        </span>
+        <JoinOrOpen m={next} />
+      </div>
+    );
+  }
+
+  // If no more meetings left today, show next meeting scheduled for tomorrow
+  const tomorrows = meetings.filter(m => !m.all_day && dayOf(m.start) === 'Tomorrow');
+  const nextTomorrow = tomorrows[0];
+  if (!nextTomorrow) return null;
+
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 bg-background-secondary border border-border-subtle rounded-xl px-4 py-3 normal-case">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 bg-background-secondary/80 border border-border-subtle rounded-xl px-4 py-3 normal-case">
       <span className="w-8 h-8 rounded-lg bg-accent-blue/10 text-accent-blue grid place-items-center shrink-0"><CalendarClock className="w-[18px] h-[18px]" /></span>
       <span className="flex-1 min-w-0 text-[14px] text-text-secondary">
-        {until === 'now' ? <b className="text-accent-green font-semibold">Happening now: </b> : <span>Next meeting {until && <b className="text-accent-blue font-semibold">{until}</b>}: </span>}
-        <b className="text-text-primary font-semibold">{next.title}</b> at {timeOf(next.start)}
-        {left.length > 1 && <span className="text-text-secondary"> · {left.length - 1} more today</span>}
+        <span className="text-accent-blue font-semibold">Next meeting tomorrow: </span>
+        <b className="text-text-primary font-semibold">{nextTomorrow.title}</b> at {timeOf(nextTomorrow.start)}
+        {tomorrows.length > 1 && <span className="text-text-secondary"> · {tomorrows.length - 1} more tomorrow</span>}
       </span>
-      <JoinOrOpen m={next} />
+      <JoinOrOpen m={nextTomorrow} />
     </div>
   );
 }

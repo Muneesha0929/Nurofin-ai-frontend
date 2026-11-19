@@ -1054,15 +1054,15 @@ export function QuickAddTaskInput({
         <div 
           ref={dropdownRef}
           className={cn(
-            "absolute left-2 right-2 z-[9999] bg-background-secondary text-text-primary border border-border-subtle rounded-2xl shadow-2xl overflow-hidden max-h-80 overflow-y-auto animate-in fade-in duration-150",
+            "absolute left-2 right-2 z-[9999] bg-white dark:bg-[#121A2A] text-text-primary border border-border-subtle rounded-2xl shadow-2xl overflow-hidden max-h-80 overflow-y-auto animate-in fade-in duration-150",
             dropUp ? "bottom-full mb-2 slide-in-from-bottom-2" : "top-full mt-2 slide-in-from-top-2"
           )}
-          style={{ backgroundColor: 'var(--bg-secondary)', opacity: 1 }}
+          style={{ backgroundColor: 'var(--bg-secondary, #FFFFFF)', opacity: 1 }}
         >
           {/* Header indicator */}
           <div 
-            className="flex items-center justify-between px-4 py-2.5 bg-surface-card border-b border-border-subtle text-[11px] font-bold text-text-secondary uppercase tracking-wider"
-            style={{ backgroundColor: 'var(--surface-card)' }}
+            className="flex items-center justify-between px-4 py-2.5 bg-slate-50 dark:bg-[#1A2332] border-b border-border-subtle text-[11px] font-bold text-text-secondary uppercase tracking-wider"
+            style={{ backgroundColor: 'var(--surface-card, #F9FAFB)' }}
           >
             <span className="flex items-center gap-1.5 font-bold text-text-primary">
               {activeTrigger === 'project' && <>📁 <span>Select Project (#)</span></>}

@@ -22,6 +22,7 @@ import {
   CalendarCheck,
   Flame,
   AlertCircle,
+  CalendarClock,
   Edit3
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
@@ -81,11 +82,28 @@ export function MyDayView({
   }, []);
 
   const now = today();
+  const tomorrowDate = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return isoDay(d);
+  })();
 
   // Filter today's meetings:
   // Show if date == today AND (isDirector OR user is owner OR user is in attendees/participants)
   const todaysMeetings = meetings.filter(m => {
     if (m.date !== now) return false;
+    if (m.status === 'cancelled') return false;
+    if (isDirector) return true;
+    if (String(m.owner_id) === String(currentUserId)) return true;
+    if (m.participants?.some(p => String(p.user_id) === String(currentUserId))) return true;
+    if (m.attendees?.includes(currentUserName)) return true;
+    return false;
+  }).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+
+  // Filter tomorrow's meetings:
+  const tomorrowsMeetings = meetings.filter(m => {
+    if (m.date !== tomorrowDate) return false;
+    if (m.status === 'cancelled') return false;
     if (isDirector) return true;
     if (String(m.owner_id) === String(currentUserId)) return true;
     if (m.participants?.some(p => String(p.user_id) === String(currentUserId))) return true;
@@ -161,9 +179,14 @@ export function MyDayView({
 
   // Handle Delete / Cancel meeting
   const handleDeleteMeeting = async (meetingId: string | number) => {
-    if (!confirm('Are you sure you want to cancel and delete this meeting?')) return;
+    const target = meetings.find(m => String(m.id) === String(meetingId));
+    const isRecurring = target?.is_recurring || Boolean(target?.recurrence_rule);
+    const msg = isRecurring
+      ? `This is a recurring meeting series. Do you want to cancel and delete all occurrences of "${target?.title}"?`
+      : 'Are you sure you want to cancel and delete this meeting?';
+    if (!confirm(msg)) return;
     try {
-      await meetingsService.deleteMeeting(meetingId);
+      await meetingsService.deleteMeeting(meetingId, true);
       setActiveMenuMeetingId(null);
       onRefresh();
       if (typeof window !== 'undefined') {
@@ -172,6 +195,7 @@ export function MyDayView({
       }
     } catch (err) {
       console.error('Failed to delete meeting:', err);
+      alert('Failed to delete meeting');
     }
   };
 
@@ -390,12 +414,16 @@ export function MyDayView({
       </div>
 
       {/* TODAY'S MEETINGS (Google Calendar-style cards with RSVP & Join actions) */}
-      {todaysMeetings.length > 0 && (
+      {(todaysMeetings.length > 0 || tomorrowsMeetings.length > 0) && (
         <div className="space-y-2.5">
           <div className="flex items-center justify-between text-xs font-bold text-text-secondary uppercase tracking-wider px-1">
             <span className="flex items-center gap-1.5">
               <Video size={13} className="text-accent-blue" />
-              <span>Today&apos;s Meetings ({todaysMeetings.length})</span>
+              <span>
+                {todaysMeetings.length > 0 
+                  ? `Today's Meetings (${todaysMeetings.length})` 
+                  : `Tomorrow's Scheduled Meetings (${tomorrowsMeetings.length})`}
+              </span>
             </span>
             <button
               onClick={onOpenMeetingModal}
@@ -406,44 +434,66 @@ export function MyDayView({
           </div>
 
           <div className="space-y-2">
-            {todaysMeetings.map(m => {
+            {(todaysMeetings.length > 0 ? todaysMeetings : tomorrowsMeetings).map(m => {
               const isOwner = String(m.owner_id) === String(currentUserId) || m.owner_name === currentUserName;
               const myParticipant = m.participants?.find(p => String(p.user_id) === String(currentUserId));
               const myRsvpStatus = myParticipant?.status || (isOwner ? 'accepted' : 'pending');
               const isCompleted = m.status === 'completed';
               const isLive = m.status === 'in_progress';
+              const isRecurring = m.is_recurring || Boolean(m.recurrence_rule);
+              const isNextDayProgressed = isRecurring && isCompleted;
+              const isTomorrowOnly = todaysMeetings.length === 0;
+
+              const tomorrowMeeting = isRecurring 
+                ? meetings.find(other => other.date === tomorrowDate && other.title === m.title && other.status !== 'cancelled')
+                : null;
 
               return (
                 <div
                   key={m.id}
                   className={cn(
                     'group relative flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl border transition-all',
-                    isCompleted 
-                      ? 'bg-background-secondary/40 border-border-subtle opacity-70' 
-                      : isLive 
-                        ? 'bg-emerald-500/5 border-emerald-500/30 shadow-xs'
-                        : 'bg-background-secondary border-border-subtle hover:border-accent-blue/40 shadow-xs'
+                    isNextDayProgressed || isTomorrowOnly
+                      ? 'bg-accent-blue/[0.04] border-accent-blue/30 shadow-xs'
+                      : isCompleted 
+                        ? 'bg-background-secondary/40 border-border-subtle opacity-70' 
+                        : isLive 
+                          ? 'bg-emerald-500/5 border-emerald-500/30 shadow-xs'
+                          : 'bg-background-secondary border-border-subtle hover:border-accent-blue/40 shadow-xs'
                   )}
                 >
                   {/* Left: Time & Details */}
                   <div className="flex items-start gap-3 min-w-0">
                     <div className="flex flex-col items-center justify-center w-14 py-1.5 px-1 rounded-xl bg-background-primary border border-border-subtle text-center shrink-0">
                       <span className="text-[11px] font-bold text-text-primary leading-tight">
-                        {m.time}
+                        {isNextDayProgressed ? (tomorrowMeeting?.time || m.time) : m.time}
                       </span>
-                      <span className="text-[9px] uppercase tracking-wider text-text-secondary">
-                        {m.duration.includes('-') ? m.duration.split('-')[1]?.trim() : 'Call'}
+                      <span className={cn("text-[9px] uppercase tracking-wider font-bold", (isNextDayProgressed || isTomorrowOnly) ? "text-accent-blue" : "text-text-secondary")}>
+                        {isNextDayProgressed || isTomorrowOnly ? "Tomorrow" : (m.duration.includes('-') ? m.duration.split('-')[1]?.trim() : 'Call')}
                       </span>
                     </div>
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className={cn('text-[13.5px] font-bold text-text-primary truncate', isCompleted && 'line-through text-text-secondary')}>
+                        <h4 className={cn('text-[13.5px] font-bold text-text-primary truncate', isCompleted && !isNextDayProgressed && 'line-through text-text-secondary')}>
                           {m.title}
                         </h4>
 
                         {/* Status Badges */}
-                        {isCompleted ? (
+                        {isNextDayProgressed ? (
+                          <>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-accent-blue/15 text-accent-blue border border-accent-blue/30 flex items-center gap-1 shadow-xs">
+                              <CalendarClock size={11} /> Scheduled for Tomorrow ({tomorrowMeeting?.time || m.time})
+                            </span>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                              ✔ Finished Today
+                            </span>
+                          </>
+                        ) : isTomorrowOnly ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-accent-blue/15 text-accent-blue border border-accent-blue/30 flex items-center gap-1 shadow-xs">
+                            <CalendarClock size={11} /> Scheduled for Tomorrow
+                          </span>
+                        ) : isCompleted ? (
                           <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-background-primary text-text-secondary border border-border-subtle">
                             ✔ Finished
                           </span>
@@ -460,12 +510,16 @@ export function MyDayView({
                         )}
                       </div>
 
-                      {/* Notes / Agenda */}
-                      {m.notes && (
+                      {/* Subtitle helper or Notes */}
+                      {isNextDayProgressed || isTomorrowOnly ? (
+                        <p className="text-[11.5px] text-accent-blue font-medium mt-0.5 flex items-center gap-1">
+                          <Calendar size={11} /> Join tomorrow from {tomorrowMeeting?.time || m.time} {m.duration?.includes('-') ? `to ${m.duration.split('-')[1]?.trim()}` : (m.duration ? `(${m.duration})` : '')}
+                        </p>
+                      ) : m.notes ? (
                         <p className="text-[11.5px] text-text-secondary line-clamp-1 mt-0.5">
                           {m.notes}
                         </p>
-                      )}
+                      ) : null}
 
                       {/* Participants Avatars with RSVP Status */}
                       {m.participants && m.participants.length > 0 && (
@@ -502,7 +556,7 @@ export function MyDayView({
                   {/* Right Actions: Google Calendar RSVP Prompt & Join / Status controls */}
                   <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
                     {/* RSVP Prompt for Invited Teammate */}
-                    {!isOwner && myRsvpStatus === 'pending' && !isCompleted && (
+                    {!isOwner && myRsvpStatus === 'pending' && !isCompleted && !isTomorrowOnly && (
                       <div className="flex items-center gap-1.5 bg-background-primary p-1 rounded-xl border border-border-subtle">
                         <span className="text-[11px] font-medium text-text-secondary px-1.5">Going?</span>
                         <button
@@ -522,7 +576,7 @@ export function MyDayView({
                       </div>
                     )}
 
-                    {!isOwner && myRsvpStatus === 'accepted' && !isCompleted && (
+                    {!isOwner && myRsvpStatus === 'accepted' && !isCompleted && !isTomorrowOnly && (
                       <span className="text-[11px] font-semibold text-emerald-500 flex items-center gap-1 px-2 py-1 bg-emerald-500/10 rounded-lg">
                         <Check size={12} /> Accepted
                       </span>
@@ -535,20 +589,21 @@ export function MyDayView({
                     )}
 
                     {/* Join Meeting Link Button */}
-                    {m.meeting_link && !isCompleted && (
+                    {(tomorrowMeeting?.meeting_link || m.meeting_link) && (!isCompleted || isNextDayProgressed || isTomorrowOnly) && (
                       <a
-                        href={m.meeting_link}
+                        href={tomorrowMeeting?.meeting_link || m.meeting_link}
                         target="_blank"
                         rel="noreferrer"
                         onClick={() => {
-                          if (m.status !== 'in_progress') {
+                          if (!isCompleted && !isTomorrowOnly && m.status !== 'in_progress') {
                             handleUpdateMeetingStatus(m.id, 'in_progress');
                           }
                         }}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-blue hover:bg-accent-blue-hover text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-sm"
+                        title={(isNextDayProgressed || isTomorrowOnly) ? `Join tomorrow from ${tomorrowMeeting?.time || m.time}` : 'Join meeting'}
                       >
                         <Video size={13} />
-                        <span>Join</span>
+                        <span>{isNextDayProgressed || isTomorrowOnly ? 'Join Tomorrow' : 'Join'}</span>
                         <ExternalLink size={10} className="opacity-80" />
                       </a>
                     )}

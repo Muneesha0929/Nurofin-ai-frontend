@@ -318,14 +318,35 @@ export default function MeetingsPage() {
     finally { setActionLoading(null); }
   };
 
+  const handleDeleteMeeting = async (targetMeeting: Meeting) => {
+    const isRecurring = targetMeeting.is_recurring || Boolean(targetMeeting.recurrence_rule);
+    const msg = isRecurring
+      ? `This is a recurring meeting series. Do you want to cancel and delete all occurrences of "${targetMeeting.title}"?`
+      : `Are you sure you want to delete "${targetMeeting.title}"?`;
+    if (!confirm(msg)) return;
+    try {
+      await meetingsService.deleteMeeting(targetMeeting.id, true);
+      if (isRecurring) {
+        setMeetings(meetings.filter(m => m.id !== targetMeeting.id && !(m.title === targetMeeting.title && m.time === targetMeeting.time)));
+      } else {
+        setMeetings(meetings.filter(m => m.id !== targetMeeting.id));
+      }
+      if (selectedId === targetMeeting.id) {
+        setSelectedId('');
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('meeting:updated'));
+        window.dispatchEvent(new CustomEvent('task:created'));
+      }
+    } catch (err) {
+      console.error('Failed to delete meeting:', err);
+      alert('Failed to delete meeting');
+    }
+  };
+
   const handleDelete = async () => {
     if (!selectedMeeting) return;
-    if (!confirm('Are you sure you want to delete this meeting?')) return;
-    try {
-      await meetingsService.deleteMeeting(selectedMeeting.id);
-      setMeetings(meetings.filter(m => m.id !== selectedMeeting.id));
-      setSelectedId('');
-    } catch (err) { console.error(err); }
+    await handleDeleteMeeting(selectedMeeting);
   };
 
   const handleApproveTasks = async () => {
@@ -567,11 +588,25 @@ export default function MeetingsPage() {
           {meetings.map((meet) => {
             const isSelected = meet.id === selectedId;
             return (
-              <div key={meet.id} onClick={() => { setSelectedId(meet.id); setActiveTab('info'); }} className={cn("p-4 rounded-lg border cursor-pointer text-left transition-all bg-background-secondary hover:border-text-muted", isSelected ? "border-accent-blue shadow-lg" : "border-border-subtle")}>
-                <h4 className="text-xs font-bold text-text-primary line-clamp-1 mb-2">{meet.title}</h4>
-                <div className="flex flex-wrap items-center gap-3 text-2xs text-text-secondary">
+              <div key={meet.id} onClick={() => { setSelectedId(meet.id); setActiveTab('info'); }} className={cn("group p-4 rounded-lg border cursor-pointer text-left transition-all bg-background-secondary hover:border-text-muted relative", isSelected ? "border-accent-blue shadow-lg" : "border-border-subtle")}>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <h4 className="text-xs font-bold text-text-primary line-clamp-1 flex-1">{meet.title}</h4>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteMeeting(meet);
+                    }}
+                    title="Delete meeting"
+                    className="opacity-0 group-hover:opacity-100 p-1 text-text-secondary hover:text-accent-red hover:bg-accent-red/10 rounded transition-all cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2.5 text-2xs text-text-secondary">
                   <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-text-muted" /> {meet.date}</span>
                   <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-text-muted" /> {meet.time}</span>
+                  {meet.is_recurring && <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/30 text-purple-600 dark:text-purple-400">Recurring</span>}
                   {meet.status && <span className={cn("text-[9px] uppercase font-bold px-1.5 py-0.5 rounded border", meet.status === 'completed' ? "bg-accent-green/10 border-accent-green/30 text-accent-green" : meet.status === 'cancelled' ? "bg-accent-red/10 border-accent-red/30 text-accent-red" : "bg-accent-blue/10 border-accent-blue/30 text-accent-blue")}>{meet.status}</span>}
                   {meet.analysis_status && getAnalysisStatusBadge(meet.analysis_status)}
                 </div>
@@ -600,17 +635,26 @@ export default function MeetingsPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   {selectedMeeting?.participants?.find(p => p.user_id === userProfile?.id)?.status === 'pending' && String(selectedMeeting?.owner_id) !== String(userProfile?.id) && (
                     <>
-                      <button onClick={handleAccept} disabled={actionLoading === 'accept'} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-semibold rounded-md shadow disabled:opacity-50 transition-colors">
+                      <button onClick={handleAccept} disabled={actionLoading === 'accept'} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white text-xs font-semibold rounded-md shadow disabled:opacity-50 transition-colors cursor-pointer">
                         {actionLoading === 'accept' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Accept
                       </button>
-                      <button onClick={handleDecline} disabled={actionLoading === 'decline'} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-300 hover:text-red-700 text-xs font-semibold rounded-md disabled:opacity-50 transition-all">
+                      <button onClick={handleDecline} disabled={actionLoading === 'decline'} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-300 hover:text-red-700 text-xs font-semibold rounded-md disabled:opacity-50 transition-all cursor-pointer">
                         {actionLoading === 'decline' ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />} Decline
                       </button>
                     </>
                   )}
-                  {selectedMeeting?.owner_id === userProfile?.id && (
-                    <button onClick={handleDelete} className="flex items-center gap-1.5 px-3 py-1.5 border border-accent-red/30 text-accent-red hover:bg-accent-red/10 text-xs font-semibold rounded-md transition-colors">
+                  {Boolean(
+                    !selectedMeeting?.owner_id ||
+                    String(selectedMeeting?.owner_id) === String(userProfile?.id) ||
+                    ['admin', 'super_admin', 'ceo', 'director'].includes((userProfile?.role || '').toLowerCase())
+                  ) && (
+                    <button 
+                      onClick={handleDelete} 
+                      title="Delete meeting"
+                      className="flex items-center gap-1.5 px-3 py-1.5 border border-accent-red/30 text-accent-red hover:bg-accent-red/10 text-xs font-semibold rounded-md transition-colors cursor-pointer"
+                    >
                       <Trash2 className="w-4 h-4" />
+                      <span>Delete</span>
                     </button>
                   )}
                 </div>
