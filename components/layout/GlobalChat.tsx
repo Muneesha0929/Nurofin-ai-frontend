@@ -45,19 +45,19 @@ export default function GlobalChat() {
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          "fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 border border-border-subtle/50",
+          "fixed bottom-4 right-3 sm:bottom-6 sm:right-6 z-50 w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 border border-border-subtle/50 cursor-pointer",
           isOpen 
             ? "bg-surface-card text-text-primary rotate-90" 
             : "bg-accent-blue text-white hover:scale-105 hover:bg-accent-blue-hover"
         )}
         aria-label="Toggle Global AI Chat"
       >
-        {isOpen ? <X className="w-5 h-5" /> : <BrainCircuit className="w-5 h-5" />}
+        {isOpen ? <X className="w-4 h-4 sm:w-5 sm:h-5" /> : <BrainCircuit className="w-4 h-4 sm:w-5 sm:h-5" />}
       </button>
 
       {/* Slide-Up Chat Panel */}
       {isOpen && (
-        <div className="fixed bottom-20 right-6 z-50 w-[360px] h-[460px] bg-background-secondary border border-border-subtle rounded-lg shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-5 duration-200 font-sans">
+        <div className="fixed bottom-16 sm:bottom-20 left-3 right-3 sm:left-auto sm:right-6 z-50 sm:w-[360px] h-[460px] max-h-[calc(100vh-5rem)] bg-background-secondary border border-border-subtle rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-5 duration-200 font-sans">
           
           {/* Header */}
           <div className="p-3.5 border-b border-border-subtle bg-surface-card/25 flex items-center justify-between">

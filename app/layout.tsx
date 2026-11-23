@@ -1,11 +1,17 @@
 import React from 'react';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import '../styles/globals.css';
 import ClientLayout from './ClientLayout';
 
 export const metadata: Metadata = {
   title: 'Nurofin-Executive-AI',
   description: 'Enterprise-grade Executive Dashboard and AI Assistant for Nurofin CEO Vincent.',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({

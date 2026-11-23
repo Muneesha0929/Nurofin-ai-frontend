@@ -7,7 +7,8 @@ import { tasksService } from '@/services/tasks';
 import { plannerService } from '@/services/planner';
 import { knowledgeService, DocumentItem } from '@/services/knowledge';
 import { StreamChat } from 'stream-chat';
-import { FileText, X, Paperclip, Plus, Briefcase } from 'lucide-react';
+import { FileText, X, Paperclip, Plus, Briefcase, ChevronLeft } from 'lucide-react';
+import { cn } from '@/utils/cn';
 import {
   Chat,
   ChannelList,
@@ -270,6 +271,83 @@ const ChatAutoOpener = ({ channelToSelect, onSelected }: { channelToSelect: any,
   return null;
 };
 
+const ChatLayoutInner = ({
+  channelToSelect,
+  onSelected,
+  onOpenTaskChat,
+  onOpenDirectChat,
+  userProfile
+}: {
+  channelToSelect: any;
+  onSelected: () => void;
+  onOpenTaskChat: () => void;
+  onOpenDirectChat: () => void;
+  userProfile: any;
+}) => {
+  const { channel, setActiveChannel } = useChatContext();
+
+  return (
+    <>
+      <ChatAutoOpener channelToSelect={channelToSelect} onSelected={onSelected} />
+      <div className={cn(
+        "w-full md:w-80 border-r border-border-subtle bg-background-secondary flex-shrink-0 flex flex-col h-full",
+        channel ? "hidden md:flex" : "flex"
+      )}>
+        <div className="p-4 border-b border-border-subtle space-y-2">
+          <button
+            onClick={onOpenTaskChat}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer"
+          >
+            <Briefcase className="w-4 h-4" /> Create Task Chat
+          </button>
+          <button
+            onClick={onOpenDirectChat}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-accent-blue hover:bg-accent-blue/90 text-white text-xs font-bold rounded-lg transition-all shadow-sm cursor-pointer"
+          >
+            <Plus className="w-4 h-4" /> New Direct Message
+          </button>
+        </div>
+        <div className="flex-1 min-h-0">
+          <ChannelList 
+            filters={{ type: 'messaging', members: { $in: [String(userProfile?.id)] } }}
+            sort={{ last_message_at: -1 }}
+            options={{ state: true, watch: true, presence: true }}
+          />
+        </div>
+      </div>
+      <div className={cn(
+        "flex-1 min-w-0 bg-background-primary relative h-full",
+        !channel ? "hidden md:flex" : "flex flex-col"
+      )}>
+        {channel && (
+          <div className="md:hidden flex items-center p-2 border-b border-border-subtle bg-background-secondary">
+            <button
+              onClick={() => setActiveChannel(undefined)}
+              className="flex items-center gap-1 text-xs font-semibold text-accent-blue py-1 px-2 hover:bg-background-primary rounded-lg transition-colors cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" /> Back to Channels
+            </button>
+          </div>
+        )}
+        <Channel>
+          <div className="flex h-full w-full">
+            <div className="flex-1 flex flex-col min-w-0">
+              <Window>
+                <ChannelHeader />
+                <MessageList />
+                <DocumentHubAction />
+                <MessageComposer />
+              </Window>
+            </div>
+            <ParticipantSidebar />
+          </div>
+          <Thread />
+        </Channel>
+      </div>
+    </>
+  );
+};
+
 // --- Main Page ---
 
 export default function TeamChatPage() {
@@ -523,48 +601,15 @@ export default function TeamChatPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-6rem)] bg-background-primary overflow-hidden stream-theme-wrapper relative rounded-xl border border-border-subtle shadow-sm">
+    <div className="flex h-[calc(100vh-10rem)] sm:h-[calc(100vh-6rem)] bg-background-primary overflow-hidden stream-theme-wrapper relative rounded-xl border border-border-subtle shadow-sm">
       <Chat client={chatClient} theme={`str-chat__theme-${theme}`}>
-        <ChatAutoOpener channelToSelect={channelToSelect} onSelected={() => setChannelToSelect(null)} />
-        <div className="w-80 border-r border-border-subtle bg-background-secondary flex-shrink-0 flex flex-col h-full">
-          <div className="p-4 border-b border-border-subtle space-y-2">
-            <button
-              onClick={() => setIsTaskChatModalOpen(true)}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-all shadow-sm"
-            >
-              <Briefcase className="w-4 h-4" /> Create Task Chat
-            </button>
-            <button
-              onClick={() => setIsDirectChatModalOpen(true)}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-accent-blue hover:bg-accent-blue/90 text-white text-xs font-bold rounded-lg transition-all shadow-sm"
-            >
-              <Plus className="w-4 h-4" /> New Direct Message
-            </button>
-          </div>
-          <div className="flex-1 min-h-0">
-            <ChannelList 
-              filters={{ type: 'messaging', members: { $in: [String(userProfile?.id)] } }}
-              sort={{ last_message_at: -1 }}
-              options={{ state: true, watch: true, presence: true }}
-            />
-          </div>
-        </div>
-        <div className="flex-1 min-w-0 bg-background-primary relative">
-          <Channel>
-            <div className="flex h-full w-full">
-              <div className="flex-1 flex flex-col min-w-0">
-                <Window>
-                  <ChannelHeader />
-                  <MessageList />
-                  <DocumentHubAction />
-                  <MessageComposer />
-                </Window>
-              </div>
-              <ParticipantSidebar />
-            </div>
-            <Thread />
-          </Channel>
-        </div>
+        <ChatLayoutInner
+          channelToSelect={channelToSelect}
+          onSelected={() => setChannelToSelect(null)}
+          onOpenTaskChat={() => setIsTaskChatModalOpen(true)}
+          onOpenDirectChat={() => setIsDirectChatModalOpen(true)}
+          userProfile={userProfile}
+        />
       </Chat>
 
       {/* Create Task Chat Modal */}

@@ -11,7 +11,7 @@ import {
   Save, AlertCircle, Check, X, Upload, UserPlus, Trash2, Link2, Globe,
   AlertTriangle, ListChecks, MessageSquare, Shield, Target, ChevronRight,
   CheckCircle2, XCircle, History, ClipboardList, BrainCircuit, BookOpen,
-  Paperclip, FileUp, HelpCircle
+  Paperclip, FileUp, HelpCircle, ChevronLeft
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
@@ -555,7 +555,7 @@ export default function MeetingsPage() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-7xl mx-auto font-sans text-text-primary">
       {/* Left Column: Meeting List */}
-      <div className="space-y-4">
+      <div className={cn("space-y-4", selectedMeeting && "hidden lg:block")}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-background-secondary p-4 rounded-lg border border-border-subtle shadow-sm gap-4">
           <h3 className="text-sm font-bold flex items-center gap-2">
             <Users className="w-4 h-4 text-text-secondary" />
@@ -617,11 +617,21 @@ export default function MeetingsPage() {
       </div>
 
       {/* Right Column: Meeting Detail */}
-      <div className="lg:col-span-2 space-y-6">
+      <div className={cn("lg:col-span-2 space-y-6", !selectedMeeting && "hidden lg:block")}>
         {selectedMeeting ? (
           <>
+            {/* Mobile Back Button */}
+            <div className="lg:hidden">
+              <button
+                onClick={() => setSelectedId('')}
+                className="flex items-center gap-1.5 text-xs font-semibold text-accent-blue hover:underline py-1"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Back to meetings list
+              </button>
+            </div>
             {/* Header */}
-            <div className="bg-background-secondary p-6 rounded-lg border border-border-subtle shadow-md">
+            <div className="bg-background-secondary p-4 sm:p-6 rounded-lg border border-border-subtle shadow-md">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border-subtle/50 pb-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">

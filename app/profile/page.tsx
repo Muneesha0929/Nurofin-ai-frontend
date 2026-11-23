@@ -880,7 +880,7 @@ export default function ProfilePage() {
       <div className="flex flex-col md:flex-row gap-8 items-start">
         
         {/* Left Side: Navigation Tabs List */}
-        <div className="w-full md:w-60 flex-shrink-0 flex flex-col gap-1 bg-background-secondary border border-border-subtle p-2 rounded-lg shadow-sm">
+        <div className="w-full md:w-60 flex-shrink-0 flex flex-row md:flex-col gap-1 bg-background-secondary border border-border-subtle p-1.5 sm:p-2 rounded-lg shadow-sm overflow-x-auto scrollbar-none">
           {navTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -890,7 +890,7 @@ export default function ProfilePage() {
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "flex items-center gap-3 px-3.5 py-2.5 rounded-md text-xs font-bold transition-all text-left w-full",
+                  "flex items-center gap-2 sm:gap-3 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-md text-xs font-bold transition-all text-left whitespace-nowrap flex-shrink-0 md:w-full",
                   isActive 
                     ? "bg-accent-blue/10 text-accent-blue dark:bg-white/[0.05] dark:text-white" 
                     : "text-text-secondary hover:bg-surface-hover hover:text-text-primary dark:text-slate-400 dark:hover:bg-white/[0.03] dark:hover:text-white"

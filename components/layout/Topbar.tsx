@@ -12,6 +12,7 @@ export default function Topbar() {
   const { 
     sidebarCollapsed, 
     toggleSidebar, 
+    toggleMobileSidebar,
     searchQuery, 
     setSearchQuery, 
     notifications, 
@@ -63,27 +64,33 @@ export default function Topbar() {
   return (
     <header 
       className={cn(
-        "h-16 border-b border-border-subtle bg-background-secondary/80 backdrop-blur-md px-6 flex items-center justify-between fixed right-0 top-0 z-30 transition-all duration-300",
-        sidebarCollapsed ? "left-16" : "left-64"
+        "h-16 border-b border-border-subtle bg-background-secondary/80 backdrop-blur-md px-3 sm:px-6 flex items-center justify-between fixed right-0 top-0 z-30 transition-all duration-300",
+        sidebarCollapsed ? "left-0 md:left-16" : "left-0 md:left-64"
       )}
     >
       {/* Left Area: Menu toggle and Page Header Title */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
         <button 
-          onClick={toggleSidebar} 
-          className="text-text-secondary hover:text-text-primary focus:outline-none p-1 hover:bg-surface-hover rounded-md transition-colors"
-          aria-label="Toggle Sidebar"
+          onClick={() => {
+            if (typeof window !== 'undefined' && window.innerWidth < 768) {
+              toggleMobileSidebar();
+            } else {
+              toggleSidebar();
+            }
+          }} 
+          className="text-text-secondary hover:text-text-primary focus:outline-none p-1.5 hover:bg-surface-hover rounded-md transition-colors shrink-0 cursor-pointer"
+          aria-label="Toggle Navigation Menu"
         >
           <Menu className="w-5 h-5" />
         </button>
 
-        <h1 className="font-sans font-bold text-base text-text-primary tracking-wide md:block hidden">
+        <h1 className="font-sans font-bold text-sm sm:text-base text-text-primary tracking-wide truncate max-w-[170px] sm:max-w-xs md:max-w-none">
           {getPageTitle()}
         </h1>
       </div>
 
       {/* Center/Right Search Bar */}
-      <div className="flex-1 max-w-md mx-6 md:block hidden">
+      <div className="flex-1 max-w-md mx-4 md:mx-6 md:block hidden">
         <div className="relative flex items-center">
           <Search className="absolute left-3 w-4 h-4 text-text-muted pointer-events-none" />
           <input
@@ -97,7 +104,7 @@ export default function Topbar() {
       </div>
 
       {/* Right Area: System Status, Clock, Theme, Bell */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-1.5 sm:gap-4">
         {/* AI Assistant Ready dot */}
         <div className="items-center gap-2 md:flex hidden bg-background-primary px-3 py-1.5 rounded-full border border-border-subtle text-2xs font-medium">
           <span 
@@ -119,7 +126,7 @@ export default function Topbar() {
         {/* Light / Dark Mode Toggle */}
         <button
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded-md transition-colors"
+          className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded-md transition-colors cursor-pointer"
           aria-label="Toggle Appearance Theme"
         >
           {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -129,7 +136,7 @@ export default function Topbar() {
         <div className="relative">
           <button
             onClick={() => setShadeOpen(!shadeOpen)}
-            className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded-md transition-colors relative"
+            className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded-md transition-colors relative cursor-pointer"
             aria-label="Toggle Notification center"
             title="Open Notifications"
           >

@@ -1559,8 +1559,8 @@ function RecursiveWorkcenterSubtaskList({ subtasks, onSelectTask, onStatusChange
                 e.stopPropagation();
                 onSelectTask(st);
               }}
-              className="p-2 bg-background-secondary/50 border border-border-subtle/40 rounded-lg hover:bg-surface-hover/30 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px] mb-1.5"
-              style={{ marginLeft: `${(depth - 1) * 20}px` }}
+              className="p-2.5 sm:p-2 bg-background-secondary/50 border border-border-subtle/40 rounded-lg hover:bg-surface-hover/30 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px] mb-1.5"
+              style={{ paddingLeft: `${Math.min(24, Math.max(8, (depth - 1) * 10 + 8))}px` }}
             >
               {/* Desktop columns layout */}
               <div className="hidden lg:flex items-center w-full gap-2 2xl:gap-4 min-w-[860px] 2xl:min-w-[990px]">
@@ -1693,12 +1693,12 @@ function RecursiveWorkcenterSubtaskList({ subtasks, onSelectTask, onStatusChange
               <div className="flex flex-col lg:hidden w-full gap-2.5">
                 <div className="flex items-center gap-2">
                   <div className={cn("w-3.5 h-3.5 rounded border flex items-center justify-center text-[9px] font-bold flex-shrink-0", isCompleted ? "bg-accent-green border-accent-green text-white" : "border-text-muted/40 text-transparent")}>✓</div>
-                  <span title={st.title} className={cn("font-medium line-clamp-2 break-words", isCompleted && "line-through text-text-muted")}>{st.title}</span>
+                  <span title={st.title} className={cn("font-medium line-clamp-2 break-words text-text-primary", isCompleted && "line-through text-text-muted")}>{st.title}</span>
                 </div>
 
-                {st.description && <div className="text-[10px] text-text-muted/80 italic pl-6">{st.description}</div>}
+                {st.description && <div className="text-[10px] text-text-muted/80 italic pl-5">{st.description}</div>}
 
-                <div className="flex flex-wrap items-center gap-3 text-[10px] text-text-muted pl-6">
+                <div className="flex flex-wrap items-center gap-2.5 text-[10px] text-text-muted pl-5">
                   {st.start_date && <span>Start: {st.start_date}</span>}
                   {st.deadline && <span>End: {st.deadline}</span>}
                   {st.deadline && !isCompleted && (
@@ -1715,19 +1715,58 @@ function RecursiveWorkcenterSubtaskList({ subtasks, onSelectTask, onStatusChange
                       return null;
                     })()
                   )}
-                  {st.assigned_to_name && <span className="font-bold">Assigned to: {st.assigned_to_name}</span>}
+                  {st.assigned_to_name && <span className="font-bold text-text-secondary">Assigned: {st.assigned_to_name}</span>}
                 </div>
 
-                <div className="flex items-center justify-between gap-2 pl-6 pt-1 border-t border-border-subtle/30" onClick={e => e.stopPropagation()}>
-                  {(st as any).transfer_date && (st as any).transfer_to_name ? (
-                    <span className="text-[9px] text-text-muted">Transferred: {(st as any).transfer_date} to {(st as any).transfer_to_name}</span>
-                  ) : (
-                    <div />
-                  )}
+                {/* Mobile Subtask Actions and Status */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pl-5 pt-2 border-t border-border-subtle/30" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        if (onFollowUpTask) onFollowUpTask(st);
+                        else onSelectTask(st);
+                      }} 
+                      className="px-2 py-0.5 bg-accent-blue/15 hover:bg-accent-blue text-accent-blue hover:text-white border border-accent-blue/40 text-[9px] font-bold rounded transition-all flex items-center gap-1 select-none shadow-xs cursor-pointer" 
+                      title="Open Updates & Follow-up thread"
+                    >
+                      <MessageSquare className="w-3 h-3" />
+                      <span>Follow-up</span>
+                    </button>
+                    {onAddSubtask && (
+                      <button 
+                        onClick={() => onAddSubtask(st)} 
+                        className="px-2 py-0.5 rounded bg-background-primary hover:bg-surface-hover text-text-muted hover:text-accent-blue transition-colors flex items-center gap-0.5 text-[9px] font-semibold border border-border-subtle cursor-pointer" 
+                        title="Add Sub-subtask"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Subtask</span>
+                      </button>
+                    )}
+                    {onEditTask && (
+                      <button 
+                        onClick={() => onEditTask(st as any)} 
+                        className="p-1 rounded bg-background-primary hover:bg-surface-hover text-text-muted hover:text-accent-blue transition-colors border border-border-subtle cursor-pointer" 
+                        title="Edit Subtask"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                      </button>
+                    )}
+                    {onDeleteTask && (
+                      <button 
+                        onClick={() => onDeleteTask(st.id)} 
+                        className="p-1 rounded bg-background-primary hover:bg-surface-hover text-text-muted hover:text-accent-red transition-colors border border-border-subtle cursor-pointer" 
+                        title="Delete Subtask"
+                      >
+                        <Trash className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
                   <select
                     value={st.status === 'done' ? 'completed' : st.status}
                     onChange={e => onStatusChange(st.id, e.target.value)}
-                    className="bg-background-primary border border-border-subtle text-[9px] rounded p-0.5 text-text-secondary outline-none cursor-pointer font-bold"
+                    className="bg-background-primary border border-border-subtle text-[9px] rounded p-1 text-text-secondary outline-none cursor-pointer font-bold"
                   >
                     {STATUS_OPTIONS.map(o => (
                       <option key={o.value} value={o.value}>{o.label}</option>
@@ -2142,18 +2181,32 @@ function GroupedTaskFeed({
                         )}
 
                         {/* Actions Block (Mobile) */}
-                        <div className="flex items-center justify-between gap-2.5 pt-2 border-t border-border-subtle/30" onClick={e => e.stopPropagation()}>
-                          <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border-subtle/30" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onFollowUpTask) onFollowUpTask(task);
+                                else onSelectTask(task);
+                              }}
+                              className="px-2 py-1 bg-accent-blue/15 hover:bg-accent-blue text-accent-blue hover:text-white border border-accent-blue/40 text-[9px] font-bold rounded transition-all flex items-center gap-1 select-none shadow-xs cursor-pointer"
+                              title="Open Updates & Follow-up thread"
+                            >
+                              <MessageSquare className="w-3 h-3" />
+                              <span>Follow-up</span>
+                            </button>
+
                             {hasSubtasks && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   toggleExpandTask(task.id, e);
                                 }}
-                                className="px-2.5 py-1 bg-background-secondary hover:bg-surface-hover border border-border-subtle/50 text-[9px] font-bold rounded text-text-secondary hover:text-text-primary transition-all flex items-center gap-1 select-none"
+                                className="px-2 py-1 bg-background-secondary hover:bg-surface-hover border border-border-subtle/50 text-[9px] font-bold rounded text-text-secondary hover:text-text-primary transition-all flex items-center gap-1 select-none cursor-pointer"
                               >
                                 <ChevronDown className={cn("w-3 h-3 text-text-muted transition-transform duration-200", isTaskExpanded ? "rotate-0" : "-rotate-90")} />
-                                {isTaskExpanded ? 'Hide' : 'View sub task'}
+                                {isTaskExpanded ? 'Hide' : 'Subtasks'}
                               </button>
                             )}
 
@@ -2162,13 +2215,13 @@ function GroupedTaskFeed({
                                 e.stopPropagation();
                                 if (onAddSubtask) onAddSubtask(task);
                               }}
-                              className="px-2.5 py-1 bg-background-secondary hover:bg-surface-hover border border-border-subtle/50 text-[9px] font-bold rounded text-text-secondary hover:text-text-primary transition-all flex items-center gap-1 select-none"
+                              className="px-2 py-1 bg-background-secondary hover:bg-surface-hover border border-border-subtle/50 text-[9px] font-bold rounded text-text-secondary hover:text-text-primary transition-all flex items-center gap-1 select-none cursor-pointer"
                             >
                               <Plus className="w-3.5 h-3.5 text-text-muted" /> Subtask
                             </button>
                           </div>
 
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
                             <select
                               value={task.status}
                               onChange={e => onStatusChange(task.id, e.target.value)}
@@ -2179,11 +2232,11 @@ function GroupedTaskFeed({
                               ))}
                             </select>
 
-                            <div className="flex items-center gap-1 border-l border-border-subtle/40 pl-2">
+                            <div className="flex items-center gap-1 border-l border-border-subtle/40 pl-1.5">
                               {onEditTask && (
                                 <button 
                                   onClick={() => onEditTask(task)} 
-                                  className="p-1.5 rounded-lg hover:bg-background-secondary text-text-muted hover:text-accent-blue transition-colors" 
+                                  className="p-1 rounded bg-background-secondary hover:bg-surface-hover text-text-muted hover:text-accent-blue transition-colors cursor-pointer" 
                                   title="Edit"
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
@@ -2192,7 +2245,7 @@ function GroupedTaskFeed({
                               {onViewHistory && (
                                 <button 
                                   onClick={() => onViewHistory(task)} 
-                                  className="p-1.5 rounded-lg hover:bg-background-secondary text-text-muted hover:text-accent-green transition-colors" 
+                                  className="p-1 rounded bg-background-secondary hover:bg-surface-hover text-text-muted hover:text-accent-green transition-colors cursor-pointer" 
                                   title="History"
                                 >
                                   <History className="w-3.5 h-3.5" />
@@ -2201,7 +2254,7 @@ function GroupedTaskFeed({
                               {onDeleteTask && (
                                 <button 
                                   onClick={() => onDeleteTask(task.id)} 
-                                  className="p-1.5 rounded-lg hover:bg-background-secondary text-text-muted hover:text-accent-red transition-colors" 
+                                  className="p-1 rounded bg-background-secondary hover:bg-surface-hover text-text-muted hover:text-accent-red transition-colors cursor-pointer" 
                                   title="Delete"
                                 >
                                   <Trash className="w-3.5 h-3.5" />
@@ -2212,11 +2265,9 @@ function GroupedTaskFeed({
                         </div>
                       </div>
 
-
-
                       {/* Expandable subtasks list */}
                       {hasSubtasks && isTaskExpanded && (
-                        <div className="pl-6 pt-3 border-t border-border-subtle/30 space-y-2">
+                        <div className="pl-2 sm:pl-6 pt-2 sm:pt-3 border-t border-border-subtle/30 space-y-2">
                           <div className="text-[9px] font-bold uppercase tracking-wider text-text-muted select-none">Subtasks</div>
                           
                           {/* Subtasks Headers Row (hidden on mobile) */}

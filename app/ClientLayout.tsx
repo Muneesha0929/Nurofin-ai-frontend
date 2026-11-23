@@ -293,14 +293,14 @@ export default function ClientLayout({
         <div 
           className={cn(
             "flex-1 flex flex-col min-h-screen transition-all duration-300 relative z-10 min-w-0",
-            sidebarCollapsed ? "pl-16" : "pl-64"
+            sidebarCollapsed ? "pl-0 md:pl-16" : "pl-0 md:pl-64"
           )}
         >
           {/* Top Navigation */}
           <Topbar />
 
           {/* Core Content Area */}
-          <main className="flex-1 pt-[5.5rem] p-6 pb-28 overflow-y-auto overflow-x-auto scrollbar-thin min-h-screen min-w-0">
+          <main className="flex-1 pt-[4.5rem] sm:pt-[5.5rem] p-3 sm:p-5 md:p-6 pb-36 overflow-y-auto overflow-x-auto scrollbar-thin min-h-screen min-w-0">
             {children}
           </main>
           {/* Global Task Adding Option (Docked at Bottom of Every Page) */}

@@ -486,7 +486,7 @@ export default function AdminPanelPage() {
   const totalRolesCount = departments.reduce((acc, d) => acc + d.roles.length, 0);
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto font-sans text-text-primary px-4 md:px-8 py-6 pb-20">
+    <div className="space-y-6 max-w-7xl mx-auto font-sans text-text-primary px-3 sm:px-4 md:px-8 py-4 sm:py-6 pb-36">
       {/* Custom CSS overrides for compact, modern layout */}
       <style>{`
         .toggle-switch-slider {
@@ -582,8 +582,8 @@ export default function AdminPanelPage() {
         </div>
       ) : (
         <Tabs defaultValue="users" className="w-full space-y-5">
-          <div className="flex justify-start">
-            <TabsList className="bg-slate-100 dark:bg-[#11121d]/85 p-1 rounded-xl border border-slate-200/50 dark:border-white/[0.02] flex gap-1 shadow-inner">
+          <div className="flex justify-start max-w-full overflow-hidden">
+            <TabsList className="bg-slate-100 dark:bg-[#11121d]/85 p-1 rounded-xl border border-slate-200/50 dark:border-white/[0.02] flex gap-1 shadow-inner overflow-x-auto max-w-full scrollbar-none">
               <TabsTrigger 
                 value="users" 
                 className="px-5 py-2 text-3xs font-extrabold tracking-wider uppercase rounded-lg text-text-secondary data-[state=active]:bg-white dark:data-[state=active]:bg-[#181928] data-[state=active]:text-blue-500 dark:data-[state=active]:text-white data-[state=active]:shadow-sm transition-all duration-200 flex items-center gap-1.5"

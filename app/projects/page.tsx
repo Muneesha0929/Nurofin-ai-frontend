@@ -761,7 +761,7 @@ export default function ProjectsPage() {
             </div>
 
             {/* Tabs Selector */}
-            <div className="flex border-b border-border-subtle text-xs font-bold text-text-secondary uppercase tracking-wider select-none bg-surface-card px-4 py-1.5 rounded-xl border">
+            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none border-b border-border-subtle text-xs font-bold text-text-secondary uppercase tracking-wider select-none bg-surface-card px-3 sm:px-4 py-1.5 rounded-xl border whitespace-nowrap">
               {([
                 { key: 'overview', label: 'Overview' },
                 { key: 'tasks', label: 'Tasks' },
@@ -1815,7 +1815,7 @@ function RecursiveSubtaskList({ subtasks, onSelectTask, onStatusChange, onEditTa
                 onSelectTask(st);
               }}
               className="p-2 bg-background-secondary/50 border border-border-subtle/40 rounded-lg hover:bg-surface-hover/30 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px] mb-1.5"
-              style={{ marginLeft: `${(depth - 1) * 20}px` }}
+              style={{ paddingLeft: `${Math.min(24, Math.max(8, (depth - 1) * 8 + 8))}px` }}
             >
               {/* Desktop columns layout */}
               <div className="hidden lg:flex items-center w-full gap-4 min-w-[990px]">
@@ -1949,6 +1949,41 @@ function RecursiveSubtaskList({ subtasks, onSelectTask, onStatusChange, onEditTa
                     })()
                   )}
                   {st.assigned_to_name && <span className="font-bold">Assigned to: {st.assigned_to_name}</span>}
+                </div>
+
+                {/* Mobile action controls */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-border-subtle/30" onClick={e => e.stopPropagation()}>
+                  <select
+                    value={st.status === 'done' ? 'completed' : st.status}
+                    onChange={e => onStatusChange(st.id, e.target.value)}
+                    className="bg-background-primary border border-border-subtle text-[9px] rounded p-1 text-text-secondary outline-none cursor-pointer font-bold"
+                  >
+                    <option value="todo">To Do</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="completed">Completed</option>
+                    <option value="blocked">Blocked</option>
+                  </select>
+
+                  <div className="flex items-center gap-1">
+                    {onEditTask && (
+                      <button 
+                        onClick={() => onEditTask(st as any)} 
+                        className="p-1 rounded hover:bg-background-primary text-text-muted hover:text-accent-blue transition-colors" 
+                        title="Edit Subtask"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {onDeleteTask && (
+                      <button 
+                        onClick={() => onDeleteTask(st.id)} 
+                        className="p-1 rounded hover:bg-background-primary text-text-muted hover:text-accent-red transition-colors" 
+                        title="Delete Subtask"
+                      >
+                        <Trash className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

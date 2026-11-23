@@ -100,11 +100,11 @@ export default function GlobalQuickAddBar() {
     <>
       <div 
         className={cn(
-          "fixed bottom-4 z-40 transition-all duration-300 pointer-events-none flex justify-center px-4",
-          sidebarCollapsed ? "left-16 right-0" : "left-64 right-0"
+          "fixed bottom-3 sm:bottom-4 z-40 transition-all duration-300 pointer-events-none flex justify-center px-2 sm:px-4",
+          sidebarCollapsed ? "left-0 md:left-16 right-0" : "left-0 md:left-64 right-0"
         )}
       >
-        <div className="pointer-events-auto w-full max-w-3xl pr-14 sm:pr-16">
+        <div className="pointer-events-auto w-full max-w-3xl pr-12 sm:pr-16">
           <QuickAddTaskInput
             isDocked
             dropUp

@@ -96,6 +96,7 @@ export default function PlannerPage() {
   const [newEventParticipants, setNewEventParticipants] = useState<number[]>([]);
   const [newEventProjectId, setNewEventProjectId] = useState<string>('none');
   const [newEventTaskId, setNewEventTaskId] = useState<string>('none');
+  const [mobileTeamListOpen, setMobileTeamListOpen] = useState(false);
   
   // Task Form State
   const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -1261,8 +1262,77 @@ export default function PlannerPage() {
   return (
     <>
       <div className="flex flex-col lg:flex-row gap-6 max-w-7xl mx-auto font-sans text-text-primary">
-      {/* Teammate Sidebar */}
-      <div className="w-full lg:w-72 shrink-0 bg-surface-card border border-border-subtle rounded-xl shadow-sm flex flex-col overflow-hidden">
+        {/* Mobile Teammate Selector Pill / Bar */}
+        <div className="block lg:hidden bg-surface-card border border-border-subtle rounded-xl p-3 shadow-xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-full bg-accent-blue/20 flex items-center justify-center text-xs font-bold text-accent-blue flex-shrink-0 overflow-hidden">
+                {selectedUserInfo?.profile_picture ? (
+                  <img src={selectedUserInfo.profile_picture} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span>{selectedUserInfo?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}</span>
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-text-primary truncate">{selectedUserInfo?.full_name || 'Team'}</p>
+                <p className="text-[10px] text-text-muted capitalize">{isOwnSchedule ? 'Your Schedule' : selectedUserInfo?.role || 'Member'}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMobileTeamListOpen(!mobileTeamListOpen)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-background-secondary hover:bg-surface-hover border border-border-subtle rounded-lg text-xs font-bold text-text-secondary cursor-pointer shrink-0"
+            >
+              <Users className="w-3.5 h-3.5 text-accent-blue" />
+              <span>{mobileTeamListOpen ? 'Close' : 'Switch Team'}</span>
+              <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", mobileTeamListOpen && "rotate-180")} />
+            </button>
+          </div>
+
+          {/* Expandable Teammates list on mobile */}
+          {mobileTeamListOpen && (
+            <div className="mt-3 pt-3 border-t border-border-subtle/60 space-y-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+                <input
+                  type="text"
+                  placeholder="Search teammates..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full h-8 bg-background-primary border border-border-subtle rounded-lg pl-8 pr-3 text-xs text-text-primary outline-none"
+                />
+              </div>
+              <div className="max-h-60 overflow-y-auto space-y-1 p-1">
+                {filteredTeammates.map(user => (
+                  <button
+                    key={user.id}
+                    onClick={() => {
+                      setSelectedUserId(user.id);
+                      setMobileTeamListOpen(false);
+                    }}
+                    className={cn(
+                      "w-full p-2 flex items-center gap-2.5 rounded-lg text-left text-xs transition-colors",
+                      selectedUserId === user.id ? "bg-accent-blue/15 text-accent-blue font-bold" : "hover:bg-surface-hover text-text-primary"
+                    )}
+                  >
+                    <div className="w-6 h-6 rounded-full bg-accent-blue/20 flex items-center justify-center text-[10px] font-bold shrink-0 overflow-hidden">
+                      {user.profile_picture ? (
+                        <img src={user.profile_picture} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        user.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+                      )}
+                    </div>
+                    <span className="truncate flex-1">{user.full_name}</span>
+                    {user.id === currentUserId && <span className="text-[9px] bg-accent-blue/10 text-accent-blue px-1.5 py-0.5 rounded">You</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Teammate Sidebar (Desktop) */}
+        <div className="hidden lg:flex w-72 shrink-0 bg-surface-card border border-border-subtle rounded-xl shadow-sm flex-col overflow-hidden">
         <div className="p-5 border-b border-border-subtle bg-background-secondary/50">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold flex items-center gap-2">
@@ -1934,58 +2004,59 @@ export default function PlannerPage() {
         {/* Views */}
         <div className="flex flex-col relative z-0">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <TabsList className="bg-surface-card p-1 rounded-lg shadow-sm border border-border-subtle self-start">
-                <TabsTrigger value="day" className="rounded-md px-4 py-1.5 data-[state=active]:bg-background-primary data-[state=active]:shadow-sm transition-all text-xs font-bold">Daily</TabsTrigger>
-                <TabsTrigger value="week" className="rounded-md px-4 py-1.5 data-[state=active]:bg-background-primary data-[state=active]:shadow-sm transition-all text-xs font-bold">Weekly</TabsTrigger>
-                <TabsTrigger value="month" className="rounded-md px-4 py-1.5 data-[state=active]:bg-background-primary data-[state=active]:shadow-sm transition-all text-xs font-bold">Monthly</TabsTrigger>
-                <TabsTrigger value="tasks" className="rounded-md px-4 py-1.5 data-[state=active]:bg-background-primary data-[state=active]:shadow-sm transition-all text-xs font-bold flex items-center gap-1.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <TabsList className="bg-surface-card p-1 rounded-lg shadow-sm border border-border-subtle flex flex-nowrap overflow-x-auto scrollbar-none w-full sm:w-auto">
+                <TabsTrigger value="day" className="rounded-md px-3 sm:px-4 py-1.5 data-[state=active]:bg-background-primary data-[state=active]:shadow-sm transition-all text-xs font-bold shrink-0">Daily</TabsTrigger>
+                <TabsTrigger value="week" className="rounded-md px-3 sm:px-4 py-1.5 data-[state=active]:bg-background-primary data-[state=active]:shadow-sm transition-all text-xs font-bold shrink-0">Weekly</TabsTrigger>
+                <TabsTrigger value="month" className="rounded-md px-3 sm:px-4 py-1.5 data-[state=active]:bg-background-primary data-[state=active]:shadow-sm transition-all text-xs font-bold shrink-0">Monthly</TabsTrigger>
+                <TabsTrigger value="tasks" className="rounded-md px-3 sm:px-4 py-1.5 data-[state=active]:bg-background-primary data-[state=active]:shadow-sm transition-all text-xs font-bold flex items-center gap-1.5 shrink-0">
                   Tasks <span className="bg-accent-purple/20 text-accent-purple text-[9px] px-1.5 py-0.5 rounded-full leading-none">{tasks.length}</span>
                 </TabsTrigger>
               </TabsList>
               
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 {activeTab === 'week' && (
-                  <div className="flex items-center bg-background-secondary rounded-lg border border-border-subtle p-1 shadow-sm">
-                    <button onClick={() => navigateWeek(-1)} className="p-1.5 hover:bg-surface-hover rounded-md transition-colors">
+                  <div className="flex items-center justify-between sm:justify-start bg-background-secondary rounded-lg border border-border-subtle p-1 shadow-sm w-full sm:w-auto">
+                    <button onClick={() => navigateWeek(-1)} className="p-1.5 hover:bg-surface-hover rounded-md transition-colors cursor-pointer shrink-0">
                       <ChevronLeft className="w-4 h-4 text-text-primary" />
                     </button>
-                    <span className="text-xs font-bold text-text-primary min-w-[190px] text-center tracking-wide">
+                    <span className="text-xs font-bold text-text-primary min-w-[150px] sm:min-w-[190px] text-center tracking-wide flex-1 sm:flex-initial">
                       {new Date(getWeekStart(selectedDate)).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})} - {new Date(getWeekEnd(selectedDate)).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'})}
                     </span>
-                    <button onClick={() => navigateWeek(1)} className="p-1.5 hover:bg-surface-hover rounded-md transition-colors">
+                    <button onClick={() => navigateWeek(1)} className="p-1.5 hover:bg-surface-hover rounded-md transition-colors cursor-pointer shrink-0">
                       <ChevronRight className="w-4 h-4 text-text-primary" />
                     </button>
                   </div>
                 )}
                 {activeTab === 'month' && (
-                  <div className="flex items-center bg-background-secondary rounded-lg border border-border-subtle p-1 shadow-sm">
-                    <button onClick={() => navigateMonth(-1)} className="p-1.5 hover:bg-surface-hover rounded-md transition-colors">
+                  <div className="flex items-center justify-between sm:justify-start bg-background-secondary rounded-lg border border-border-subtle p-1 shadow-sm w-full sm:w-auto">
+                    <button onClick={() => navigateMonth(-1)} className="p-1.5 hover:bg-surface-hover rounded-md transition-colors cursor-pointer shrink-0">
                       <ChevronLeft className="w-4 h-4 text-text-primary" />
                     </button>
-                    <span className="text-xs font-bold text-text-primary min-w-[150px] text-center tracking-wide">
+                    <span className="text-xs font-bold text-text-primary min-w-[120px] sm:min-w-[150px] text-center tracking-wide flex-1 sm:flex-initial">
                       {currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
                     </span>
-                    <button onClick={() => navigateMonth(1)} className="p-1.5 hover:bg-surface-hover rounded-md transition-colors">
+                    <button onClick={() => navigateMonth(1)} className="p-1.5 hover:bg-surface-hover rounded-md transition-colors cursor-pointer shrink-0">
                       <ChevronRight className="w-4 h-4 text-text-primary" />
                     </button>
                   </div>
                 )}
                 {activeTab === 'day' && (
-                  <div className="flex items-center gap-2 bg-background-secondary px-2 py-1 rounded-lg border border-border-subtle shadow-sm">
+                  <div className="flex items-center justify-between sm:justify-start gap-1.5 sm:gap-2 bg-background-secondary px-2 py-1 rounded-lg border border-border-subtle shadow-sm w-full sm:w-auto">
                     <button 
                       onClick={() => {
                         const newDate = new Date(selectedDate);
                         newDate.setDate(newDate.getDate() - 1);
                         setSelectedDate(newDate);
                       }}
-                      className="p-1 hover:bg-surface-hover rounded-md transition-colors"
+                      className="p-1 hover:bg-surface-hover rounded-md transition-colors cursor-pointer shrink-0"
                     >
                       <ChevronLeft className="w-4 h-4 text-text-primary" />
                     </button>
-                    <span className="text-sm font-extrabold text-text-primary tracking-wide px-2">
-                      {selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
-                      {formatDateStr(selectedDate) === todayStr && <span className="ml-2 text-[10px] bg-accent-blue/10 text-accent-blue px-1.5 py-0.5 rounded uppercase">Today</span>}
+                    <span className="text-xs sm:text-sm font-extrabold text-text-primary tracking-wide px-1 truncate text-center flex-1">
+                      <span className="sm:hidden">{selectedDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                      <span className="hidden sm:inline">{selectedDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+                      {formatDateStr(selectedDate) === todayStr && <span className="ml-1.5 text-[9px] sm:text-[10px] bg-accent-blue/10 text-accent-blue px-1.5 py-0.5 rounded uppercase font-bold">Today</span>}
                     </span>
                     <button 
                       onClick={() => {
@@ -1993,7 +2064,7 @@ export default function PlannerPage() {
                         newDate.setDate(newDate.getDate() + 1);
                         setSelectedDate(newDate);
                       }}
-                      className="p-1 hover:bg-surface-hover rounded-md transition-colors"
+                      className="p-1 hover:bg-surface-hover rounded-md transition-colors cursor-pointer shrink-0"
                     >
                       <ChevronRight className="w-4 h-4 text-text-primary" />
                     </button>
@@ -2004,7 +2075,7 @@ export default function PlannerPage() {
 
             {/* Daily View */}
             <TabsContent value="day" className="mt-0">
-              <div className="bg-surface-card border border-border-subtle rounded-xl p-6 shadow-md space-y-6">
+              <div className="bg-surface-card border border-border-subtle rounded-xl p-3 sm:p-6 shadow-md space-y-4 sm:space-y-6">
                 <h3 className="text-sm font-bold border-b border-border-subtle pb-4 flex items-center justify-between gap-2">
                   <span className="flex items-center gap-2">
                     <CalendarIcon className="w-4 h-4 text-accent-blue" /> Daily Timeline
@@ -2322,11 +2393,11 @@ export default function PlannerPage() {
                                 onDragLeave={() => { if (dragOverHour === hourNum) setDragOverHour(null); }}
                                 onDrop={(e) => handleDropOnHour(hourNum as number, e)}
                                 className={cn(
-                                  "flex gap-5 items-start text-xs border-b border-border-subtle/40 pb-4 last:border-0 last:pb-0 p-2 rounded-xl transition-all",
+                                  "flex gap-2 sm:gap-5 items-start text-xs border-b border-border-subtle/40 pb-3 sm:pb-4 last:border-0 last:pb-0 p-1.5 sm:p-2 rounded-xl transition-all",
                                   dragOverHour === hourNum && "bg-accent-blue/10 ring-2 ring-accent-blue/40 ring-dashed"
                                 )}
                               >
-                                <span className="font-mono text-text-secondary font-bold text-sm w-16 pt-2">{formatAmPm(hourNum as number)}</span>
+                                <span className="font-mono text-text-secondary font-bold text-xs sm:text-sm w-14 sm:w-16 pt-1.5 sm:pt-2 shrink-0">{formatAmPm(hourNum as number)}</span>
                                 {hourEvents.length > 0 ? (
                                   <div className="flex-1 space-y-3">
                                     {hourEvents.map((evt, idx) => renderEventCard(evt, idx))}
@@ -2526,58 +2597,60 @@ export default function PlannerPage() {
                 <h3 className="text-sm font-bold border-b border-border-subtle pb-4 flex items-center gap-2">
                   <CalendarIcon className="w-4 h-4 text-accent-blue" /> Monthly Overview
                 </h3>
-                <div>
-                  <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-[10px] sm:text-xs font-extrabold uppercase tracking-widest text-text-secondary border-b border-border-subtle pb-4 mb-4">
-                    <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
-                  </div>
-                  <div className="grid grid-cols-7 gap-1 sm:gap-2">
-                  {getDaysInMonth(currentMonth).map((day, idx) => {
-                    const dateStr = formatDateStr(day);
-                    const isCurrentMonth = day.getMonth() === currentMonth.getMonth();
-                    const isToday = dateStr === todayStr;
-                    const dayEvents = getEventsForDate(dateStr);
+                <div className="overflow-x-auto -mx-2 sm:mx-0 px-1 sm:px-0 scrollbar-thin">
+                  <div className="min-w-[580px] sm:min-w-0">
+                    <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-[10px] sm:text-xs font-extrabold uppercase tracking-widest text-text-secondary border-b border-border-subtle pb-4 mb-4">
+                      <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1 sm:gap-2">
+                    {getDaysInMonth(currentMonth).map((day, idx) => {
+                      const dateStr = formatDateStr(day);
+                      const isCurrentMonth = day.getMonth() === currentMonth.getMonth();
+                      const isToday = dateStr === todayStr;
+                      const dayEvents = getEventsForDate(dateStr);
 
-                    return (
-                      <div
-                        key={idx}
-                        className={cn(
-                          "min-h-[100px] p-2 border rounded-xl flex flex-col gap-1 text-left transition-all overflow-hidden",
-                          isToday ? "border-accent-blue/50 bg-accent-blue/5 ring-1 ring-accent-blue/20 shadow-sm" : "border-border-subtle/50",
-                          isCurrentMonth ? "bg-background-primary hover:bg-surface-hover/50 hover:shadow-md cursor-pointer" : "bg-background-secondary/30 opacity-40"
-                        )}
-                      >
-                        <div className="flex justify-between items-start mb-1">
-                          <span className={cn(
-                            "text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full shadow-sm",
-                            isToday ? "bg-accent-blue text-white" : "text-text-secondary bg-background-secondary"
-                          )}>
-                            {day.getDate()}
-                          </span>
-                        </div>
-                        <div className="space-y-1">
-                          {dayEvents.slice(0, 3).map((e, i) => (
-                            <div key={i} className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded truncate leading-tight shadow-sm flex items-center gap-1",
-                              e.source === 'google_calendar'
-                                ? 'bg-[#4285F4]/10 text-[#4285F4] border border-[#4285F4]/20'
-                                : e.type === 'meeting' ? 'bg-accent-blue/10 text-accent-blue border border-accent-blue/20'
-                                : e.type === 'event' ? 'bg-accent-green/10 text-accent-green border border-accent-green/20'
-                                : 'bg-accent-orange/10 text-accent-orange border border-accent-orange/20'
-                            )}>
-                              {e.source === 'google_calendar' ? <Globe className="w-2.5 h-2.5 flex-shrink-0" /> : null}
-                              <span className="truncate">
-                                {e.source === 'google_calendar'
-                                  ? (e.start ? new Date(e.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' : '') + e.title
-                                  : (e.start_time || '') + ' ' + e.title}
-                              </span>
-                            </div>
-                          ))}
-                          {dayEvents.length > 3 && (
-                            <span className="text-[9px] font-bold text-text-muted text-center block mt-1 hover:text-text-primary transition-colors bg-surface-hover rounded py-0.5">+{dayEvents.length - 3} more</span>
+                      return (
+                        <div
+                          key={idx}
+                          className={cn(
+                            "min-h-[100px] p-2 border rounded-xl flex flex-col gap-1 text-left transition-all overflow-hidden",
+                            isToday ? "border-accent-blue/50 bg-accent-blue/5 ring-1 ring-accent-blue/20 shadow-sm" : "border-border-subtle/50",
+                            isCurrentMonth ? "bg-background-primary hover:bg-surface-hover/50 hover:shadow-md cursor-pointer" : "bg-background-secondary/30 opacity-40"
                           )}
+                        >
+                          <div className="flex justify-between items-start mb-1">
+                            <span className={cn(
+                              "text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full shadow-sm",
+                              isToday ? "bg-accent-blue text-white" : "text-text-secondary bg-background-secondary"
+                            )}>
+                              {day.getDate()}
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            {dayEvents.slice(0, 3).map((e, i) => (
+                              <div key={i} className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded truncate leading-tight shadow-sm flex items-center gap-1",
+                                e.source === 'google_calendar'
+                                  ? 'bg-[#4285F4]/10 text-[#4285F4] border border-[#4285F4]/20'
+                                  : e.type === 'meeting' ? 'bg-accent-blue/10 text-accent-blue border border-accent-blue/20'
+                                  : e.type === 'event' ? 'bg-accent-green/10 text-accent-green border border-accent-green/20'
+                                  : 'bg-accent-orange/10 text-accent-orange border border-accent-orange/20'
+                              )}>
+                                {e.source === 'google_calendar' ? <Globe className="w-2.5 h-2.5 flex-shrink-0" /> : null}
+                                <span className="truncate">
+                                  {e.source === 'google_calendar'
+                                    ? (e.start ? new Date(e.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' : '') + e.title
+                                    : (e.start_time || '') + ' ' + e.title}
+                                </span>
+                              </div>
+                            ))}
+                            {dayEvents.length > 3 && (
+                              <span className="text-[9px] font-bold text-text-muted text-center block mt-1 hover:text-text-primary transition-colors bg-surface-hover rounded py-0.5">+{dayEvents.length - 3} more</span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                    </div>
                   </div>
                 </div>
               </motion.div>

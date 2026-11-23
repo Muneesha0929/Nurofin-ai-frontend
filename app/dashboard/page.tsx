@@ -169,14 +169,35 @@ export default function DashboardPage() {
   const allFlattenedTasks = useMemo(() => {
     const map = new Map<number, WCTask>();
 
-    const traverseWCTask = (t: any, parentTitle?: string) => {
+    const getProjectName = (projId?: number | null, fallbackName?: string | null) => {
+      if (fallbackName) return fallbackName;
+      if (!projId) return null;
+      const found = projects.find(p => Number(p.id) === Number(projId));
+      return found?.name || null;
+    };
+
+    const getAssigneeName = (uid?: number | null, fallbackName?: string | null) => {
+      if (fallbackName) return fallbackName;
+      if (!uid) return null;
+      const found = teammates.find(u => Number(u.id) === Number(uid));
+      return found?.name || null;
+    };
+
+    const traverseWCTask = (t: any, parentTitle?: string, parentProjId?: number | null, parentProjName?: string | null) => {
       if (!t || !t.id) return;
       const idNum = Number(t.id);
+      const projId = t.project_id || parentProjId || null;
+      const projName = getProjectName(projId, t.project_name || parentProjName);
+      const assName = getAssigneeName(t.assigned_to_id, t.assigned_to_name);
+
       if (!map.has(idNum)) {
         map.set(idNum, {
           ...t,
           id: idNum,
-          parent_title: t.parent_title || parentTitle,
+          project_id: projId,
+          project_name: projName,
+          parent_title: t.parent_title || parentTitle || null,
+          assigned_to_name: assName,
           deadline: t.deadline || t.scheduled_date || null,
           scheduled_date: t.scheduled_date || t.scheduledDate || (t.deadline ? t.deadline.slice(0, 10) : null),
           scheduled_start_time: t.scheduled_start_time || t.scheduledStartTime || t.start_time || null,
@@ -187,13 +208,13 @@ export default function DashboardPage() {
         t.subtasks.forEach((st: any) => {
           traverseWCTask({
             ...st,
-            project_id: st.project_id || t.project_id,
-            project_name: st.project_name || t.project_name,
+            project_id: st.project_id || projId,
+            project_name: st.project_name || projName,
             deadline: st.deadline || t.deadline,
             scheduled_date: st.scheduled_date || t.scheduled_date,
             scheduled_start_time: st.scheduled_start_time || t.scheduled_start_time,
             scheduled_end_time: st.scheduled_end_time || t.scheduled_end_time,
-          }, t.title);
+          }, t.title, projId, projName);
         });
       }
     };
@@ -205,6 +226,11 @@ export default function DashboardPage() {
       plannerTasks.forEach((pt: any) => {
         if (!pt || !pt.id) return;
         const idNum = Number(pt.id);
+        const pId = pt.projectId ? Number(pt.projectId) : (pt.project_id ? Number(pt.project_id) : null);
+        const pName = getProjectName(pId, pt.project_name);
+        const assId = pt.assignedTo?.id ? Number(pt.assignedTo.id) : (pt.assigneeId ? Number(pt.assigneeId) : null);
+        const assName = pt.assignedTo?.name || getAssigneeName(assId, null);
+
         if (!map.has(idNum)) {
           map.set(idNum, {
             id: idNum,
@@ -219,15 +245,15 @@ export default function DashboardPage() {
             start_date: pt.start_date || null,
             estimated_hours: pt.extended_time || null,
             progress: 0,
-            assigned_to_id: pt.assignedTo?.id ? Number(pt.assignedTo.id) : (pt.assigneeId ? Number(pt.assigneeId) : null),
-            assigned_to_name: pt.assignedTo?.name || null,
+            assigned_to_id: assId,
+            assigned_to_name: assName,
             assigned_to_avatar: pt.assignedTo?.avatar || null,
             assigned_by_id: null,
             assigned_by_name: null,
             reviewer_id: null,
             reviewer_name: null,
-            project_id: pt.projectId ? Number(pt.projectId) : null,
-            project_name: null,
+            project_id: pId,
+            project_name: pName,
             parent_id: pt.parentId ? Number(pt.parentId) : null,
             quarter_id: null,
             meeting_id: pt.meetingId ? Number(pt.meetingId) : null,
@@ -236,6 +262,8 @@ export default function DashboardPage() {
           });
         } else {
           const existing = map.get(idNum)!;
+          if (pName && !existing.project_name) existing.project_name = pName;
+          if (assName && !existing.assigned_to_name) existing.assigned_to_name = assName;
           if (pt.scheduledDate && !existing.scheduled_date) existing.scheduled_date = pt.scheduledDate;
           if (pt.dueDate && !existing.deadline) existing.deadline = pt.dueDate;
           const sTime = pt.scheduledStartTime || pt.scheduled_start_time || pt.start_time;
@@ -246,8 +274,22 @@ export default function DashboardPage() {
       });
     }
 
+    // Second pass to resolve parent_title for any subtask that didn't have it
+    map.forEach(item => {
+      if (item.parent_id && !item.parent_title) {
+        const parent = map.get(Number(item.parent_id));
+        if (parent) {
+          item.parent_title = parent.title;
+          if (!item.project_id && parent.project_id) {
+            item.project_id = parent.project_id;
+            item.project_name = parent.project_name;
+          }
+        }
+      }
+    });
+
     return Array.from(map.values());
-  }, [tasks, plannerTasks]);
+  }, [tasks, plannerTasks, projects, teammates]);
 
   const now = today();
   const isTaskDone = (status?: string) => ['completed', 'done', 'resolved', 'closed'].includes(String(status || '').toLowerCase());

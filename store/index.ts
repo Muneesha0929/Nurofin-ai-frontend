@@ -16,6 +16,7 @@ import {
 interface AppState {
   // Navigation & Shell
   sidebarCollapsed: boolean;
+  mobileSidebarOpen: boolean;
   theme: 'dark' | 'light';
   themeColor: 'blue' | 'purple' | 'green' | 'orange' | 'red' | 'custom';
   customColor: string;
@@ -36,6 +37,8 @@ interface AppState {
 
   // Mutators
   toggleSidebar: () => void;
+  toggleMobileSidebar: () => void;
+  setMobileSidebarOpen: (open: boolean) => void;
   setTheme: (theme: 'dark' | 'light') => void;
   setThemeColor: (color: 'blue' | 'purple' | 'green' | 'orange' | 'red' | 'custom') => void;
   setCustomColor: (hex: string) => void;
@@ -84,6 +87,7 @@ interface AppState {
 export const useStore = create<AppState>((set) => ({
   // Navigation & Shell Defaults
   sidebarCollapsed: false,
+  mobileSidebarOpen: false,
   theme: 'light',
   themeColor: 'blue',
   customColor: '#10B981',
@@ -127,6 +131,8 @@ export const useStore = create<AppState>((set) => ({
 
   // Shell State Mutators
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+  toggleMobileSidebar: () => set((state) => ({ mobileSidebarOpen: !state.mobileSidebarOpen })),
+  setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
   setTheme: (theme) => {
     set((state) => {
       const userId = state.userProfile.id;

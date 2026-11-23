@@ -764,11 +764,15 @@ export function MyDayView({
         ) : (
           <div className="space-y-2">
             {activeTasks.map(t => {
-              const hasProject = Boolean(t.project_name);
+              const pName = t.project_name || projects?.find(p => Number(p.id) === Number(t.project_id))?.name;
+              const parentTitle = t.parent_title || allTasks?.find(p => Number(p.id) === Number(t.parent_id))?.title;
+              const hasProject = Boolean(pName);
               const isSubtask = Boolean(t.parent_id);
               const isCompleting = completingTaskIds.has(t.id);
               const isIssue = (t as any).source === 'issue' || (t as any).is_issue || t.title.startsWith('[Issue]');
               const displayTitle = t.title.replace(/^\[Issue\]\s*/i, '');
+              const assigneeName = t.assigned_to_name || teammates?.find(u => Number(u.id) === Number(t.assigned_to_id))?.name;
+              const isAssignedToMe = String(t.assigned_to_id) === String(currentUserId) || (!t.assigned_to_id && !t.assigned_to_name);
 
               return (
                 <div
@@ -823,57 +827,63 @@ export function MyDayView({
                         )}
                       </div>
 
-                      {/* Context Badges: Project, Parent Subtask, Assignee */}
-                      <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[11px] text-text-secondary">
+                      {/* Context Badges: Project, Parent Subtask, Assignee, Timing */}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[11px] text-text-secondary">
+                        {/* Project Badge */}
                         {hasProject && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-accent-blue/10 text-accent-blue font-medium">
-                            <Hash size={10} />
-                            <span className="truncate max-w-[120px]">{t.project_name}</span>
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-accent-blue/15 text-accent-blue font-bold text-xs border border-accent-blue/30 shadow-2xs">
+                            <Hash size={11} className="stroke-[2.5]" />
+                            <span className="truncate max-w-[150px]">{pName}</span>
                           </span>
                         )}
 
+                        {/* Subtask / Parent Hierarchy Badge */}
                         {isSubtask && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400 font-medium">
-                            <CornerDownRight size={10} />
-                            <span>Subtask</span>
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-purple-500/15 text-purple-600 dark:text-purple-400 font-bold text-xs border border-purple-500/30 shadow-2xs">
+                            <CornerDownRight size={11} className="stroke-[2.5]" />
+                            <span>Subtask of: <strong className="font-extrabold">{parentTitle || 'Parent Task'}</strong></span>
                           </span>
                         )}
 
-                        {/* If assigned to someone else */}
-                        {t.assigned_to_name && String(t.assigned_to_id) !== String(currentUserId) && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-background-primary border border-border-subtle font-medium text-text-secondary">
-                            <User size={10} />
-                            <span>@{t.assigned_to_name}</span>
+                        {t.subtasks && t.subtasks.length > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 text-xs font-semibold">
+                            <span>🌳 {t.subtasks.filter((st: any) => isDone(st.status)).length}/{t.subtasks.length} subtasks</span>
                           </span>
                         )}
 
-                        {/* Deadline badge: Today */}
-                        <span className="inline-flex items-center gap-1 text-[10.5px] font-medium text-text-secondary ml-1">
-                          <Calendar size={10} className="text-accent-blue" />
-                          <span>Today</span>
+                        {/* Assignee Badge (Always visible) */}
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 font-semibold text-xs">
+                          <User size={11} className="stroke-[2.5]" />
+                          <span>{isAssignedToMe ? `Assigned: Myself (@${currentUserName || 'me'})` : `Assigned: @${assigneeName || 'Teammate'}`}</span>
                         </span>
 
-                        {/* Interactive Task Timing Badge (e.g. 09:00 - 10:00) */}
+                        {/* Deadline badge */}
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-text-secondary">
+                          <Calendar size={11} className="text-accent-blue" />
+                          <span>{t.scheduled_date && t.scheduled_date !== now ? t.scheduled_date : 'Today'}</span>
+                        </span>
+
+                        {/* Interactive Task Timing Badge (e.g. 10:00 - 11:00) */}
                         <button
                           type="button"
                           onClick={() => {
                             setTimingTask(t);
-                            setTimingStart(t.scheduled_start_time || '09:00');
-                            setTimingEnd(t.scheduled_end_time || '10:00');
+                            setTimingStart(t.scheduled_start_time || '10:00');
+                            setTimingEnd(t.scheduled_end_time || '11:00');
                           }}
                           className={cn(
-                            "inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium text-[10.5px] transition-all cursor-pointer",
+                            "inline-flex items-center gap-1 px-2 py-0.5 rounded-lg font-semibold text-xs transition-all cursor-pointer",
                             t.scheduled_start_time && t.scheduled_end_time
                               ? "bg-accent-blue/15 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/25"
                               : "bg-background-primary border border-border-subtle hover:border-accent-blue/40 text-text-secondary hover:text-text-primary"
                           )}
-                          title="Update task timing (e.g. 9 to 10)"
+                          title="Update task scheduled timing"
                         >
-                          <Clock size={10} className="text-accent-blue" />
+                          <Clock size={11} className="text-accent-blue stroke-[2.5]" />
                           <span>
                             {t.scheduled_start_time && t.scheduled_end_time
                               ? `${t.scheduled_start_time} - ${t.scheduled_end_time}`
-                              : 'Set Time (e.g. 9 to 10)'}
+                              : 'Set Time (e.g. 10 to 11)'}
                           </span>
                         </button>
                       </div>
@@ -975,12 +985,14 @@ export function MyDayView({
               {completedTasks.map(t => {
                 const isIssue = (t as any).source === 'issue' || (t as any).is_issue || t.title.startsWith('[Issue]');
                 const displayTitle = t.title.replace(/^\[Issue\]\s*/i, '');
+                const pName = t.project_name || projects?.find(p => Number(p.id) === Number(t.project_id))?.name;
+                const parentTitle = t.parent_title || allTasks?.find(p => Number(p.id) === Number(t.parent_id))?.title;
                 return (
                   <div
                     key={t.id}
                     className="flex items-center justify-between gap-3 p-2.5 bg-background-secondary/40 border border-border-subtle/60 rounded-xl text-text-secondary"
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <button
                         type="button"
                         onClick={() => handleRestoreTask(t.id)}
@@ -992,13 +1004,25 @@ export function MyDayView({
                       <span className="text-xs line-through text-text-secondary truncate">
                         {displayTitle}
                       </span>
+                      {pName && (
+                        <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded bg-accent-blue/10 text-accent-blue text-[10px] font-semibold">
+                          <Hash size={10} />
+                          <span className="truncate max-w-[100px]">{pName}</span>
+                        </span>
+                      )}
+                      {t.parent_id && (
+                        <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] font-semibold">
+                          <CornerDownRight size={10} />
+                          <span>Subtask of: {parentTitle || 'Parent'}</span>
+                        </span>
+                      )}
                     </div>
                     {isIssue ? (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
                         ✔ Resolved
                       </span>
                     ) : (
-                      <span className="text-[10px] text-text-secondary shrink-0">
+                      <span className="text-[10px] text-text-secondary shrink-0 font-medium">
                         Done
                       </span>
                     )}

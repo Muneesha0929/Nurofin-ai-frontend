@@ -161,7 +161,7 @@ export function PlanMyDayModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs normal-case animate-in fade-in duration-150">
       <div 
-        className="w-full max-w-md bg-background-secondary border border-border-subtle rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+        className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-background-secondary border border-border-subtle rounded-3xl shadow-2xl flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}

@@ -442,55 +442,183 @@ export function QuickAddTaskInput({
     }
   };
 
-  // Replace the typed #/@/~ token with clean text and record selection
-  const removeTriggerTokenFromInput = (prefix: string) => {
-    const cursorPos = inputRef.current?.selectionStart || text.length;
-    const textBefore = text.slice(0, cursorPos);
-    const textAfter = text.slice(cursorPos);
-    const lastTriggerPos = textBefore.lastIndexOf(prefix);
-    if (lastTriggerPos !== -1) {
-      const cleanBefore = textBefore.slice(0, lastTriggerPos);
-      setText((cleanBefore + textAfter).trim());
-    }
-  };
-
+  // Replace or insert the typed #/@/~ token with clean formatted tag and record selection
   const selectProject = (project: Project) => {
     setSelectedProjectId(Number(project.id));
-    removeTriggerTokenFromInput('#');
+    
+    // Replace the # or #query with #${project.name}
+    const cursorPos = inputRef.current?.selectionStart ?? text.length;
+    const textBefore = text.slice(0, cursorPos);
+    const textAfter = text.slice(cursorPos);
+    const lastHashPos = textBefore.lastIndexOf('#');
+    
+    let newText = '';
+    if (lastHashPos !== -1) {
+      const beforeHash = textBefore.slice(0, lastHashPos);
+      newText = `${beforeHash}#${project.name} ${textAfter}`.trimStart();
+    } else {
+      newText = text.trim() ? `${text.trim()} #${project.name} ` : `#${project.name} `;
+    }
+    setText(newText);
     setActiveTrigger(null);
-    inputRef.current?.focus();
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
   };
 
-  const selectSubtask = (item: { id: number; title: string; projectId?: number | null }) => {
+  const clearSelectedProject = () => {
+    if (selectedProject) {
+      const escaped = selectedProject.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`#${escaped}\\s*`, 'gi');
+      setText(prev => prev.replace(regex, '').trim());
+    }
+    setSelectedProjectId(null);
+    setSelectedParentTaskId(null);
+  };
+
+  const selectSubtask = (item: { id: number; title: string; projectId?: number | null; projectName?: string }) => {
     setSelectedParentTaskId(item.id);
     if (item.projectId && !selectedProjectId) {
       setSelectedProjectId(item.projectId);
+      const proj = projects.find(p => Number(p.id) === item.projectId);
+      if (proj && !text.includes(`#${proj.name}`)) {
+        setText(prev => `${prev.trim()} #${proj.name} `.trimStart());
+      }
     }
-    removeTriggerTokenFromInput('~');
+    
+    // Replace ~ or ~query with ~"${item.title}"
+    const cursorPos = inputRef.current?.selectionStart ?? text.length;
+    const textBefore = text.slice(0, cursorPos);
+    const textAfter = text.slice(cursorPos);
+    const lastTildePos = textBefore.lastIndexOf('~');
+    
+    let newText = '';
+    if (lastTildePos !== -1) {
+      const beforeTilde = textBefore.slice(0, lastTildePos);
+      newText = `${beforeTilde}~"${item.title}" ${textAfter}`.trimStart();
+    } else {
+      newText = text.trim() ? `${text.trim()} ~"${item.title}" ` : `~"${item.title}" `;
+    }
+    setText(newText);
     setActiveTrigger(null);
-    inputRef.current?.focus();
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
+  };
+
+  const clearSelectedSubtask = () => {
+    if (selectedParentTask) {
+      const escaped = selectedParentTask.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`~"?${escaped}"?\\s*`, 'gi');
+      setText(prev => prev.replace(regex, '').trim());
+    }
+    setSelectedParentTaskId(null);
   };
 
   const selectAssignee = (user: TeammateUser) => {
     setSelectedAssigneeId(user.id);
-    removeTriggerTokenFromInput('@');
+    
+    const cursorPos = inputRef.current?.selectionStart ?? text.length;
+    const textBefore = text.slice(0, cursorPos);
+    const textAfter = text.slice(cursorPos);
+    const lastAtPos = textBefore.lastIndexOf('@');
+    
+    let newText = '';
+    if (lastAtPos !== -1) {
+      const beforeAt = textBefore.slice(0, lastAtPos);
+      newText = `${beforeAt}@${user.name} ${textAfter}`.trimStart();
+    } else {
+      newText = text.trim() ? `${text.trim()} @${user.name} ` : `@${user.name} `;
+    }
+    setText(newText);
     setActiveTrigger(null);
-    inputRef.current?.focus();
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
+  };
+
+  const clearSelectedAssignee = () => {
+    if (selectedAssignee) {
+      const escaped = selectedAssignee.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`@${escaped}\\s*`, 'gi');
+      setText(prev => prev.replace(regex, '').trim());
+    }
+    setSelectedAssigneeId(null);
   };
 
   // Submit task creation (handles conflict checking & next available slot prompts)
   const handleSubmit = async (overrideStart?: string, overrideEnd?: string, overrideSlot?: string) => {
     const isIssueMode = isIssue || text.includes('!');
 
+    let finalProjectId: number | null = selectedProjectId;
+    let finalParentTaskId: number | null = selectedParentTaskId;
+    let finalAssigneeId: number | undefined = selectedAssigneeId || undefined;
+
+    // 1. Detect typed project tag #ProjectName if not explicitly set
+    if (!finalProjectId) {
+      const hashMatch = text.match(/#([^\s~@!]+)/);
+      if (hashMatch) {
+        const pQuery = hashMatch[1].toLowerCase().replace(/['"]/g, '');
+        const found = projects.find(p => 
+          p.name.toLowerCase() === pQuery || 
+          p.name.toLowerCase().replace(/\s+/g, '') === pQuery ||
+          p.name.toLowerCase().startsWith(pQuery)
+        );
+        if (found) finalProjectId = Number(found.id);
+      }
+    }
+
+    // 2. Detect typed subtask tag ~"Subtask Title" or ~Subtask if not explicitly set
+    if (!finalParentTaskId) {
+      const tildeMatch = text.match(/~"([^"]+)"/) || text.match(/~([^\s#@!]+)/);
+      if (tildeMatch) {
+        const sQuery = tildeMatch[1].toLowerCase().trim();
+        const found = hierarchicalTasks.find(t => 
+          t.title.toLowerCase() === sQuery || 
+          t.title.toLowerCase().includes(sQuery)
+        );
+        if (found) {
+          finalParentTaskId = Number(found.id);
+          if (found.projectId && !finalProjectId) {
+            finalProjectId = found.projectId;
+          }
+        }
+      }
+    }
+
+    // 3. Detect typed assignee tag @TeammateName if not explicitly set
+    if (!finalAssigneeId) {
+      const atMatch = text.match(/@([^\s~#!]+)/);
+      if (atMatch) {
+        const aQuery = atMatch[1].toLowerCase().trim();
+        const found = teammates.find(u => 
+          u.name.toLowerCase() === aQuery || 
+          u.name.toLowerCase().replace(/\s+/g, '') === aQuery ||
+          u.name.toLowerCase().startsWith(aQuery)
+        );
+        if (found) finalAssigneeId = Number(found.id);
+      }
+    }
+
     let cleanTitle = text
+      .replace(/#"[^"]+"/g, '')
       .replace(/#\S+/g, '')
+      .replace(/~"[^"]+"/g, '')
       .replace(/~\S+/g, '')
+      .replace(/@"[^"]+"/g, '')
       .replace(/@\S+/g, '')
       .replace(/^!\s*/, '')
       .replace(/\s+!\s*/g, ' ')
       .trim();
 
-    if (!cleanTitle) return;
+    if (!cleanTitle) {
+      if (finalProjectId) {
+        const pObj = projects.find(p => Number(p.id) === finalProjectId);
+        cleanTitle = `${pObj?.name || 'Project'} Task`;
+      } else {
+        cleanTitle = 'New Task';
+      }
+    }
 
     const [defaultStart, defaultEnd] = selectedTimeSlot ? selectedTimeSlot.split(' - ') : ['10:00', '11:00'];
     const startT = overrideStart || defaultStart || '10:00';
@@ -500,7 +628,6 @@ export function QuickAddTaskInput({
     const startH = parseInt(startT.split(':')[0], 10);
     const endH = parseInt(endT.split(':')[0], 10);
 
-    let finalAssigneeId: number | undefined = selectedAssigneeId || undefined;
     let autoAssignedName = '';
 
     // If creating an Issue and no @ assignee was explicitly chosen: auto-assign to someone free at that time!
@@ -567,7 +694,7 @@ export function QuickAddTaskInput({
             priority: 'high',
             category: 'Bug',
             deadline: targetDate,
-            project_id: selectedProjectId || undefined,
+            project_id: finalProjectId || undefined,
             assigned_user_id: finalAssigneeId || undefined,
           });
           createdIssueId = issueRes?.data?.id || issueRes?.id || null;
@@ -589,8 +716,8 @@ export function QuickAddTaskInput({
         scheduled_date: targetDate,
         scheduled_start_time: startT,
         scheduled_end_time: endT,
-        project_id: selectedProjectId || undefined,
-        parent_id: selectedParentTaskId || undefined,
+        project_id: finalProjectId || undefined,
+        parent_id: finalParentTaskId || undefined,
         assigned_to_id: finalAssigneeId,
         priority: isIssueMode ? 'high' : 'medium',
         source: isIssueMode ? (createdIssueId ? `issue:${createdIssueId}` : 'issue') : undefined,
@@ -715,17 +842,18 @@ export function QuickAddTaskInput({
       </div>
 
       {/* Selected Metadata Chips Row */}
-      <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-2.5 border-t border-border-subtle/50 text-[11.5px]">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center justify-between gap-1.5 sm:gap-2 mt-2 sm:mt-3 pt-2 sm:pt-2.5 border-t border-border-subtle/50 text-[11px] sm:text-[11.5px] overflow-x-auto scrollbar-none py-0.5 max-w-full">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Project Chip / Button */}
           {selectedProject ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-accent-blue/15 text-accent-blue border border-accent-blue/30 font-bold text-xs shadow-xs">
               <Hash size={12} className="stroke-[2.5]" />
-              <span className="max-w-[130px] truncate">{selectedProject.name}</span>
+              <span className="max-w-[150px] truncate">{selectedProject.name}</span>
               <button 
                 type="button" 
-                onClick={() => { setSelectedProjectId(null); setSelectedParentTaskId(null); }} 
-                className="hover:text-accent-red ml-0.5 cursor-pointer"
+                onClick={clearSelectedProject} 
+                className="hover:text-accent-red ml-0.5 cursor-pointer text-accent-blue/70 hover:text-red-500"
+                title="Remove project filter"
               >
                 <X size={12} />
               </button>
@@ -755,11 +883,12 @@ export function QuickAddTaskInput({
           {selectedParentTask ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30 font-bold text-xs shadow-xs">
               <CornerDownRight size={12} className="stroke-[2.5]" />
-              <span className="max-w-[140px] truncate">{selectedParentTask.title}</span>
+              <span className="max-w-[150px] truncate">{selectedParentTask.title}</span>
               <button 
                 type="button" 
-                onClick={() => setSelectedParentTaskId(null)} 
-                className="hover:text-accent-red ml-0.5 cursor-pointer"
+                onClick={clearSelectedSubtask} 
+                className="hover:text-accent-red ml-0.5 cursor-pointer text-purple-500/70 hover:text-red-500"
+                title="Remove subtask parent"
               >
                 <X size={12} />
               </button>
@@ -789,11 +918,12 @@ export function QuickAddTaskInput({
           {selectedAssignee ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-bold text-xs shadow-xs">
               <AtSign size={12} className="stroke-[2.5]" />
-              <span className="max-w-[130px] truncate">{selectedAssignee.name}</span>
+              <span className="max-w-[140px] truncate">{selectedAssignee.name}</span>
               <button 
                 type="button" 
-                onClick={() => setSelectedAssigneeId(null)} 
-                className="hover:text-accent-red ml-0.5 cursor-pointer"
+                onClick={clearSelectedAssignee} 
+                className="hover:text-accent-red ml-0.5 cursor-pointer text-emerald-500/70 hover:text-red-500"
+                title="Remove assignee"
               >
                 <X size={12} />
               </button>
@@ -850,7 +980,7 @@ export function QuickAddTaskInput({
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {/* Deadline Chip (Defaults to Today) */}
           <div className="relative">
             <button
@@ -871,7 +1001,7 @@ export function QuickAddTaskInput({
             {showDatePicker && (
               <div 
                 className={cn(
-                  "absolute right-0 z-[9999] p-2 bg-background-secondary text-text-primary border border-border-subtle rounded-2xl shadow-2xl flex flex-col gap-1 w-48 animate-in fade-in duration-100",
+                  "absolute right-0 z-[9999] p-2 bg-background-secondary text-text-primary border border-border-subtle rounded-2xl shadow-2xl flex flex-col gap-1 w-48 max-w-[calc(100vw-2rem)] animate-in fade-in duration-100",
                   dropUp ? "bottom-full mb-2 slide-in-from-bottom-2" : "top-full mt-1.5 slide-in-from-top-2"
                 )}
                 style={{ backgroundColor: 'var(--bg-secondary)', opacity: 1 }}
@@ -960,7 +1090,7 @@ export function QuickAddTaskInput({
             {showTimePicker && (
               <div 
                 className={cn(
-                  "absolute right-0 z-[9999] p-2 bg-background-secondary text-text-primary border border-border-subtle rounded-2xl shadow-2xl flex flex-col gap-1 w-56 animate-in fade-in duration-100 max-h-72 overflow-y-auto",
+                  "absolute right-0 z-[9999] p-2 bg-background-secondary text-text-primary border border-border-subtle rounded-2xl shadow-2xl flex flex-col gap-1 w-56 max-w-[calc(100vw-2rem)] animate-in fade-in duration-100 max-h-72 overflow-y-auto",
                   dropUp ? "bottom-full mb-2 slide-in-from-bottom-2" : "top-full mt-1.5 slide-in-from-top-2"
                 )}
                 style={{ backgroundColor: 'var(--bg-secondary)', opacity: 1 }}
@@ -1054,24 +1184,24 @@ export function QuickAddTaskInput({
         <div 
           ref={dropdownRef}
           className={cn(
-            "absolute left-2 right-2 z-[9999] bg-white dark:bg-[#121A2A] text-text-primary border border-border-subtle rounded-2xl shadow-2xl overflow-hidden max-h-80 overflow-y-auto animate-in fade-in duration-150",
+            "absolute left-1 right-1 sm:left-2 sm:right-2 z-[9999] bg-white dark:bg-[#121A2A] text-text-primary border border-border-subtle rounded-2xl shadow-2xl overflow-hidden max-h-[55vh] sm:max-h-80 overflow-y-auto animate-in fade-in duration-150",
             dropUp ? "bottom-full mb-2 slide-in-from-bottom-2" : "top-full mt-2 slide-in-from-top-2"
           )}
           style={{ backgroundColor: 'var(--bg-secondary, #FFFFFF)', opacity: 1 }}
         >
           {/* Header indicator */}
           <div 
-            className="flex items-center justify-between px-4 py-2.5 bg-slate-50 dark:bg-[#1A2332] border-b border-border-subtle text-[11px] font-bold text-text-secondary uppercase tracking-wider"
+            className="flex items-center justify-between px-3 sm:px-4 py-2 sm:py-2.5 bg-slate-50 dark:bg-[#1A2332] border-b border-border-subtle text-[10px] sm:text-[11px] font-bold text-text-secondary uppercase tracking-wider"
             style={{ backgroundColor: 'var(--surface-card, #F9FAFB)' }}
           >
-            <span className="flex items-center gap-1.5 font-bold text-text-primary">
+            <span className="flex items-center gap-1.5 font-bold text-text-primary truncate">
               {activeTrigger === 'project' && <>📁 <span>Select Project (#)</span></>}
               {activeTrigger === 'subtask' && (
-                <>🌳 <span>{selectedProject ? `Subtasks for #${selectedProject.name} (~)` : 'All Available Tasks / Subtasks (~)'}</span></>
+                <>🌳 <span>{selectedProject ? `Subtasks for #${selectedProject.name} (~)` : 'All Available Tasks (~)'}</span></>
               )}
               {activeTrigger === 'assignee' && <>👤 <span>Assign Teammate (@)</span></>}
             </span>
-            <span className="text-[10px] lowercase text-text-secondary font-normal">Enter/Tab to select • Esc to close</span>
+            <span className="text-[9px] sm:text-[10px] lowercase text-text-secondary font-normal shrink-0">Esc to close</span>
           </div>
 
           {/* PROJECT LIST */}
@@ -1088,20 +1218,20 @@ export function QuickAddTaskInput({
                     onMouseEnter={() => setHighlightedIndex(idx)}
                     style={highlightedIndex === idx ? undefined : { backgroundColor: 'var(--surface-card)' }}
                     className={cn(
-                      'w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-left transition-all cursor-pointer group',
+                      'w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-left transition-all cursor-pointer group gap-2',
                       highlightedIndex === idx 
                         ? 'bg-accent-blue text-white shadow-md' 
                         : 'bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/40'
                     )}
                   >
-                    <span className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <span className="flex items-center gap-2 min-w-0 flex-1">
                       <Hash size={14} className={highlightedIndex === idx ? 'text-white stroke-[2.5]' : 'text-accent-blue stroke-[2.5]'} />
-                      <span className={cn("font-bold text-[13.5px] truncate", highlightedIndex === idx ? "text-white" : "text-text-primary")}>
+                      <span className={cn("font-bold text-xs sm:text-[13.5px] truncate", highlightedIndex === idx ? "text-white" : "text-text-primary")}>
                         {p.name}
                       </span>
                     </span>
                     <span className={cn(
-                      'text-[10px] uppercase font-bold px-2 py-0.5 rounded border',
+                      'text-[9px] sm:text-[10px] uppercase font-bold px-2 py-0.5 rounded border shrink-0',
                       highlightedIndex === idx 
                         ? 'bg-white/20 text-white border-transparent' 
                         : 'bg-background-primary text-text-secondary border-border-subtle'
@@ -1116,7 +1246,7 @@ export function QuickAddTaskInput({
 
           {/* HIERARCHICAL SUBTASK TREE */}
           {activeTrigger === 'subtask' && (
-            <div className="p-2 space-y-1.5">
+            <div className="p-1.5 sm:p-2 space-y-1.5">
               {filteredSubtasks.length === 0 ? (
                 <div className="p-4 text-center text-xs text-text-secondary space-y-1.5">
                   <p className="font-semibold text-text-primary">{selectedProjectId ? `No tasks found under #${selectedProject?.name}.` : 'No tasks available to nest under.'}</p>
@@ -1138,11 +1268,11 @@ export function QuickAddTaskInput({
                     onClick={() => selectSubtask(t)}
                     onMouseEnter={() => setHighlightedIndex(idx)}
                     style={{
-                      paddingLeft: `${Math.max(12, t.depth * 20 + 12)}px`,
+                      paddingLeft: `${Math.max(8, Math.min(24, t.depth * 8 + 8))}px`,
                       backgroundColor: highlightedIndex === idx ? undefined : 'var(--surface-card)',
                     }}
                     className={cn(
-                      'w-full flex items-center justify-between pr-3.5 py-2.5 rounded-xl text-left transition-all cursor-pointer group',
+                      'w-full flex flex-col sm:flex-row sm:items-center justify-between p-2.5 sm:px-3.5 sm:py-2.5 rounded-xl text-left transition-all cursor-pointer group gap-1.5',
                       highlightedIndex === idx 
                         ? 'bg-accent-blue text-white shadow-md' 
                         : 'bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/40'
@@ -1159,17 +1289,17 @@ export function QuickAddTaskInput({
                         </span>
                       )}
                       <span className={cn(
-                        "font-bold text-[13px] truncate",
+                        "font-bold text-xs sm:text-[13px] line-clamp-2 sm:line-clamp-1 break-words",
                         highlightedIndex === idx ? "text-white" : "text-text-primary"
                       )}>
                         {t.title}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                    <div className="flex items-center gap-1.5 shrink-0 pl-5 sm:pl-0 flex-wrap">
                       {t.depth > 0 && (
                         <span className={cn(
-                          "text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                          "text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded border",
                           highlightedIndex === idx 
                             ? "bg-white/20 text-white border-transparent" 
                             : "bg-purple-500/10 text-purple-600 dark:text-purple-300 border-purple-500/20"
@@ -1179,7 +1309,7 @@ export function QuickAddTaskInput({
                       )}
                       {t.projectName && (
                         <span className={cn(
-                          "text-[10px] font-bold px-1.5 py-0.5 rounded max-w-[100px] truncate border",
+                          "text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded max-w-[85px] sm:max-w-[100px] truncate border",
                           highlightedIndex === idx 
                             ? "bg-white/20 text-white border-transparent" 
                             : "bg-accent-blue/10 text-accent-blue border-accent-blue/20"
@@ -1189,7 +1319,7 @@ export function QuickAddTaskInput({
                       )}
                       {t.status && (
                         <span className={cn(
-                          "text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border",
+                          "text-[9px] sm:text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border",
                           highlightedIndex === idx 
                             ? "bg-white/20 text-white border-transparent" 
                             : t.status === 'completed' || t.status === 'done' 
