@@ -778,7 +778,7 @@ export function QuickAddTaskInput({
   return (
     <div 
       className={cn(
-        "relative w-full border rounded-2xl transition-all normal-case shadow-2xl",
+        "relative w-full border rounded-2xl transition-all normal-case shadow-2xl overflow-hidden",
         isDocked 
           ? "bg-background-secondary border-border-subtle hover:border-accent-blue/50 focus-within:border-accent-blue p-2 sm:p-2.5" 
           : "bg-background-secondary border-border-subtle hover:border-accent-blue/40 focus-within:border-accent-blue p-3 sm:p-4 shadow-sm"
@@ -789,12 +789,12 @@ export function QuickAddTaskInput({
       {autoAssignNotice && (
         <div className="mb-2.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-semibold flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
           <AlertCircle size={14} className="shrink-0 text-amber-500" />
-          <span>{autoAssignNotice}</span>
+          <span className="truncate">{autoAssignNotice}</span>
         </div>
       )}
 
       {/* Input row */}
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-1.5 sm:gap-2.5 w-full min-w-0">
         <span className={cn(
           "rounded-full bg-accent-blue/10 text-accent-blue flex items-center justify-center shrink-0",
           isDocked ? "w-5 h-5 text-xs" : "w-6 h-6 text-sm"
@@ -809,22 +809,22 @@ export function QuickAddTaskInput({
           value={text}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
-          placeholder={isDocked ? "Quick add task anywhere... (# project, ~ subtask, @ teammate, ! issue)" : "What would you like to achieve today? Use #project, ~subtask, @assignee, !issue..."}
-          className="flex-1 bg-transparent border-0 outline-none text-[13.5px] sm:text-[14.5px] placeholder:text-text-secondary/60 text-text-primary"
+          placeholder={isDocked ? "Quick add task... (# project, ~ subtask, @ person)" : "What would you like to achieve today? Use #project, ~subtask, @assignee, !issue..."}
+          className="min-w-0 flex-1 bg-transparent border-0 outline-none text-[13px] sm:text-[14.5px] placeholder:text-text-secondary/60 text-text-primary"
           disabled={isSubmitting}
         />
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           {onOpenMeetingModal && (
             <button
               type="button"
               onClick={onOpenMeetingModal}
               title="Schedule a meeting for today"
               style={{ backgroundColor: 'var(--surface-card)' }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border-subtle hover:border-accent-blue hover:text-accent-blue text-[12px] font-medium text-text-secondary transition-all cursor-pointer bg-surface-card hover:bg-surface-hover"
+              className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl border border-border-subtle hover:border-accent-blue hover:text-accent-blue text-[11.5px] sm:text-[12px] font-medium text-text-secondary transition-all cursor-pointer bg-surface-card hover:bg-surface-hover shrink-0"
             >
-              <Video size={13} className="text-accent-blue" />
+              <Video size={13} className="text-accent-blue shrink-0" />
               <span className="hidden sm:inline">+ Meeting</span>
             </button>
           )}
@@ -833,259 +833,256 @@ export function QuickAddTaskInput({
             type="button"
             onClick={() => handleSubmit()}
             disabled={!text.trim() || isSubmitting}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-accent-blue hover:bg-accent-blue-hover disabled:opacity-40 disabled:cursor-not-allowed text-white text-[12.5px] font-semibold rounded-xl shadow-sm transition-all cursor-pointer"
+            className="flex items-center gap-1 px-3 sm:px-3.5 py-1.5 bg-accent-blue hover:bg-accent-blue-hover disabled:opacity-40 disabled:cursor-not-allowed text-white text-[12px] sm:text-[12.5px] font-semibold rounded-xl shadow-sm transition-all cursor-pointer shrink-0"
           >
-            <Plus size={14} />
+            <Plus size={13} className="shrink-0" />
             <span>Add</span>
           </button>
         </div>
       </div>
 
-      {/* Selected Metadata Chips Row */}
-      <div className="flex items-center justify-between gap-1.5 sm:gap-2 mt-2 sm:mt-3 pt-2 sm:pt-2.5 border-t border-border-subtle/50 text-[11px] sm:text-[11.5px] overflow-x-auto scrollbar-none py-0.5 max-w-full">
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Project Chip / Button */}
-          {selectedProject ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-accent-blue/15 text-accent-blue border border-accent-blue/30 font-bold text-xs shadow-xs">
-              <Hash size={12} className="stroke-[2.5]" />
-              <span className="max-w-[150px] truncate">{selectedProject.name}</span>
-              <button 
-                type="button" 
-                onClick={clearSelectedProject} 
-                className="hover:text-accent-red ml-0.5 cursor-pointer text-accent-blue/70 hover:text-red-500"
-                title="Remove project filter"
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTrigger(activeTrigger === 'project' ? null : 'project');
-                setTriggerQuery('');
-                inputRef.current?.focus();
-              }}
-              style={activeTrigger === 'project' ? undefined : { backgroundColor: 'var(--surface-card)' }}
-              className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                activeTrigger === 'project'
-                  ? "bg-accent-blue text-white shadow-xs"
-                  : "bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/50"
-              )}
+      {/* Selected Metadata Chips Row - Single fluid horizontal row */}
+      <div className="flex items-center gap-1.5 sm:gap-2 mt-2 sm:mt-2.5 pt-2 sm:pt-2.5 border-t border-border-subtle/50 text-[11px] sm:text-[11.5px] overflow-x-auto scrollbar-none py-0.5 w-full">
+        {/* Project Chip / Button */}
+        {selectedProject ? (
+          <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl bg-accent-blue/15 text-accent-blue border border-accent-blue/30 font-bold text-xs shadow-xs shrink-0">
+            <Hash size={12} className="stroke-[2.5]" />
+            <span className="max-w-[120px] sm:max-w-[150px] truncate">{selectedProject.name}</span>
+            <button 
+              type="button" 
+              onClick={clearSelectedProject} 
+              className="hover:text-accent-red ml-0.5 cursor-pointer text-accent-blue/70 hover:text-red-500"
+              title="Remove project filter"
             >
-              <Hash size={12} className={activeTrigger === 'project' ? "text-white stroke-[2.5]" : "text-accent-blue stroke-[2.5]"} />
-              <span>Project (#)</span>
+              <X size={12} />
             </button>
-          )}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTrigger(activeTrigger === 'project' ? null : 'project');
+              setTriggerQuery('');
+              inputRef.current?.focus();
+            }}
+            style={activeTrigger === 'project' ? undefined : { backgroundColor: 'var(--surface-card)' }}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+              activeTrigger === 'project'
+                ? "bg-accent-blue text-white shadow-xs"
+                : "bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/50"
+            )}
+          >
+            <Hash size={12} className={activeTrigger === 'project' ? "text-white stroke-[2.5]" : "text-accent-blue stroke-[2.5]"} />
+            <span>Project (#)</span>
+          </button>
+        )}
 
-          {/* Parent / Subtask Chip / Button */}
-          {selectedParentTask ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30 font-bold text-xs shadow-xs">
-              <CornerDownRight size={12} className="stroke-[2.5]" />
-              <span className="max-w-[150px] truncate">{selectedParentTask.title}</span>
-              <button 
-                type="button" 
-                onClick={clearSelectedSubtask} 
-                className="hover:text-accent-red ml-0.5 cursor-pointer text-purple-500/70 hover:text-red-500"
-                title="Remove subtask parent"
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTrigger(activeTrigger === 'subtask' ? null : 'subtask');
-                setTriggerQuery('');
-                inputRef.current?.focus();
-              }}
-              style={activeTrigger === 'subtask' ? undefined : { backgroundColor: 'var(--surface-card)' }}
-              className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                activeTrigger === 'subtask'
-                  ? "bg-purple-600 text-white shadow-xs"
-                  : "bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-purple-400/50"
-              )}
+        {/* Parent / Subtask Chip / Button */}
+        {selectedParentTask ? (
+          <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30 font-bold text-xs shadow-xs shrink-0">
+            <CornerDownRight size={12} className="stroke-[2.5]" />
+            <span className="max-w-[120px] sm:max-w-[150px] truncate">{selectedParentTask.title}</span>
+            <button 
+              type="button" 
+              onClick={clearSelectedSubtask} 
+              className="hover:text-accent-red ml-0.5 cursor-pointer text-purple-500/70 hover:text-red-500"
+              title="Remove subtask parent"
             >
-              <CornerDownRight size={12} className={activeTrigger === 'subtask' ? "text-white stroke-[2.5]" : "text-purple-400 stroke-[2.5]"} />
-              <span>Subtask (~)</span>
+              <X size={12} />
             </button>
-          )}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTrigger(activeTrigger === 'subtask' ? null : 'subtask');
+              setTriggerQuery('');
+              inputRef.current?.focus();
+            }}
+            style={activeTrigger === 'subtask' ? undefined : { backgroundColor: 'var(--surface-card)' }}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+              activeTrigger === 'subtask'
+                ? "bg-purple-600 text-white shadow-xs"
+                : "bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-purple-400/50"
+            )}
+          >
+            <CornerDownRight size={12} className={activeTrigger === 'subtask' ? "text-white stroke-[2.5]" : "text-purple-400 stroke-[2.5]"} />
+            <span>Subtask (~)</span>
+          </button>
+        )}
 
-          {/* Assignee Chip / Button */}
-          {selectedAssignee ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-bold text-xs shadow-xs">
-              <AtSign size={12} className="stroke-[2.5]" />
-              <span className="max-w-[140px] truncate">{selectedAssignee.name}</span>
-              <button 
-                type="button" 
-                onClick={clearSelectedAssignee} 
-                className="hover:text-accent-red ml-0.5 cursor-pointer text-emerald-500/70 hover:text-red-500"
-                title="Remove assignee"
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTrigger(activeTrigger === 'assignee' ? null : 'assignee');
-                setTriggerQuery('');
-                inputRef.current?.focus();
-              }}
-              style={activeTrigger === 'assignee' ? undefined : { backgroundColor: 'var(--surface-card)' }}
-              className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                activeTrigger === 'assignee'
-                  ? "bg-emerald-600 text-white shadow-xs"
-                  : "bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-emerald-500/50"
-              )}
+        {/* Assignee Chip / Button */}
+        {selectedAssignee ? (
+          <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-bold text-xs shadow-xs shrink-0">
+            <AtSign size={12} className="stroke-[2.5]" />
+            <span className="max-w-[110px] sm:max-w-[140px] truncate">{selectedAssignee.name}</span>
+            <button 
+              type="button" 
+              onClick={clearSelectedAssignee} 
+              className="hover:text-accent-red ml-0.5 cursor-pointer text-emerald-500/70 hover:text-red-500"
+              title="Remove assignee"
             >
-              <UserCheck size={12} className={activeTrigger === 'assignee' ? "text-white stroke-[2.5]" : "text-emerald-500 stroke-[2.5]"} />
-              <span>Assigned: <span className="underline decoration-dotted">Myself (@)</span></span>
+              <X size={12} />
             </button>
-          )}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTrigger(activeTrigger === 'assignee' ? null : 'assignee');
+              setTriggerQuery('');
+              inputRef.current?.focus();
+            }}
+            style={activeTrigger === 'assignee' ? undefined : { backgroundColor: 'var(--surface-card)' }}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+              activeTrigger === 'assignee'
+                ? "bg-emerald-600 text-white shadow-xs"
+                : "bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-emerald-500/50"
+            )}
+          >
+            <UserCheck size={12} className={activeTrigger === 'assignee' ? "text-white stroke-[2.5]" : "text-emerald-500 stroke-[2.5]"} />
+            <span><span className="hidden sm:inline">Assigned: </span><span className="underline decoration-dotted">Myself (@)</span></span>
+          </button>
+        )}
 
-          {/* Issue Mode Toggle Chip / Button */}
-          {isIssue ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold text-xs shadow-xs animate-in fade-in">
-              <AlertCircle size={12} className="stroke-[2.5] text-amber-500" />
-              <span>Issue (!)</span>
-              <button 
-                type="button" 
-                onClick={() => setIsIssue(false)} 
-                className="hover:text-accent-red ml-0.5 cursor-pointer text-text-secondary hover:text-red-500"
-                title="Remove Issue flag"
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setIsIssue(true);
-                inputRef.current?.focus();
-              }}
-              style={{ backgroundColor: 'var(--surface-card)' }}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-amber-500/50"
-              title="Flag as Issue (!) - Auto-assigns to free teammate if unassigned"
+        {/* Issue Mode Toggle Chip / Button */}
+        {isIssue ? (
+          <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold text-xs shadow-xs shrink-0 animate-in fade-in">
+            <AlertCircle size={12} className="stroke-[2.5] text-amber-500" />
+            <span>Issue (!)</span>
+            <button 
+              type="button" 
+              onClick={() => setIsIssue(false)} 
+              className="hover:text-accent-red ml-0.5 cursor-pointer text-text-secondary hover:text-red-500"
+              title="Remove Issue flag"
             >
-              <AlertCircle size={12} className="text-amber-500 stroke-[2.5]" />
-              <span>Issue (!)</span>
+              <X size={12} />
             </button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setIsIssue(true);
+              inputRef.current?.focus();
+            }}
+            style={{ backgroundColor: 'var(--surface-card)' }}
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-amber-500/50 shrink-0"
+            title="Flag as Issue (!) - Auto-assigns to free teammate if unassigned"
+          >
+            <AlertCircle size={12} className="text-amber-500 stroke-[2.5]" />
+            <span>Issue (!)</span>
+          </button>
+        )}
+
+        {/* Deadline Chip (Defaults to Today) */}
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => { setShowDatePicker(!showDatePicker); setShowTimePicker(false); }}
+            style={showDatePicker ? undefined : { backgroundColor: 'var(--surface-card)' }}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+              showDatePicker 
+                ? "bg-accent-blue text-white shadow-xs" 
+                : "bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/50"
+            )}
+          >
+            <Calendar size={12} className={showDatePicker ? "text-white" : "text-accent-blue"} />
+            <span>{deadline === today() ? 'Today' : deadline}</span>
+          </button>
+
+          {showDatePicker && (
+            <div 
+              className={cn(
+                "absolute right-0 z-[9999] p-2 bg-background-secondary text-text-primary border border-border-subtle rounded-2xl shadow-2xl flex flex-col gap-1 w-48 max-w-[calc(100vw-2rem)] animate-in fade-in duration-100",
+                dropUp ? "bottom-full mb-2 slide-in-from-bottom-2" : "top-full mt-1.5 slide-in-from-top-2"
+              )}
+              style={{ backgroundColor: 'var(--bg-secondary)', opacity: 1 }}
+            >
+              <div 
+                className="px-2.5 py-1 text-[10px] uppercase font-bold text-text-secondary border-b border-border-subtle mb-0.5 rounded-lg"
+                style={{ backgroundColor: 'var(--surface-card)' }}
+              >
+                Select Due Date
+              </div>
+              <button
+                type="button"
+                onClick={() => { setDeadline(today()); setShowDatePicker(false); }}
+                style={deadline === today() ? undefined : { backgroundColor: 'var(--surface-card)' }}
+                className={cn(
+                  'text-left px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-between',
+                  deadline === today()
+                    ? 'bg-accent-blue text-white shadow-xs'
+                    : 'bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/40'
+                )}
+              >
+                <span>☀️ Today</span>
+                {deadline === today() && <span className="text-[9px] font-bold uppercase bg-white/20 px-1.5 py-0.5 rounded">Active</span>}
+              </button>
+              <button
+                type="button"
+                onClick={() => { 
+                  const d = new Date(Date.now() + 86400000); 
+                  setDeadline(isoDay(d)); 
+                  setShowDatePicker(false); 
+                }}
+                style={deadline === isoDay(new Date(Date.now() + 86400000)) ? undefined : { backgroundColor: 'var(--surface-card)' }}
+                className={cn(
+                  'text-left px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-between',
+                  deadline === isoDay(new Date(Date.now() + 86400000))
+                    ? 'bg-accent-blue text-white shadow-xs'
+                    : 'bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/40'
+                )}
+              >
+                <span>⏭️ Tomorrow</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { 
+                  const d = new Date();
+                  d.setDate(d.getDate() + ((7 - d.getDay() + 1) % 7 || 7));
+                  setDeadline(isoDay(d));
+                  setShowDatePicker(false);
+                }}
+                style={{ backgroundColor: 'var(--surface-card)' }}
+                className="text-left px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/40"
+              >
+                <span>📅 Next Monday</span>
+              </button>
+              <div className="pt-1.5 border-t border-border-subtle">
+                <input
+                  type="date"
+                  value={deadline}
+                  onChange={e => { if (e.target.value) { setDeadline(e.target.value); setShowDatePicker(false); } }}
+                  style={{ backgroundColor: 'var(--surface-card)' }}
+                  className="w-full text-xs p-1.5 bg-surface-card border border-border-subtle rounded-lg text-text-primary font-semibold"
+                />
+              </div>
+            </div>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Deadline Chip (Defaults to Today) */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => { setShowDatePicker(!showDatePicker); setShowTimePicker(false); }}
-              style={showDatePicker ? undefined : { backgroundColor: 'var(--surface-card)' }}
-              className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                showDatePicker 
-                  ? "bg-accent-blue text-white shadow-xs" 
-                  : "bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/50"
-              )}
-            >
-              <Calendar size={12} className={showDatePicker ? "text-white" : "text-accent-blue"} />
-              <span>{deadline === today() ? 'Today' : deadline}</span>
-            </button>
-
-            {showDatePicker && (
-              <div 
-                className={cn(
-                  "absolute right-0 z-[9999] p-2 bg-background-secondary text-text-primary border border-border-subtle rounded-2xl shadow-2xl flex flex-col gap-1 w-48 max-w-[calc(100vw-2rem)] animate-in fade-in duration-100",
-                  dropUp ? "bottom-full mb-2 slide-in-from-bottom-2" : "top-full mt-1.5 slide-in-from-top-2"
-                )}
-                style={{ backgroundColor: 'var(--bg-secondary)', opacity: 1 }}
-              >
-                <div 
-                  className="px-2.5 py-1 text-[10px] uppercase font-bold text-text-secondary border-b border-border-subtle mb-0.5 rounded-lg"
-                  style={{ backgroundColor: 'var(--surface-card)' }}
-                >
-                  Select Due Date
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setDeadline(today()); setShowDatePicker(false); }}
-                  style={deadline === today() ? undefined : { backgroundColor: 'var(--surface-card)' }}
-                  className={cn(
-                    'text-left px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-between',
-                    deadline === today()
-                      ? 'bg-accent-blue text-white shadow-xs'
-                      : 'bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/40'
-                  )}
-                >
-                  <span>☀️ Today</span>
-                  {deadline === today() && <span className="text-[9px] font-bold uppercase bg-white/20 px-1.5 py-0.5 rounded">Active</span>}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { 
-                    const d = new Date(Date.now() + 86400000); 
-                    setDeadline(isoDay(d)); 
-                    setShowDatePicker(false); 
-                  }}
-                  style={deadline === isoDay(new Date(Date.now() + 86400000)) ? undefined : { backgroundColor: 'var(--surface-card)' }}
-                  className={cn(
-                    'text-left px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-between',
-                    deadline === isoDay(new Date(Date.now() + 86400000))
-                      ? 'bg-accent-blue text-white shadow-xs'
-                      : 'bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/40'
-                  )}
-                >
-                  <span>⏭️ Tomorrow</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const d = new Date();
-                    d.setDate(d.getDate() + ((7 - d.getDay() + 1) % 7 || 7));
-                    setDeadline(isoDay(d));
-                    setShowDatePicker(false);
-                  }}
-                  style={{ backgroundColor: 'var(--surface-card)' }}
-                  className="text-left px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/40"
-                >
-                  <span>📅 Next Monday</span>
-                </button>
-                <div className="pt-1.5 border-t border-border-subtle">
-                  <input
-                    type="date"
-                    value={deadline}
-                    onChange={e => { if (e.target.value) { setDeadline(e.target.value); setShowDatePicker(false); } }}
-                    style={{ backgroundColor: 'var(--surface-card)' }}
-                    className="w-full text-xs p-1.5 bg-surface-card border border-border-subtle rounded-lg text-text-primary font-semibold"
-                  />
-                </div>
-              </div>
+        {/* Time Slot Chip */}
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => { setShowTimePicker(!showTimePicker); setShowDatePicker(false); }}
+            style={showTimePicker ? undefined : { backgroundColor: 'var(--surface-card)' }}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+              showTimePicker 
+                ? "bg-accent-blue text-white shadow-xs" 
+                : "bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/50"
             )}
-          </div>
-
-          {/* Time Slot Chip */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => { setShowTimePicker(!showTimePicker); setShowDatePicker(false); }}
-              style={showTimePicker ? undefined : { backgroundColor: 'var(--surface-card)' }}
-              className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                showTimePicker 
-                  ? "bg-accent-blue text-white shadow-xs" 
-                  : "bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-accent-blue/50"
-              )}
-              title="Select schedule time slot"
-            >
-              <Clock size={12} className={showTimePicker ? "text-white" : "text-accent-blue"} />
-              <span>{selectedTimeSlot}</span>
-            </button>
+            title="Select schedule time slot"
+          >
+            <Clock size={12} className={showTimePicker ? "text-white" : "text-accent-blue"} />
+            <span>{selectedTimeSlot}</span>
+          </button>
 
             {showTimePicker && (
               <div 
@@ -1177,7 +1174,6 @@ export function QuickAddTaskInput({
             )}
           </div>
         </div>
-      </div>
 
       {/* AUTOCOMPLETE POPUP DROPDOWN */}
       {activeTrigger && (

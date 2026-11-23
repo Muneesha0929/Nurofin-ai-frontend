@@ -831,30 +831,30 @@ export function MyDayView({
                       <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[11px] text-text-secondary">
                         {/* Project Badge */}
                         {hasProject && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-accent-blue/15 text-accent-blue font-bold text-xs border border-accent-blue/30 shadow-2xs">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-accent-blue/15 text-accent-blue font-bold text-xs border border-accent-blue/30 shadow-2xs shrink-0">
                             <Hash size={11} className="stroke-[2.5]" />
-                            <span className="truncate max-w-[150px]">{pName}</span>
+                            <span className="truncate max-w-[120px] sm:max-w-[150px]">{pName}</span>
                           </span>
                         )}
 
                         {/* Subtask / Parent Hierarchy Badge */}
                         {isSubtask && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-purple-500/15 text-purple-600 dark:text-purple-400 font-bold text-xs border border-purple-500/30 shadow-2xs">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-purple-500/15 text-purple-600 dark:text-purple-400 font-bold text-xs border border-purple-500/30 shadow-2xs shrink-0">
                             <CornerDownRight size={11} className="stroke-[2.5]" />
-                            <span>Subtask of: <strong className="font-extrabold">{parentTitle || 'Parent Task'}</strong></span>
+                            <span className="truncate max-w-[130px] sm:max-w-[200px]">Subtask of: <strong className="font-extrabold">{parentTitle || 'Parent Task'}</strong></span>
                           </span>
                         )}
 
                         {t.subtasks && t.subtasks.length > 0 && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 text-xs font-semibold">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 text-xs font-semibold shrink-0">
                             <span>🌳 {t.subtasks.filter((st: any) => isDone(st.status)).length}/{t.subtasks.length} subtasks</span>
                           </span>
                         )}
 
-                        {/* Assignee Badge (Always visible) */}
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 font-semibold text-xs">
+                        {/* Assignee Badge (Always visible & prominent) */}
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-bold text-xs shadow-2xs shrink-0">
                           <User size={11} className="stroke-[2.5]" />
-                          <span>{isAssignedToMe ? `Assigned: Myself (@${currentUserName || 'me'})` : `Assigned: @${assigneeName || 'Teammate'}`}</span>
+                          <span className="truncate max-w-[140px] sm:max-w-none">{isAssignedToMe ? `Assigned: Myself (@${currentUserName || 'me'})` : `Assigned: @${assigneeName || 'Teammate'}`}</span>
                         </span>
 
                         {/* Deadline badge */}
