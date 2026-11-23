@@ -100,7 +100,7 @@ export default function GlobalQuickAddBar() {
     <>
       <div 
         className={cn(
-          "fixed bottom-2 sm:bottom-4 z-40 transition-all duration-300 pointer-events-none flex justify-center px-2 sm:px-4",
+          "fixed bottom-2 sm:bottom-4 z-40 focus-within:z-50 hover:z-50 transition-all duration-300 pointer-events-none flex justify-center px-2 sm:px-4",
           sidebarCollapsed ? "left-0 md:left-16 right-0" : "left-0 md:left-64 right-0"
         )}
       >

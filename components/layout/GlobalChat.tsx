@@ -45,7 +45,7 @@ export default function GlobalChat() {
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          "fixed bottom-24 right-3 sm:bottom-6 sm:right-6 z-50 w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 border border-border-subtle/50 cursor-pointer",
+          "fixed bottom-24 right-3 sm:bottom-6 sm:right-6 z-40 w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 border border-border-subtle/50 cursor-pointer",
           isOpen 
             ? "bg-surface-card text-text-primary rotate-90" 
             : "bg-accent-blue text-white hover:scale-105 hover:bg-accent-blue-hover"
