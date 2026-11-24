@@ -300,7 +300,7 @@ export default function ClientLayout({
           <Topbar />
 
           {/* Core Content Area */}
-          <main className="flex-1 pt-[4.5rem] sm:pt-[5.5rem] p-3 sm:p-5 md:p-6 pb-36 overflow-y-auto overflow-x-auto scrollbar-thin min-h-screen min-w-0">
+          <main className="flex-1 pt-20 sm:pt-24 px-3 sm:px-5 md:px-6 pb-36 overflow-y-auto overflow-x-auto scrollbar-thin min-h-screen min-w-0">
             {children}
           </main>
           {/* Global Task Adding Option (Docked at Bottom of Every Page) */}

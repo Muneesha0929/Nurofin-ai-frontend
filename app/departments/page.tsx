@@ -24,7 +24,7 @@ import {
 
 type Person = { id: number; name: string; avatar?: string | null };
 
-const isDirectorRole = (role?: string) => ['ceo', 'super_admin'].includes((role || '').toLowerCase());
+const isDirectorRole = (role?: string) => ['ceo', 'super_admin', 'admin', 'director', 'chief_of_staff', 'team_lead'].includes((role || '').toLowerCase());
 const fmtDate = (iso?: string | null) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 const paragraphs = (t: string) => t.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
 
@@ -73,7 +73,7 @@ function DepartmentsRouter() {
   const id = Number(params.get('id'));
   const view = params.get('view');
   return (
-    <div className="p-6 flex flex-col gap-5 bg-background-primary min-h-screen text-text-primary normal-case">
+    <div className="flex flex-col gap-5 text-text-primary normal-case">
       {view === 'targets' ? <QuarterTargetsView /> : id ? <DepartmentView id={id} /> : <DepartmentList />}
     </div>
   );

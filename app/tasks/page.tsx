@@ -39,6 +39,13 @@ import {
   MessageCircle
 } from 'lucide-react';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
+import { 
+  useLinkableObjectives, 
+  ObjectiveSelect, 
+  TaskObjectiveBadge, 
+  syncTaskObjective, 
+  currentObjectiveOf 
+} from '@/components/targets/TaskObjectiveLink';
 
 const taskSchema = z.object({
   title: z.string().min(3, 'Title must be at least 3 characters long'),
@@ -79,6 +86,10 @@ export default function TaskCenterPage() {
   const [availableUsers, setAvailableUsers] = useState<UserType[]>([]);
   const [availableProjects, setAvailableProjects] = useState<Project[]>([]);
   const [filterProjectId, setFilterProjectId] = useState<string>('all');
+
+  const { objectives: linkableObjectives, quarterShort } = useLinkableObjectives();
+  const [targetObjectiveId, setTargetObjectiveId] = useState<string>('');
+  const [prevTargetObjectiveId, setPrevTargetObjectiveId] = useState<string>('');
 
   useEffect(() => {
     let active = true;
@@ -184,6 +195,8 @@ export default function TaskCenterPage() {
   const handleOpenCreate = () => {
     setEditMode(false);
     setIsIssue(false);
+    setTargetObjectiveId('');
+    setPrevTargetObjectiveId('');
     reset({
       title: '',
       description: '',
@@ -199,6 +212,14 @@ export default function TaskCenterPage() {
     setEditMode(true);
     setSelectedTask(task);
     setIsIssue(Boolean(task.title?.startsWith('[Issue]') || (task as any).source === 'issue' || (task as any).is_issue));
+    setTargetObjectiveId('');
+    setPrevTargetObjectiveId('');
+    if (task.id) {
+      currentObjectiveOf(Number(task.id)).then(id => {
+        setTargetObjectiveId(id);
+        setPrevTargetObjectiveId(id);
+      }).catch(() => {});
+    }
     reset({
       title: task.title,
       description: task.description,
@@ -256,12 +277,15 @@ export default function TaskCenterPage() {
         is_issue: isIssueMode ? true : undefined,
       };
 
+      let savedTaskId: string | number | undefined;
       if (editMode && selectedTask) {
         const updated = await tasksService.updateTask(selectedTask.id, payload as any);
         updateTask(selectedTask.id, updated);
+        savedTaskId = selectedTask.id;
       } else {
         const created = await tasksService.createTask(payload as any);
         addTask(created);
+        savedTaskId = created?.id;
 
         // Sync to Issue Center if created as an issue!
         if (isIssueMode) {
@@ -283,6 +307,13 @@ export default function TaskCenterPage() {
           }
         }
       }
+
+      if (savedTaskId) {
+        await syncTaskObjective(Number(savedTaskId), targetObjectiveId, prevTargetObjectiveId).catch(err => {
+          console.error('Failed to sync task objective:', err);
+        });
+      }
+
       setModalOpen(false);
     } catch (err) {
       console.error(err);
@@ -605,6 +636,12 @@ export default function TaskCenterPage() {
                 </div>
               </div>
 
+              {selectedTask.id && (
+                <div>
+                  <TaskObjectiveBadge taskId={Number(selectedTask.id)} />
+                </div>
+              )}
+
               {/* Task Comment timeline */}
               <div className="space-y-2 pt-2 border-t border-border-subtle/50">
                 <span className="text-2xs text-text-secondary font-bold uppercase tracking-wider block">Comments</span>
@@ -752,6 +789,14 @@ export default function TaskCenterPage() {
                 <option value="done">Done</option>
               </select>
             </div>
+
+            <ObjectiveSelect
+              objectives={linkableObjectives}
+              quarterShort={quarterShort}
+              value={targetObjectiveId}
+              onChange={setTargetObjectiveId}
+              className="w-full h-10 bg-background-secondary border border-border-subtle rounded-md px-3 text-sm text-text-primary outline-none"
+            />
 
             {/* Flag as Issue Toggle */}
             <div className="flex items-center gap-2 pt-1 pb-1">
