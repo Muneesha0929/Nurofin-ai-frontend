@@ -42,6 +42,7 @@ export default function LoginPage() {
     try {
       const session = await authService.login(data.email, data.password);
       updateUserProfile({
+        id: String(session.user.id),
         name: session.user.name,
         email: session.user.email,
         role: session.user.role,

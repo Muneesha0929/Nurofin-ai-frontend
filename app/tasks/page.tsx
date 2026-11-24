@@ -243,19 +243,7 @@ export default function TaskCenterPage() {
       const cleanTitle = data.title.replace(/^\[Issue\]\s*/i, '').replace(/!\s*/g, '').trim();
       const finalTitle = isIssueMode ? `[Issue] ${cleanTitle}` : data.title;
 
-      let finalAssigneeId = data.assigneeId ? parseInt(data.assigneeId) : undefined;
-      // If issue and unassigned, auto-assign to a non-CEO user!
-      if (isIssueMode && !finalAssigneeId) {
-        const nonCeoUsers = availableUsers.filter(u => {
-          const role = String((u as any).role || '').toLowerCase();
-          const name = String(u.name || '').toLowerCase();
-          const isCeo = role === 'ceo' || role === 'super_admin' || role === 'admin' || Number(u.id) === 1 || name.includes('ceo') || name.includes('vincent');
-          return !isCeo;
-        });
-        if (nonCeoUsers.length > 0) {
-          finalAssigneeId = parseInt(nonCeoUsers[0].id);
-        }
-      }
+      let finalAssigneeId = data.assigneeId ? parseInt(data.assigneeId) : (userProfile?.id ? parseInt(userProfile.id) : undefined);
 
       const selectedUser = finalAssigneeId ? availableUsers.find(u => Number(u.id) === finalAssigneeId) : null;
       const assignedTo = selectedUser ? {

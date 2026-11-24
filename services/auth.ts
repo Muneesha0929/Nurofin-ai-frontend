@@ -2,6 +2,7 @@ export interface UserSession {
   token: string;
   refreshToken: string;
   user: {
+    id: string | number;
     name: string;
     email: string;
     role: string;
@@ -38,6 +39,7 @@ export const authService = {
       token,
       refreshToken: "dummy_refresh_token",
       user: {
+        id: String(user.id),
         name: user.full_name || "User",
         email: user.email,
         role: user.role || "Member"

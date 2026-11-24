@@ -681,16 +681,8 @@ export function QuickAddTaskInput({
 
     let autoAssignedName = '';
 
-    // If creating an Issue and no @ assignee was explicitly chosen: auto-assign to someone free at that time!
-    if (isIssueMode && !finalAssigneeId) {
-      const freeTeammate = findFreeTeammate(targetDate, startH, endH);
-      if (freeTeammate) {
-        finalAssigneeId = freeTeammate.id;
-        autoAssignedName = freeTeammate.name;
-      } else if (currentUserId) {
-        finalAssigneeId = parseInt(currentUserId, 10);
-      }
-    } else if (!finalAssigneeId) {
+    // If no @ assignee was explicitly chosen, assign to the current user creating the task
+    if (!finalAssigneeId) {
       finalAssigneeId = currentUserId ? parseInt(currentUserId, 10) : undefined;
     }
 

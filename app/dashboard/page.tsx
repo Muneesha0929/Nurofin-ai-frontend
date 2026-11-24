@@ -50,7 +50,7 @@ import { PlanMyDayModal } from '@/components/dashboard/PlanMyDayModal';
 
 export default function DashboardPage() {
   const { userProfile, issues } = useStore();
-  const isDirector = true;
+  const isDirector = ['ceo', 'super_admin'].includes((userProfile?.role || '').toLowerCase()) || Number(userProfile?.id) === 1;
   const me = String(userProfile?.id || '');
   const myName = userProfile?.name || 'Executive';
 

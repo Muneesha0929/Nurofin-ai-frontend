@@ -148,36 +148,39 @@ export default function TaskCenterPage() {
 
   const filteredTasks = useMemo(() => {
     if (taskFilterTab === 'all') return tasks;
-    if (!userProfile) return tasks;
+    if (!userProfile || !userProfile.id) return tasks;
 
     const list: any[] = [];
-    tasks.forEach(task => {
-      // 1. If main task is assigned to the current user
-      if (task.assigned_to_id != null && String(task.assigned_to_id) === String(userProfile.id)) {
-        list.push({
-          ...task,
-          subtasks: [], // Don't show nested subtasks list inside it in My Tasks
-        });
+    const seenIds = new Set<number>();
+
+    const collectMyTasks = (t: any, parentTitle?: string, projId?: number | null, projName?: string | null, parentDeadline?: string | null, parentPriority?: string | null) => {
+      if (!t || !t.id) return;
+      const tProjId = t.project_id || projId;
+      const tProjName = t.project_name || projName;
+      const tDeadline = t.deadline || parentDeadline;
+      const tPriority = t.priority || parentPriority;
+      if (t.assigned_to_id != null && String(t.assigned_to_id) === String(userProfile.id)) {
+        if (!seenIds.has(Number(t.id))) {
+          seenIds.add(Number(t.id));
+          list.push({
+            ...t,
+            parent_title: t.parent_title || parentTitle,
+            project_id: tProjId,
+            project_name: tProjName,
+            deadline: tDeadline,
+            priority: tPriority,
+            assigned_to_name: t.assigned_to_name || userProfile.name,
+            assigned_to_avatar: t.assigned_to_avatar || userProfile.avatar,
+            subtasks: [],
+          });
+        }
       }
-      // 2. If any subtasks are assigned to the current user
-      if (task.subtasks && task.subtasks.length > 0) {
-        task.subtasks.forEach(sub => {
-          if (sub.assigned_to_id != null && String(sub.assigned_to_id) === String(userProfile.id)) {
-            list.push({
-              ...sub,
-              parent_title: task.title, // Add parent title info
-              project_name: task.project_name, // inherit project name
-              project_id: task.project_id,
-              deadline: sub.deadline || task.deadline, // inherit deadline if missing
-              priority: sub.priority || task.priority, // inherit priority if missing
-              assigned_to_name: sub.assigned_to_name || userProfile.name,
-              assigned_to_avatar: sub.assigned_to_avatar || userProfile.avatar,
-              subtasks: [], // Clear any subtasks
-            });
-          }
-        });
+      if (t.subtasks && Array.isArray(t.subtasks)) {
+        t.subtasks.forEach((st: any) => collectMyTasks(st, t.title, tProjId, tProjName, tDeadline, tPriority));
       }
-    });
+    };
+
+    tasks.forEach(task => collectMyTasks(task));
     return list;
   }, [tasks, taskFilterTab, userProfile]);
   const [totalTasks, setTotalTasks] = useState(0);

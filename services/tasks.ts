@@ -29,8 +29,8 @@ export const tasksService = {
       dueDate: t.deadline || '',
       assignedTo: {
         id: t.assigned_to_id?.toString() || t.assigned_to?.id?.toString() || '',
-        name: t.assigned_to?.name || 'Unassigned',
-        avatar: t.assigned_to?.avatar || ''
+        name: t.assigned_to?.name || t.assigned_to?.full_name || 'Unassigned',
+        avatar: t.assigned_to?.avatar || t.assigned_to?.profile_picture || ''
       },
       projectId: t.project_id?.toString(),
       start_date: t.start_date || undefined,
@@ -81,8 +81,9 @@ export const tasksService = {
       priority: t.priority,
       dueDate: t.deadline || '',
       assignedTo: {
-        name: t.assigned_to?.name || 'Unassigned',
-        avatar: t.assigned_to?.avatar || ''
+        id: t.assigned_to_id?.toString() || t.assigned_to?.id?.toString() || '',
+        name: t.assigned_to?.name || t.assigned_to?.full_name || 'Unassigned',
+        avatar: t.assigned_to?.avatar || t.assigned_to?.profile_picture || ''
       },
       projectId: t.project_id?.toString(),
       scheduledDate: t.scheduled_date || undefined,
@@ -131,8 +132,9 @@ export const tasksService = {
       priority: t.priority,
       dueDate: t.deadline || '',
       assignedTo: {
-        name: t.assigned_to?.name || 'Unassigned',
-        avatar: t.assigned_to?.avatar || ''
+        id: t.assigned_to_id?.toString() || t.assigned_to?.id?.toString() || '',
+        name: t.assigned_to?.name || t.assigned_to?.full_name || 'Unassigned',
+        avatar: t.assigned_to?.avatar || t.assigned_to?.profile_picture || ''
       },
       projectId: t.project_id?.toString(),
       scheduledDate: t.scheduled_date || undefined,
