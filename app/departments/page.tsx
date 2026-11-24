@@ -24,7 +24,7 @@ import {
 
 type Person = { id: number; name: string; avatar?: string | null };
 
-const isDirectorRole = (role?: string) => true;
+const isDirectorRole = (role?: string) => ['ceo', 'super_admin', 'director', 'admin'].includes((role || '').toLowerCase());
 const fmtDate = (iso?: string | null) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 const paragraphs = (t: string) => t.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
 
