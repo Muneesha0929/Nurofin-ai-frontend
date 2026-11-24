@@ -265,7 +265,7 @@ export default function ClientLayout({
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen bg-background-primary text-text-primary font-sans flex relative">
+      <div className="h-screen overflow-hidden bg-background-primary text-text-primary font-sans flex relative">
         {/* Fixed Animated Grid & Glow Backdrop */}
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
           {/* Soft animated glowing background blobs */}
@@ -292,7 +292,7 @@ export default function ClientLayout({
         {/* Unified Content Frame */}
         <div 
           className={cn(
-            "flex-1 flex flex-col min-h-screen transition-all duration-300 relative z-10 min-w-0",
+            "flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 relative z-10 min-w-0",
             sidebarCollapsed ? "pl-0 md:pl-16" : "pl-0 md:pl-64"
           )}
         >
@@ -300,7 +300,7 @@ export default function ClientLayout({
           <Topbar />
 
           {/* Core Content Area */}
-          <main className="flex-1 pt-20 sm:pt-24 px-3 sm:px-5 md:px-6 pb-36 overflow-y-auto overflow-x-auto scrollbar-thin min-h-screen min-w-0">
+          <main className="flex-1 overflow-y-auto overflow-x-auto scrollbar-thin px-3 sm:px-5 md:px-6 pt-6 pb-36 min-w-0">
             {children}
           </main>
           {/* Global Task Adding Option (Docked at Bottom of Every Page) */}

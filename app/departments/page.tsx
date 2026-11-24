@@ -92,6 +92,9 @@ function DepartmentList() {
   // Set after a delete (here or from a department page): offers Undo for 15 seconds.
   const [undo, setUndo] = useState<{ id: number; name: string } | null>(null);
 
+  const isHod = data?.departments?.some(d => String(d.hod?.id) === String(userProfile?.id));
+  const canManageTargets = director || isHod;
+
   const load = useCallback(() => {
     api.overview().then(setData).catch(e => setError(e.message));
   }, []);
@@ -115,11 +118,13 @@ function DepartmentList() {
             Each quarter the Director writes one target per department. The HOD reads it and sets the objectives.
           </div>
         </div>
-        <div className="flex gap-2">
-          <Link href="/departments?view=targets" className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-accent-blue text-white hover:bg-accent-blue-hover"><Target size={14} /> Quarter targets</Link>
-          {director && <Btn onClick={() => setFormOpen(true)}><Plus size={14} /> New department</Btn>}
-          {director && <SetupCheck />}
-        </div>
+        {canManageTargets && (
+          <div className="flex gap-2">
+            <Link href="/departments?view=targets" className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-accent-blue text-white hover:bg-accent-blue-hover"><Target size={14} /> Set quarter targets</Link>
+            {director && <Btn onClick={() => setFormOpen(true)}><Plus size={14} /> New department</Btn>}
+            {director && <SetupCheck />}
+          </div>
+        )}
       </div>
 
       {undo && <UndoBar key={undo.id} item={undo} onDone={() => setUndo(null)} onUndone={load} onError={setError} />}
@@ -290,15 +295,17 @@ function DepartmentView({ id }: { id: number }) {
           </div>
         </div>
         <div className="flex flex-col items-start md:items-end gap-3">
-          <div className="flex gap-2">
-            <Link href="/departments?view=targets" className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-accent-blue text-white hover:bg-accent-blue-hover"><Target size={13} /> Quarter targets</Link>
-            {data.permissions.is_director && (
-              <>
-                <Btn onClick={() => setEditOpen(true)}><Pencil size={13} /> Edit department</Btn>
-                <HoldToDelete label="Hold to delete" onConfirm={removeHere} />
-              </>
-            )}
-          </div>
+          {(data.permissions.is_director || data.permissions.is_hod) && (
+            <div className="flex gap-2">
+              <Link href="/departments?view=targets" className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-accent-blue text-white hover:bg-accent-blue-hover"><Target size={13} /> Set quarter targets</Link>
+              {data.permissions.is_director && (
+                <>
+                  <Btn onClick={() => setEditOpen(true)}><Pencil size={13} /> Edit department</Btn>
+                  <HoldToDelete label="Hold to delete" onConfirm={removeHere} />
+                </>
+              )}
+            </div>
+          )}
           {cur && (
             <div className="flex gap-6">
               <Fact label={`${cur.short} progress`} value={cur.progress === null ? '—' : `${Math.round(cur.progress)}%`} />
@@ -664,6 +671,9 @@ function QuarterTargetsView() {
   }, [sel]);
 
   if (!data || !sel) return <div className="text-[13px] text-text-secondary animate-pulse">Loading…</div>;
+
+  const isHod = data.departments.some(d => String(d.hod?.id) === String(userProfile?.id));
+  if (!director && !isHod) return <><BackLink /><ErrorNote text="Only the Director and HODs manage quarter targets." /></>;
 
   // This financial year's four quarters, plus Q1 of the next one.
   const options = [1, 2, 3, 4].map(q => ({ fy: data.quarter.fiscal_year, q })).concat([{ fy: data.quarter.fiscal_year + 1, q: 1 }]);

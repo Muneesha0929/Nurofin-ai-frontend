@@ -63,10 +63,7 @@ export default function Topbar() {
 
   return (
     <header 
-      className={cn(
-        "h-16 border-b border-border-subtle bg-background-secondary/80 backdrop-blur-md px-3 sm:px-6 flex items-center justify-between fixed right-0 top-0 z-30 transition-all duration-300",
-        sidebarCollapsed ? "left-0 md:left-16" : "left-0 md:left-64"
-      )}
+      className="h-16 border-b border-border-subtle bg-background-secondary/95 backdrop-blur-md px-3 sm:px-6 flex items-center justify-between shrink-0 sticky top-0 z-30 w-full transition-all duration-300"
     >
       {/* Left Area: Menu toggle and Page Header Title */}
       <div className="flex items-center gap-2.5 sm:gap-4 min-w-0">
