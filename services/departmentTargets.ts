@@ -105,6 +105,7 @@ export interface TargetDepartment {
 
 export interface OverviewDepartment extends TargetDepartment, TargetFields, QuarterStats {
   new_for_me: boolean;
+  objectives_tree?: ObjectiveNode[];
 }
 
 export type WidgetKind = 'number' | 'money' | 'percent' | 'milestone';

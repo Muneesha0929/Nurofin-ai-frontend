@@ -115,13 +115,11 @@ function DepartmentList() {
             Each quarter the Director writes one target per department. The HOD reads it and sets the objectives.
           </div>
         </div>
-        {director && (
-          <div className="flex gap-2">
-            <Link href="/departments?view=targets" className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-accent-blue text-white hover:bg-accent-blue-hover"><Target size={14} /> Set quarter targets</Link>
-            <Btn onClick={() => setFormOpen(true)}><Plus size={14} /> New department</Btn>
-            <SetupCheck />
-          </div>
-        )}
+        <div className="flex gap-2">
+          <Link href="/departments?view=targets" className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-accent-blue text-white hover:bg-accent-blue-hover"><Target size={14} /> Quarter targets</Link>
+          {director && <Btn onClick={() => setFormOpen(true)}><Plus size={14} /> New department</Btn>}
+          {director && <SetupCheck />}
+        </div>
       </div>
 
       {undo && <UndoBar key={undo.id} item={undo} onDone={() => setUndo(null)} onUndone={load} onError={setError} />}
@@ -292,13 +290,15 @@ function DepartmentView({ id }: { id: number }) {
           </div>
         </div>
         <div className="flex flex-col items-start md:items-end gap-3">
-          {data.permissions.is_director && (
-            <div className="flex gap-2">
-              <Link href="/departments?view=targets" className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-accent-blue text-white hover:bg-accent-blue-hover"><Target size={13} /> Set quarter targets</Link>
-              <Btn onClick={() => setEditOpen(true)}><Pencil size={13} /> Edit department</Btn>
-              <HoldToDelete label="Hold to delete" onConfirm={removeHere} />
-            </div>
-          )}
+          <div className="flex gap-2">
+            <Link href="/departments?view=targets" className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold inline-flex items-center gap-1.5 bg-accent-blue text-white hover:bg-accent-blue-hover"><Target size={13} /> Quarter targets</Link>
+            {data.permissions.is_director && (
+              <>
+                <Btn onClick={() => setEditOpen(true)}><Pencil size={13} /> Edit department</Btn>
+                <HoldToDelete label="Hold to delete" onConfirm={removeHere} />
+              </>
+            )}
+          </div>
           {cur && (
             <div className="flex gap-6">
               <Fact label={`${cur.short} progress`} value={cur.progress === null ? '—' : `${Math.round(cur.progress)}%`} />
@@ -349,6 +349,7 @@ const ErrorNote = ({ text }: { text: string }) => (
 
 function QuarterBlock({ dept, q, open, onToggle, reload }: { dept: DepartmentDetail; q: DepartmentQuarter; open: boolean; onToggle: () => void; reload: () => void }) {
   const { is_director, can_plan, is_hod } = dept.permissions;
+  const canEditTarget = is_director || can_plan;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [showObjectives, setShowObjectives] = useState(true);
@@ -391,12 +392,12 @@ function QuarterBlock({ dept, q, open, onToggle, reload }: { dept: DepartmentDet
 
       {open && (
         <div className="border-t border-border-subtle p-5 flex flex-col gap-4">
-          {/* Director's message */}
+          {/* Department target */}
           <div className="rounded-xl bg-background-primary border border-border-subtle p-4 md:p-5">
             <div className="flex items-center gap-2 text-[12px] text-text-secondary mb-2">
-              <Target size={13} className="text-accent-blue" /> Director’s target for {dept.name} · {q.short}
+              <Target size={13} className="text-accent-blue" /> Department target for {dept.name} · {q.short}
               {q.message_updated_at && <span>· updated {new Date(q.message_updated_at + 'Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>}
-              {is_director && !editing && q.message && <Btn kind="ghost" className="ml-auto" onClick={() => { setDraft(q.message || ''); setEditing(true); }}><Pencil size={12} /> Edit</Btn>}
+              {canEditTarget && !editing && q.message && <Btn kind="ghost" className="ml-auto" onClick={() => { setDraft(q.message || ''); setEditing(true); }}><Pencil size={12} /> Edit</Btn>}
             </div>
             {editing ? (
               <div className="flex flex-col gap-2">
@@ -413,9 +414,9 @@ function QuarterBlock({ dept, q, open, onToggle, reload }: { dept: DepartmentDet
             ) : (
               <div className="flex flex-col gap-2 items-start">
                 <div className="text-[13px] text-text-secondary">
-                  {is_director ? `No target written for ${q.short} yet.` : 'The Director has not written this target yet.'}
+                  {canEditTarget ? `No target written for ${q.short} yet.` : 'No target written for this quarter yet.'}
                 </div>
-                {is_director && <Btn kind="primary" onClick={() => { setDraft(''); setEditing(true); }}><Pencil size={12} /> Write the {q.short} target</Btn>}
+                {canEditTarget && <Btn kind="primary" onClick={() => { setDraft(''); setEditing(true); }}><Pencil size={12} /> Write the {q.short} target</Btn>}
               </div>
             )}
           </div>
@@ -662,7 +663,6 @@ function QuarterTargetsView() {
     }).catch(e => setNote({ ok: false, text: e.message }));
   }, [sel]);
 
-  if (!director) return <><BackLink /><ErrorNote text="Only the Director sets quarter targets." /></>;
   if (!data || !sel) return <div className="text-[13px] text-text-secondary animate-pulse">Loading…</div>;
 
   // This financial year's four quarters, plus Q1 of the next one.
@@ -673,12 +673,12 @@ function QuarterTargetsView() {
     e.preventDefault();
     setBusy(true); setNote(null);
     try {
-      if ((data.headline || '') !== headline.trim()) await api.setHeadline(sel.fy, sel.q, headline);
+      if (director && (data.headline || '') !== headline.trim()) await api.setHeadline(sel.fy, sel.q, headline);
       const changed = data.departments.filter(d => (d.message || '') !== (messages[d.id] || '').trim());
       for (const d of changed) await api.updateQuarter(d.id, sel.fy, sel.q, { message: messages[d.id] || '' });
       const notified = changed.filter(d => d.hod && (messages[d.id] || '').trim()).length;
-      setNote({ ok: true, text: changed.length ? `Saved. ${notified} ${notified === 1 ? 'HOD has' : 'HODs have'} been notified.` : 'Saved.' });
-      setData({ ...data, headline: headline.trim() || null, departments: data.departments.map(d => ({ ...d, message: (messages[d.id] || '').trim() || null })) });
+      setNote({ ok: true, text: changed.length ? `Saved. ${notified ? `${notified} ${notified === 1 ? 'HOD has' : 'HODs have'} been notified.` : ''}` : 'Saved.' });
+      setData({ ...data, headline: director ? (headline.trim() || null) : data.headline, departments: data.departments.map(d => ({ ...d, message: (messages[d.id] || '').trim() || null })) });
     } catch (err: any) { setNote({ ok: false, text: err.message }); } finally { setBusy(false); }
   };
 
@@ -688,7 +688,7 @@ function QuarterTargetsView() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-[26px] font-extrabold">Quarter targets</div>
-          <div className="text-[13.5px] text-text-secondary mt-1 max-w-2xl">Write one line for the whole company, then one message per department. The HOD reads it and sets the objectives from it.</div>
+          <div className="text-[13.5px] text-text-secondary mt-1 max-w-2xl">Quarter targets and objectives for each department. Set the target message and review objectives.</div>
         </div>
         <div className="flex flex-wrap rounded-lg border border-border-subtle overflow-hidden bg-background-secondary">
           {options.map(o => (
@@ -702,12 +702,19 @@ function QuarterTargetsView() {
       <QuarterPills quarter={data.quarter} />
 
       <form onSubmit={save} className="flex flex-col gap-4">
-        <Panel className="p-5 flex flex-col gap-2">
-          <label htmlFor="qt-headline" className="text-[12.5px] font-semibold text-text-secondary">{data.quarter.label} · {data.quarter.range} · the one-line target for the company</label>
-          <input id="qt-headline" value={headline} onChange={e => setHeadline(e.target.value)} maxLength={500}
-            placeholder="e.g. Make Nurofin the default payout partner for mid-market merchants"
-            className={cn(inputCls, 'text-[20px] font-extrabold py-3')} />
-        </Panel>
+        {director ? (
+          <Panel className="p-5 flex flex-col gap-2">
+            <label htmlFor="qt-headline" className="text-[12.5px] font-semibold text-text-secondary">{data.quarter.label} · {data.quarter.range} · the one-line target for the company</label>
+            <input id="qt-headline" value={headline} onChange={e => setHeadline(e.target.value)} maxLength={500}
+              placeholder="e.g. Make Nurofin the default payout partner for mid-market merchants"
+              className={cn(inputCls, 'text-[20px] font-extrabold py-3')} />
+          </Panel>
+        ) : data.headline ? (
+          <Panel className="p-5 flex flex-col gap-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-text-secondary">{data.quarter.label} · {data.quarter.range} · Company Target</span>
+            <span className="text-[17px] font-extrabold text-text-primary">{data.headline}</span>
+          </Panel>
+        ) : null}
 
         {data.departments.length ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -721,10 +728,40 @@ function QuarterTargetsView() {
                   </div>
                   {d.objectives > 0 && <Chip tone="muted">{d.objectives} {d.objectives === 1 ? 'objective' : 'objectives'} set</Chip>}
                 </div>
-                <textarea aria-label={`Target for ${d.name}`} rows={6} maxLength={20000} value={messages[d.id] || ''}
+                <textarea aria-label={`Target for ${d.name}`} rows={4} maxLength={20000} value={messages[d.id] || ''}
                   onChange={e => setMessages({ ...messages, [d.id]: e.target.value })}
                   placeholder={`What does ${d.name} have to achieve in ${data.quarter.short}? Write it the way you would explain it in a meeting.`}
                   className={cn(inputCls, 'text-[14px] leading-relaxed')} />
+
+                {/* Objectives under this target */}
+                {d.objectives_tree && d.objectives_tree.length > 0 ? (
+                  <div className="mt-1 pt-3 border-t border-border-subtle flex flex-col gap-2">
+                    <div className="text-[12px] font-bold uppercase tracking-wider text-text-secondary flex items-center justify-between">
+                      <span>Objectives ({d.objectives_tree.length})</span>
+                      <Link href={`/departments?id=${d.id}`} className="text-accent-blue hover:underline text-[11.5px] font-semibold">View department →</Link>
+                    </div>
+                    <div className="flex flex-col gap-1.5 max-h-56 overflow-y-auto">
+                      {d.objectives_tree.map((obj, idx) => (
+                        <div key={obj.id} className="text-[12.5px] bg-background-primary/60 border border-border-subtle rounded-lg px-3 py-2 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-extrabold text-accent-blue text-[12px] w-4 shrink-0">{idx + 1}.</span>
+                            <span className="font-semibold truncate">{obj.title}</span>
+                            {obj.children?.length > 0 && <span className="text-[11px] text-text-secondary shrink-0">({obj.children.length} sub)</span>}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 text-[11.5px] text-text-secondary">
+                            {obj.owner && <span className="truncate max-w-[100px]">{obj.owner.name}</span>}
+                            <span className="font-bold text-text-primary">{Math.round(obj.progress || 0)}%</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-1 pt-2 border-t border-border-subtle/50 text-[12px] text-text-secondary flex items-center justify-between">
+                    <span>No objectives set for {data.quarter.short} yet.</span>
+                    <Link href={`/departments?id=${d.id}`} className="text-accent-blue hover:underline text-[11.5px] font-semibold">Add objectives in department →</Link>
+                  </div>
+                )}
               </Panel>
             ))}
           </div>
@@ -734,7 +771,7 @@ function QuarterTargetsView() {
 
         <div className="flex items-center justify-end gap-3">
           {note && <span className={cn('text-[13px] font-semibold', note.ok ? 'text-accent-green' : 'text-accent-red')}>{note.text}</span>}
-          <Btn type="submit" kind="primary" disabled={busy}>{busy ? 'Saving…' : 'Save and notify HODs'}</Btn>
+          <Btn type="submit" kind="primary" disabled={busy}>{busy ? 'Saving…' : director ? 'Save and notify HODs' : 'Save targets'}</Btn>
         </div>
       </form>
     </>
