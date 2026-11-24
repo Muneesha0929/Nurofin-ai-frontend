@@ -83,7 +83,7 @@ export default function UnifiedTargetsPage() {
 
       const isUserCeo = (u: UserProfile) => {
         const r = (u.role || '').toLowerCase();
-        return r === 'ceo' || r === 'super_admin' || Number(u.id) === 1;
+        return (r === 'ceo' || r === 'super_admin' || Number(u.id) === 1) && (Number(u.id) === 1 || String(u.email || '').toLowerCase().includes('vincent'));
       };
 
       if (canManageTargets) {

@@ -124,8 +124,10 @@ export default function PerformanceDashboard({
   
   const isCeo = (userId: number) => {
       if (userId === 1) return true;
-      const role = getUserRole(userId);
-      return role === 'ceo' || role === 'super_admin' || role === 'admin';
+      const u = allUsersList.find(x => Number(x.id) === userId);
+      const email = String(u?.email || '').toLowerCase();
+      const role = u?.role?.toLowerCase() || '';
+      return (role === 'ceo' || role === 'super_admin') && (userId === 1 || email.includes('vincent'));
   };
 
   let monthName = "All Time";
