@@ -14,10 +14,17 @@ import {
   CheckSquare,
   Video, 
   UserCheck,
-  AlertCircle
+  AlertCircle,
+  Building2,
+  Target,
+  ChevronRight,
+  Search,
+  Loader2,
+  MessageSquare
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { workcenterService, WCTask } from '@/services/workcenter';
+import { departmentTargetsService, BoardDepartment, ObjectiveNode, LinkedTask, QuarterInfo } from '@/services/departmentTargets';
 import { issuesService } from '@/services/issues';
 import { projectsService } from '@/services/projects';
 import { usersService } from '@/services/users';
@@ -64,10 +71,23 @@ export function QuickAddTaskInput({
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [selectedParentTaskId, setSelectedParentTaskId] = useState<number | null>(null);
   const [selectedAssigneeId, setSelectedAssigneeId] = useState<number | null>(null);
+  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
+  const [selectedObjectiveId, setSelectedObjectiveId] = useState<number | null>(null);
+  const [selectedObjectiveCode, setSelectedObjectiveCode] = useState<string>('');
+  const [nextAutoCode, setNextAutoCode] = useState<string>('');
   const [deadline, setDeadline] = useState<string>(today());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>('10:00 - 11:00');
   const [showTimePicker, setShowTimePicker] = useState(false);
+
+  // Department (##) state
+  const [boardDepts, setBoardDepts] = useState<BoardDepartment[]>([]);
+  const [boardQuarter, setBoardQuarter] = useState<QuarterInfo | null>(null);
+  const [deptSearch, setDeptSearch] = useState('');
+  const [creatingTargetFor, setCreatingTargetFor] = useState<{ parentId: number | null; nextNum: string } | null>(null);
+  const [newTargetTitle, setNewTargetTitle] = useState('');
+  const [creatingTargetBusy, setCreatingTargetBusy] = useState(false);
+  const [creatingTargetErr, setCreatingTargetErr] = useState('');
 
   // Time slot conflict detection prompt
   const [conflictPrompt, setConflictPrompt] = useState<{
@@ -84,8 +104,8 @@ export function QuickAddTaskInput({
     nextEnd: string;
   } | null>(null);
 
-  // Active autocomplete trigger popup: null | 'project' | 'subtask' | 'assignee'
-  const [activeTrigger, setActiveTrigger] = useState<'project' | 'subtask' | 'assignee' | null>(null);
+  // Active autocomplete trigger popup: null | 'department' | 'project' | 'subtask' | 'assignee'
+  const [activeTrigger, setActiveTrigger] = useState<'department' | 'project' | 'subtask' | 'assignee' | null>(null);
   const [triggerQuery, setTriggerQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
@@ -107,6 +127,23 @@ export function QuickAddTaskInput({
   const [fetchedProjects, setFetchedProjects] = useState<Project[]>([]);
   const [fetchedTasks, setFetchedTasks] = useState<any[]>([]);
   const [fetchedTeammates, setFetchedTeammates] = useState<TeammateUser[]>([]);
+
+  const loadDepartmentBoard = React.useCallback(() => {
+    departmentTargetsService.board()
+      .then(b => {
+        setBoardDepts(b.departments || []);
+        setBoardQuarter(b.quarter || null);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!isMounted) return;
+    loadDepartmentBoard();
+    const onRefresh = () => loadDepartmentBoard();
+    window.addEventListener('task:created', onRefresh);
+    return () => window.removeEventListener('task:created', onRefresh);
+  }, [isMounted, loadDepartmentBoard]);
 
   useEffect(() => {
     if (!isMounted) return;
@@ -280,6 +317,24 @@ export function QuickAddTaskInput({
     return effectiveTeammates.find(u => Number(u.id) === selectedAssigneeId) || null;
   }, [selectedAssigneeId, effectiveTeammates]);
 
+  const selectedDept = useMemo(() => {
+    if (!selectedDeptId) return null;
+    return boardDepts.find(d => d.id === selectedDeptId) || null;
+  }, [selectedDeptId, boardDepts]);
+
+  const selectedObjective = useMemo(() => {
+    if (!selectedObjectiveId) return null;
+    for (const d of boardDepts) {
+      for (const o of d.objectives_tree || []) {
+        if (o.id === selectedObjectiveId) return { obj: o, dept: d };
+        for (const c of o.children || []) {
+          if (c.id === selectedObjectiveId) return { obj: c, dept: d };
+        }
+      }
+    }
+    return null;
+  }, [selectedObjectiveId, boardDepts]);
+
   // Hierarchical Subtask Tree Parser (Matching Operations Calendar exactly!)
   const hierarchicalTasks = useMemo(() => {
     // 1. Filter tasks by selected project if specified, with full ancestor project inheritance
@@ -402,19 +457,42 @@ export function QuickAddTaskInput({
     );
   }, [activeTrigger, triggerQuery, effectiveTeammates]);
 
-  // Check cursor position for '#', '~', or '@'
+  const filteredDepartments = useMemo(() => {
+    if (activeTrigger !== 'department') return [];
+    const q = triggerQuery.toLowerCase().trim();
+    return boardDepts.filter(d =>
+      !q ||
+      d.name.toLowerCase().includes(q) ||
+      (d.short_code && d.short_code.toLowerCase().includes(q))
+    );
+  }, [activeTrigger, triggerQuery, boardDepts]);
+
+  // Check cursor position for '##', '#', '~', or '@'
   const checkTriggerAtCursor = (val: string, cursorPos: number) => {
     const textBeforeCursor = val.slice(0, cursorPos);
     const words = textBeforeCursor.split(/\s+/);
     const currentWord = words[words.length - 1] || '';
 
-    const hashIdx = currentWord.lastIndexOf('#');
+    const doubleHashIdx = currentWord.lastIndexOf('##');
+    const singleHashIdx = currentWord.lastIndexOf('#');
+    const hashIdx = doubleHashIdx !== -1 ? -1 : singleHashIdx;
     const tildeIdx = currentWord.lastIndexOf('~');
     const atIdx = currentWord.lastIndexOf('@');
 
-    const maxIdx = Math.max(hashIdx, tildeIdx, atIdx);
+    const maxIdx = Math.max(doubleHashIdx, hashIdx, tildeIdx, atIdx);
     if (maxIdx !== -1) {
-      if (maxIdx === hashIdx) {
+      if (maxIdx === doubleHashIdx) {
+        const q = currentWord.slice(doubleHashIdx + 2);
+        setActiveTrigger('department');
+        setTriggerQuery(q);
+        setHighlightedIndex(0);
+        setShowDatePicker(false);
+        setShowTimePicker(false);
+        // If user typed ##CODE and space hasn't been pressed yet, keep dept picker unless exact match locked
+        if (q.length === 0) {
+          setSelectedDeptId(null);
+        }
+      } else if (maxIdx === hashIdx) {
         setActiveTrigger('project');
         setTriggerQuery(currentWord.slice(hashIdx + 1));
         setHighlightedIndex(0);
@@ -456,28 +534,29 @@ export function QuickAddTaskInput({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (activeTrigger) {
       let count = 0;
+      if (activeTrigger === 'department' && !selectedDeptId) count = filteredDepartments.length;
       if (activeTrigger === 'project') count = filteredProjects.length;
       if (activeTrigger === 'subtask') count = filteredSubtasks.length;
       if (activeTrigger === 'assignee') count = filteredTeammates.length;
 
-      if (e.key === 'ArrowDown') {
+      if (e.key === 'ArrowDown' && count > 0) {
         e.preventDefault();
         setHighlightedIndex(prev => (prev + 1) % Math.max(1, count));
         return;
-      } else if (e.key === 'ArrowUp') {
+      } else if (e.key === 'ArrowUp' && count > 0) {
         e.preventDefault();
         setHighlightedIndex(prev => (prev - 1 + count) % Math.max(1, count));
         return;
-      } else if (e.key === 'Enter' || e.key === 'Tab') {
+      } else if ((e.key === 'Enter' || e.key === 'Tab') && count > 0) {
         e.preventDefault();
-        if (count > 0) {
-          if (activeTrigger === 'project' && filteredProjects[highlightedIndex]) {
-            selectProject(filteredProjects[highlightedIndex]);
-          } else if (activeTrigger === 'subtask' && filteredSubtasks[highlightedIndex]) {
-            selectSubtask(filteredSubtasks[highlightedIndex]);
-          } else if (activeTrigger === 'assignee' && filteredTeammates[highlightedIndex]) {
-            selectAssignee(filteredTeammates[highlightedIndex]);
-          }
+        if (activeTrigger === 'department' && !selectedDeptId && filteredDepartments[highlightedIndex]) {
+          selectDepartment(filteredDepartments[highlightedIndex]);
+        } else if (activeTrigger === 'project' && filteredProjects[highlightedIndex]) {
+          selectProject(filteredProjects[highlightedIndex]);
+        } else if (activeTrigger === 'subtask' && filteredSubtasks[highlightedIndex]) {
+          selectSubtask(filteredSubtasks[highlightedIndex]);
+        } else if (activeTrigger === 'assignee' && filteredTeammates[highlightedIndex]) {
+          selectAssignee(filteredTeammates[highlightedIndex]);
         }
         return;
       } else if (e.key === 'Escape') {
@@ -490,6 +569,127 @@ export function QuickAddTaskInput({
     if (e.key === 'Enter' && !activeTrigger) {
       e.preventDefault();
       handleSubmit();
+    }
+  };
+
+  const applyAutoCodeToText = (baseText: string, newCode: string, prevCode: string) => {
+    let updated = baseText;
+    if (prevCode) {
+      const esc = prevCode.replace(/\./g, '\\.');
+      updated = updated.replace(new RegExp(`(^|\\s)${esc}\\s*`), '$1');
+    }
+    const trimmed = updated.trim();
+    return trimmed ? `${trimmed} ${newCode} ` : `${newCode} `;
+  };
+
+  const selectDepartment = (dept: BoardDepartment) => {
+    setSelectedDeptId(dept.id);
+    setDeptSearch('');
+    setCreatingTargetFor(null);
+    const codeTag = `##${dept.short_code || dept.name.replace(/\s+/g, '')}`;
+    const cursorPos = inputRef.current?.selectionStart ?? text.length;
+    const textBefore = text.slice(0, cursorPos);
+    const textAfter = text.slice(cursorPos);
+    const lastDoubleHash = textBefore.lastIndexOf('##');
+
+    let newText = '';
+    if (lastDoubleHash !== -1) {
+      const before = textBefore.slice(0, lastDoubleHash);
+      newText = `${before}${codeTag} ${textAfter}`.trimStart();
+    } else {
+      // Remove any prior ##CODE tag
+      const stripped = text.replace(/##\S+\s*/g, '').trim();
+      newText = stripped ? `${codeTag} ${stripped}` : `${codeTag} `;
+    }
+    setText(newText);
+    setTriggerQuery('');
+    // Keep popup open in department explorer mode so user sees all objectives/targets/tasks & can click or create!
+    setActiveTrigger('department');
+  };
+
+  const selectDeptObjectiveTarget = (dept: BoardDepartment, obj: ObjectiveNode) => {
+    const objCode = obj.code || '';
+    const nextNum = obj.parent_id
+      ? `${objCode}.${obj.tasks.length + 1}`
+      : `${objCode}.${(obj.children.length ? obj.children.length : 0) + obj.tasks.length + 1}`;
+    const prevAuto = nextAutoCode;
+    setSelectedDeptId(dept.id);
+    setSelectedObjectiveId(obj.id);
+    setSelectedObjectiveCode(objCode);
+    setSelectedParentTaskId(null);
+    setNextAutoCode(nextNum);
+
+    const codeTag = `##${dept.short_code || dept.name.replace(/\s+/g, '')}`;
+    setText(prev => {
+      let base = prev.trim();
+      if (!base.toLowerCase().includes(codeTag.toLowerCase())) {
+        base = base ? `${codeTag} ${base}` : codeTag;
+      }
+      return applyAutoCodeToText(base, nextNum, prevAuto);
+    });
+    setActiveTrigger(null);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const selectDeptTaskTarget = (dept: BoardDepartment, obj: ObjectiveNode, taskItem: LinkedTask) => {
+    const taskCode = taskItem.code || '';
+    const nextSubNum = taskCode ? `${taskCode}.${(taskItem.subtasks?.length || 0) + 1}` : '';
+    const prevAuto = nextAutoCode;
+    setSelectedDeptId(dept.id);
+    setSelectedObjectiveId(obj.id);
+    setSelectedObjectiveCode(taskCode);
+    setSelectedParentTaskId(taskItem.id);
+    setNextAutoCode(nextSubNum);
+
+    const codeTag = `##${dept.short_code || dept.name.replace(/\s+/g, '')}`;
+    setText(prev => {
+      let base = prev.trim();
+      if (!base.toLowerCase().includes(codeTag.toLowerCase())) {
+        base = base ? `${codeTag} ${base}` : codeTag;
+      }
+      return nextSubNum ? applyAutoCodeToText(base, nextSubNum, prevAuto) : `${base} `;
+    });
+    setActiveTrigger(null);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const clearSelectedDepartment = () => {
+    const prevCode = nextAutoCode;
+    setText(prev => {
+      let t = prev.replace(/##\S+\s*/g, '').trim();
+      if (prevCode) {
+        const esc = prevCode.replace(/\./g, '\\.');
+        t = t.replace(new RegExp(`(^|\\s)${esc}\\s*`), '$1').trim();
+      }
+      return t;
+    });
+    setSelectedDeptId(null);
+    setSelectedObjectiveId(null);
+    setSelectedObjectiveCode('');
+    setNextAutoCode('');
+  };
+
+  const createTargetInsideDept = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDept || !creatingTargetFor || !newTargetTitle.trim() || !boardQuarter) return;
+    setCreatingTargetBusy(true);
+    setCreatingTargetErr('');
+    try {
+      await departmentTargetsService.createObjective({
+        department_id: selectedDept.id,
+        fiscal_year: boardQuarter.fiscal_year,
+        quarter_number: boardQuarter.quarter_number,
+        parent_id: creatingTargetFor.parentId,
+        title: newTargetTitle.trim(),
+      });
+      setNewTargetTitle('');
+      setCreatingTargetFor(null);
+      loadDepartmentBoard();
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('task:created'));
+    } catch (err: any) {
+      setCreatingTargetErr(err.message || 'Could not create target');
+    } finally {
+      setCreatingTargetBusy(false);
     }
   };
 
@@ -605,9 +805,26 @@ export function QuickAddTaskInput({
     let finalParentTaskId: number | null = selectedParentTaskId;
     let finalAssigneeId: number | undefined = selectedAssigneeId || undefined;
 
-    // 1. Detect typed project tag #ProjectName if not explicitly set
+    // 1. Detect typed department tag ##Code (if not explicitly set)
+    let finalDeptId: number | null = selectedDeptId;
+    if (!finalDeptId) {
+      const doubleHashMatch = text.match(/##([^\s~@!]+)/);
+      if (doubleHashMatch) {
+        const dQuery = doubleHashMatch[1].toLowerCase().trim();
+        const foundDept = boardDepts.find(d =>
+          (d.short_code && d.short_code.toLowerCase() === dQuery) ||
+          d.name.toLowerCase() === dQuery ||
+          d.name.toLowerCase().replace(/\s+/g, '') === dQuery ||
+          d.name.toLowerCase().startsWith(dQuery)
+        );
+        if (foundDept) finalDeptId = foundDept.id;
+      }
+    }
+
+    // 1b. Detect typed project tag #ProjectName (single # only) if not explicitly set
     if (!finalProjectId) {
-      const hashMatch = text.match(/#([^\s~@!]+)/);
+      const textNoDoubleHash = text.replace(/##\S+/g, '');
+      const hashMatch = textNoDoubleHash.match(/#([^\s~@!]+)/);
       if (hashMatch) {
         const pQuery = hashMatch[1].toLowerCase().replace(/['"]/g, '');
         const found = effectiveProjects.find(p => 
@@ -652,6 +869,7 @@ export function QuickAddTaskInput({
     }
 
     let cleanTitle = text
+      .replace(/##\S+/g, '')
       .replace(/#"[^"]+"/g, '')
       .replace(/#\S+/g, '')
       .replace(/~"[^"]+"/g, '')
@@ -663,7 +881,12 @@ export function QuickAddTaskInput({
       .trim();
 
     if (!cleanTitle) {
-      if (finalProjectId) {
+      if (selectedObjective) {
+        cleanTitle = nextAutoCode ? `${nextAutoCode} ${selectedObjective.obj.title}` : selectedObjective.obj.title;
+      } else if (finalDeptId) {
+        const dObj = boardDepts.find(d => d.id === finalDeptId);
+        cleanTitle = `${dObj?.name || 'Department'} Task`;
+      } else if (finalProjectId) {
         const pObj = effectiveProjects.find(p => Number(p.id) === finalProjectId);
         cleanTitle = `${pObj?.name || 'Project'} Task`;
       } else {
@@ -753,7 +976,7 @@ export function QuickAddTaskInput({
         ? `[Issue] ${cleanTitle}` 
         : cleanTitle;
 
-      await workcenterService.createTask({
+      const createdTask: any = await workcenterService.createTask({
         title: finalTitle,
         deadline: targetDate,
         scheduled_date: targetDate,
@@ -766,6 +989,12 @@ export function QuickAddTaskInput({
         source: isIssueMode ? (createdIssueId ? `issue:${createdIssueId}` : 'issue') : undefined,
         is_issue: isIssueMode ? true : undefined,
       } as any);
+
+      // Link to selected department objective if creating a task under it (and not already nested under a task that is linked)
+      const createdId = createdTask?.id ?? createdTask?.data?.id;
+      if (createdId && selectedObjectiveId && !finalParentTaskId) {
+        await departmentTargetsService.linkTask(selectedObjectiveId, createdId).catch(() => {});
+      }
 
       if (autoAssignedName) {
         setAutoAssignNotice(`⚠️ Issue auto-assigned to ${autoAssignedName} (Free at ${currentSlot})`);
@@ -791,10 +1020,15 @@ export function QuickAddTaskInput({
       setSelectedProjectId(null);
       setSelectedParentTaskId(null);
       setSelectedAssigneeId(null);
+      setSelectedDeptId(null);
+      setSelectedObjectiveId(null);
+      setSelectedObjectiveCode('');
+      setNextAutoCode('');
       setIsIssue(false);
       setDeadline(today());
       setActiveTrigger(null);
       setConflictPrompt(null);
+      loadDepartmentBoard();
       onTaskCreated?.();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('task:created'));
@@ -860,7 +1094,7 @@ export function QuickAddTaskInput({
             }
           }}
           onKeyDown={handleKeyDown}
-          placeholder={isDocked ? "Quick add task... (# project, ~ subtask, @ person)" : "What would you like to achieve today? Use #project, ~subtask, @assignee, !issue..."}
+          placeholder={isDocked ? "Quick add task... (## dept, # project, ~ subtask, @ person)" : "What would you like to achieve today? Use ##dept, #project, ~subtask, @assignee, !issue..."}
           className="min-w-0 flex-1 bg-transparent border-0 outline-none text-[13px] sm:text-[14.5px] placeholder:text-text-secondary/60 text-text-primary"
           disabled={isSubmitting}
         />
@@ -896,6 +1130,62 @@ export function QuickAddTaskInput({
       <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 mt-2 sm:mt-2.5 pt-2 sm:pt-2.5 border-t border-border-subtle/50 text-[11px] sm:text-[11.5px] py-0.5 w-full">
         {/* Left Section: Context & Assignment Chips */}
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          {/* Department (##) Chip / Button */}
+          {selectedDept ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 font-bold text-xs shadow-xs shrink-0">
+              <Building2 size={12} className="stroke-[2.5]" />
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTrigger('department');
+                  setTriggerQuery('');
+                  setShowDatePicker(false);
+                  setShowTimePicker(false);
+                }}
+                className="flex items-center gap-1 cursor-pointer hover:underline max-w-[210px] truncate"
+                title="Click to pick objective, target, task, or create new target under this department"
+              >
+                <span className="font-mono">##{selectedDept.short_code || selectedDept.name}</span>
+                {selectedObjectiveCode && <span className="opacity-80">· {selectedObjectiveCode}</span>}
+                {nextAutoCode && (
+                  <span className="ml-0.5 px-1.5 py-0.2 rounded bg-indigo-500/20 font-mono text-[10.5px]">
+                    → {nextAutoCode}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={clearSelectedDepartment}
+                className="hover:text-accent-red ml-0.5 cursor-pointer text-indigo-500/70 hover:text-red-500"
+                title="Remove department link"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTrigger(activeTrigger === 'department' ? null : 'department');
+                setTriggerQuery('');
+                setShowDatePicker(false);
+                setShowTimePicker(false);
+                inputRef.current?.focus();
+              }}
+              style={activeTrigger === 'department' ? undefined : { backgroundColor: 'var(--surface-card)' }}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0",
+                activeTrigger === 'department'
+                  ? "bg-indigo-600 text-white shadow-xs"
+                  : "bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-indigo-500/50"
+              )}
+              title="Link to a Department objective, target, or task (##PROD, ##BD...)"
+            >
+              <Building2 size={12} className={activeTrigger === 'department' ? "text-white stroke-[2.5]" : "text-indigo-500 stroke-[2.5]"} />
+              <span>Dept (##)</span>
+            </button>
+          )}
+
           {/* Project Chip / Button */}
           {selectedProject ? (
             <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-xl bg-accent-blue/15 text-accent-blue border border-accent-blue/30 font-bold text-xs shadow-xs shrink-0">
@@ -1262,14 +1552,273 @@ export function QuickAddTaskInput({
             style={{ backgroundColor: 'var(--surface-card, #F9FAFB)' }}
           >
             <span className="flex items-center gap-1.5 font-bold text-text-primary truncate">
+              {activeTrigger === 'department' && (
+                selectedDept
+                  ? <>🏢 <span>##{selectedDept.short_code || selectedDept.name} · {selectedDept.name} ({boardQuarter?.short || 'Current'})</span></>
+                  : <>🏢 <span>Select Department (##)</span></>
+              )}
               {activeTrigger === 'project' && <>📁 <span>Select Project (#)</span></>}
               {activeTrigger === 'subtask' && (
                 <>🌳 <span>{selectedProject ? `Subtasks for #${selectedProject.name} (~)` : 'All Available Tasks (~)'}</span></>
               )}
               {activeTrigger === 'assignee' && <>👤 <span>Assign Teammate (@)</span></>}
             </span>
-            <span className="text-[9px] sm:text-[10px] lowercase text-text-secondary font-normal shrink-0">Esc to close</span>
+            <div className="flex items-center gap-2 shrink-0">
+              {activeTrigger === 'department' && selectedDept && (
+                <button
+                  type="button"
+                  onClick={() => { setSelectedDeptId(null); setDeptSearch(''); setCreatingTargetFor(null); }}
+                  className="text-[10px] text-accent-blue hover:underline font-bold cursor-pointer normal-case"
+                >
+                  All Depts
+                </button>
+              )}
+              <span className="text-[9px] sm:text-[10px] lowercase text-text-secondary font-normal">Esc to close</span>
+            </div>
           </div>
+
+          {/* DEPARTMENT (##) LIST & TREE EXPLORER */}
+          {activeTrigger === 'department' && (
+            <div className="p-2 space-y-2">
+              {!selectedDept ? (
+                filteredDepartments.length === 0 ? (
+                  <div className="p-4 text-center text-xs font-semibold text-text-secondary">No matching departments found</div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {filteredDepartments.map((d, idx) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        onClick={() => selectDepartment(d)}
+                        onMouseEnter={() => setHighlightedIndex(idx)}
+                        style={highlightedIndex === idx ? undefined : { backgroundColor: 'var(--surface-card)' }}
+                        className={cn(
+                          'w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-left transition-all cursor-pointer gap-2',
+                          highlightedIndex === idx
+                            ? 'bg-indigo-600 text-white shadow-md'
+                            : 'bg-surface-card hover:bg-surface-hover text-text-primary border border-border-subtle hover:border-indigo-500/40'
+                        )}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <span className={cn(
+                            'font-mono text-[11px] font-extrabold px-2 py-0.5 rounded-md shrink-0',
+                            highlightedIndex === idx ? 'bg-white/20 text-white' : 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+                          )}>
+                            ##{d.short_code || d.name.slice(0, 3).toUpperCase()}
+                          </span>
+                          <div className="min-w-0">
+                            <div className={cn('font-bold text-xs sm:text-[13px] truncate', highlightedIndex === idx ? 'text-white' : 'text-text-primary')}>
+                              {d.name}
+                            </div>
+                            <div className={cn('text-[10.5px] truncate', highlightedIndex === idx ? 'text-white/80' : 'text-text-secondary')}>
+                              {d.hod ? `${d.hod.name} · ` : ''}{d.objectives} {d.objectives === 1 ? 'objective' : 'objectives'} · {d.done}/{d.items} done
+                            </div>
+                          </div>
+                        </div>
+                        <ChevronRight size={14} className={highlightedIndex === idx ? 'text-white' : 'text-text-secondary'} />
+                      </button>
+                    ))}
+                  </div>
+                )
+              ) : (
+                <div className="space-y-2">
+                  {/* Search + Create Objective bar */}
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search size={12} className="absolute left-2.5 top-2 text-text-muted" />
+                      <input
+                        value={deptSearch}
+                        onChange={e => setDeptSearch(e.target.value)}
+                        placeholder={`Filter ${selectedDept.name} objectives, targets, tasks...`}
+                        className="w-full pl-7 pr-2.5 py-1.5 text-xs rounded-lg border border-border-subtle bg-background-primary text-text-primary outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    {selectedDept.can_plan && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCreatingTargetFor({
+                            parentId: null,
+                            nextNum: String((selectedDept.objectives_tree?.length || 0) + 1),
+                          });
+                          setNewTargetTitle('');
+                          setCreatingTargetErr('');
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+                      >
+                        <Plus size={12} /> Objective {(selectedDept.objectives_tree?.length || 0) + 1}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Inline target/objective creation form */}
+                  {creatingTargetFor && (
+                    <form onSubmit={createTargetInsideDept} className="p-2 rounded-xl border border-indigo-500/30 bg-indigo-500/5 space-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-[11px] font-bold px-2 py-1 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 shrink-0">
+                          {creatingTargetFor.nextNum}
+                        </span>
+                        <input
+                          autoFocus
+                          value={newTargetTitle}
+                          onChange={e => setNewTargetTitle(e.target.value)}
+                          placeholder={creatingTargetFor.parentId ? `New target ${creatingTargetFor.nextNum}...` : `New objective ${creatingTargetFor.nextNum}...`}
+                          className="flex-1 rounded-md border border-border-subtle bg-background-primary px-2 py-1 text-xs text-text-primary outline-none focus:border-indigo-500"
+                        />
+                        <button
+                          type="submit"
+                          disabled={creatingTargetBusy || !newTargetTitle.trim()}
+                          className="px-2.5 py-1 rounded-md bg-indigo-600 text-white text-[11px] font-bold disabled:opacity-50 cursor-pointer"
+                        >
+                          {creatingTargetBusy ? <Loader2 size={11} className="animate-spin" /> : 'Save'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCreatingTargetFor(null)}
+                          className="px-1.5 py-1 text-[11px] text-text-secondary cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      {creatingTargetErr && <div className="text-[11px] text-accent-red">{creatingTargetErr}</div>}
+                    </form>
+                  )}
+
+                  {/* Full hierarchy of Objectives -> Sub-targets -> Tasks -> Subtasks */}
+                  <div className="space-y-1.5">
+                    {(selectedDept.objectives_tree || []).length === 0 ? (
+                      <div className="p-3 text-center text-xs text-text-secondary">
+                        No objectives created under {selectedDept.name} yet.
+                      </div>
+                    ) : (
+                      (selectedDept.objectives_tree || []).map((obj, oi) => {
+                        const objCode = obj.code || String(oi + 1);
+                        const dq = deptSearch.toLowerCase().trim();
+                        const renderLinkedTasks = (tasksList: LinkedTask[], depth: number, parentBaseCode: string) =>
+                          tasksList.map((tk, ti) => {
+                            const tkCode = tk.code || `${parentBaseCode}.${ti + 1}`;
+                            const nextSubNum = `${tkCode}.${(tk.subtasks?.length || 0) + 1}`;
+                            const matchesTk = !dq || tk.title.toLowerCase().includes(dq) || tkCode.includes(dq) || (tk.description || '').toLowerCase().includes(dq);
+                            return (
+                              <React.Fragment key={tk.id}>
+                                {matchesTk && (
+                                  <button
+                                    type="button"
+                                    onClick={() => selectDeptTaskTarget(selectedDept, obj, tk)}
+                                    style={{ paddingLeft: `${depth * 14 + 28}px` }}
+                                    className="w-full flex items-center justify-between gap-2 pr-2.5 py-1.5 rounded-lg hover:bg-purple-500/10 text-left text-xs transition-colors cursor-pointer group"
+                                  >
+                                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                      <CheckSquare size={12} className={tk.done ? 'text-accent-green shrink-0' : 'text-purple-500 shrink-0'} />
+                                      <span className="font-mono text-[10.5px] font-bold px-1.5 py-0.2 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 shrink-0">
+                                        {tkCode}
+                                      </span>
+                                      <span className={cn('truncate font-medium text-text-primary', tk.done && 'line-through text-text-secondary')}>
+                                        {tk.title}
+                                      </span>
+                                      {(tk.followup_count || 0) > 0 && (
+                                        <span className="text-[10px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-0.5 shrink-0">
+                                          <MessageSquare size={9} /> {tk.followup_count}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-[10px] font-mono font-bold text-purple-600 dark:text-purple-400 opacity-75 group-hover:opacity-100 shrink-0">
+                                      + {nextSubNum}
+                                    </span>
+                                  </button>
+                                )}
+                                {tk.subtasks && tk.subtasks.length > 0 && renderLinkedTasks(tk.subtasks, depth + 1, tkCode)}
+                              </React.Fragment>
+                            );
+                          });
+
+                        const objMatches = !dq || obj.title.toLowerCase().includes(dq) || objCode.includes(dq) ||
+                          obj.children.some(c => c.title.toLowerCase().includes(dq) || (c.code || '').includes(dq) || c.tasks.some(t => t.title.toLowerCase().includes(dq))) ||
+                          obj.tasks.some(t => t.title.toLowerCase().includes(dq));
+                        if (!objMatches) return null;
+
+                        const nextObjTaskNum = `${objCode}.${(obj.children.length || 0) + obj.tasks.length + 1}`;
+                        const nextChildNum = `${objCode}.${obj.children.length + 1}`;
+
+                        return (
+                          <div key={obj.id} className="rounded-xl border border-border-subtle bg-surface-card/70 overflow-hidden">
+                            {/* Objective row */}
+                            <div className="flex items-center justify-between gap-2 px-2.5 py-2 bg-background-primary/60">
+                              <button
+                                type="button"
+                                onClick={() => selectDeptObjectiveTarget(selectedDept, obj)}
+                                className="flex items-center gap-2 min-w-0 flex-1 text-left hover:text-accent-blue cursor-pointer"
+                              >
+                                <span className="font-mono text-[11px] font-extrabold px-1.5 py-0.5 rounded bg-accent-blue/15 text-accent-blue shrink-0">
+                                  {objCode}
+                                </span>
+                                <Target size={12} className="text-accent-blue shrink-0" />
+                                <span className="font-bold text-xs text-text-primary truncate">{obj.title}</span>
+                                <span className="text-[10px] font-mono text-accent-blue opacity-75 shrink-0">+ {nextObjTaskNum}</span>
+                              </button>
+                              {selectedDept.can_plan && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCreatingTargetFor({ parentId: obj.id, nextNum: nextChildNum });
+                                    setNewTargetTitle('');
+                                    setCreatingTargetErr('');
+                                  }}
+                                  className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline px-1.5 py-0.5 rounded hover:bg-indigo-500/10 shrink-0 cursor-pointer"
+                                >
+                                  + Target {nextChildNum}
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Direct tasks on Objective */}
+                            {obj.tasks.length > 0 && (
+                              <div className="border-t border-border-subtle/50 py-1">
+                                {renderLinkedTasks(obj.tasks, 0, objCode)}
+                              </div>
+                            )}
+
+                            {/* Sub-objectives / Targets (1.1, 1.2 ...) */}
+                            {obj.children.map((sub, si) => {
+                              const subCode = sub.code || `${objCode}.${si + 1}`;
+                              const nextTaskUnderSub = `${subCode}.${sub.tasks.length + 1}`;
+                              const subMatches = !dq || sub.title.toLowerCase().includes(dq) || subCode.includes(dq) ||
+                                obj.title.toLowerCase().includes(dq) || sub.tasks.some(t => t.title.toLowerCase().includes(dq));
+                              if (!subMatches) return null;
+                              return (
+                                <div key={sub.id} className="border-t border-border-subtle/60">
+                                  <button
+                                    type="button"
+                                    onClick={() => selectDeptObjectiveTarget(selectedDept, sub)}
+                                    className="w-full flex items-center justify-between gap-2 px-3 py-1.5 pl-6 hover:bg-accent-blue/10 text-left text-xs transition-colors cursor-pointer group"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                                      <span className="font-mono text-[11px] font-bold px-1.5 py-0.2 rounded bg-accent-blue/10 text-accent-blue shrink-0">
+                                        {subCode}
+                                      </span>
+                                      <span className="font-semibold text-text-primary truncate">{sub.title}</span>
+                                    </div>
+                                    <span className="text-[10.5px] font-mono font-bold text-accent-blue opacity-80 group-hover:opacity-100 shrink-0">
+                                      + Task {nextTaskUnderSub}
+                                    </span>
+                                  </button>
+                                  {sub.tasks.length > 0 && (
+                                    <div className="pb-1">
+                                      {renderLinkedTasks(sub.tasks, 1, subCode)}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* PROJECT LIST */}
           {activeTrigger === 'project' && (

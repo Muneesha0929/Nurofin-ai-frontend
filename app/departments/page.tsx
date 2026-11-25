@@ -4,19 +4,23 @@ import React, { Suspense, createContext, useCallback, useContext, useEffect, use
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Building2, Plus, ChevronRight, ChevronLeft, Pencil, Trash2, X, Users, Target, Calendar, CheckCircle2, AlertCircle,
+  Building2, Plus, ChevronRight, ChevronLeft, Pencil, Trash2, X, Users, Target, Calendar, CheckCircle2, AlertCircle, FolderKanban,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { HoldToDelete } from '@/components/HoldToDelete';
 import { cn } from '@/utils/cn';
 import { usersService } from '@/services/users';
+import { projectsService } from '@/services/projects';
+import { Project } from '@/types';
 import { ProgressBar } from '@/components/QuarterGoalHero';
-import { ObjectivePanel } from '@/components/SidePanel';
+import { ObjectivePanel, TaskPanel } from '@/components/SidePanel';
 import { ObjectiveTasks } from '@/components/targets/ObjectiveTasks';
 import { DeptCard, Panel, QuarterPills } from '@/components/targets/ui';
+import { workcenterService, WCTask } from '@/services/workcenter';
 
-// Opens the objective side panel from anywhere inside a department page.
+// Opens the objective side panel or task side panel from anywhere inside a department page.
 const OpenObjective = createContext<(id: number) => void>(() => {});
+const OpenTask = createContext<(taskId: number) => void>(() => {});
 import {
   departmentTargetsService as api, DepartmentDetail, DepartmentQuarter, ObjectiveNode,
   Outcome, OUTCOME_LABEL, PersonBrief, QuarterOverview, TargetDepartment,
@@ -167,6 +171,7 @@ function DepartmentList() {
 function DepartmentForm({ dept, onClose, onSaved, onDeleted }: { dept?: TargetDepartment; onClose: () => void; onSaved: () => void; onDeleted?: () => void }) {
   const users = useAllUsers();
   const [name, setName] = useState(dept?.name || '');
+  const [shortCode, setShortCode] = useState(dept?.short_code || '');
   const [hodId, setHodId] = useState<number | ''>(dept?.hod?.id || '');
   const [members, setMembers] = useState<Set<number>>(new Set(dept?.members.map(m => m.id) || []));
   const [search, setSearch] = useState('');
@@ -179,7 +184,13 @@ function DepartmentForm({ dept, onClose, onSaved, onDeleted }: { dept?: TargetDe
     e.preventDefault();
     if (!name.trim()) return setError('Give the department a name.');
     setBusy(true); setError('');
-    const payload = { name: name.trim(), hod_id: hodId || null, member_ids: [...members].filter(id => id !== hodId) };
+    const cleanCode = shortCode.trim().replace(/^#+/, '').toUpperCase();
+    const payload = {
+      name: name.trim(),
+      short_code: cleanCode || null,
+      hod_id: hodId || null,
+      member_ids: [...members].filter(id => id !== hodId),
+    };
     try {
       if (dept) await api.updateDepartment(dept.id, payload); else await api.createDepartment(payload);
       onSaved();
@@ -206,6 +217,13 @@ function DepartmentForm({ dept, onClose, onSaved, onDeleted }: { dept?: TargetDe
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-semibold text-text-secondary">Department name</span>
             <input autoFocus value={name} onChange={e => setName(e.target.value)} maxLength={120} placeholder="e.g. Business Development" className={inputCls} />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[12px] font-semibold text-text-secondary">Shortcut code for ## (optional, e.g. PROD, BD)</span>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[13px] font-bold text-accent-blue">##</span>
+              <input value={shortCode} onChange={e => setShortCode(e.target.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase())} maxLength={10} placeholder="Auto (e.g. PROD)" className={inputCls} />
+            </div>
           </label>
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-semibold text-text-secondary">Head of department (optional)</span>
@@ -250,11 +268,21 @@ function DepartmentView({ id }: { id: number }) {
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [editOpen, setEditOpen] = useState(false);
   const [panelId, setPanelId] = useState<number | null>(null);
+  const [taskPanel, setTaskPanel] = useState<WCTask | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
   const router = useRouter();
   const deleted = () => router.push(`/departments?undo=${id}&name=${encodeURIComponent(data?.name || '')}`);
   const removeHere = async () => {
     try { await api.deleteDepartment(id); deleted(); } catch (e: any) { setError(e.message); }
   };
+
+  useEffect(() => {
+    projectsService.getProjects().then(setProjects).catch(() => {});
+  }, []);
+
+  const openTaskPanel = useCallback((taskId: number) => {
+    workcenterService.getTask(taskId).then(setTaskPanel).catch(() => {});
+  }, []);
 
   const load = useCallback(() => {
     api.getDepartment(id, fy).then(d => {
@@ -272,10 +300,18 @@ function DepartmentView({ id }: { id: number }) {
 
   return (
     <OpenObjective.Provider value={setPanelId}>
+    <OpenTask.Provider value={openTaskPanel}>
       <BackLink />
       <div className="bg-background-secondary border border-border-subtle rounded-2xl p-5 md:p-6 flex flex-col md:flex-row gap-5 md:items-start">
         <div className="flex-1 min-w-0">
-          <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-text-secondary">Department</div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-text-secondary">Department</span>
+            {data.short_code && (
+              <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-accent-blue/10 text-accent-blue">
+                ##{data.short_code}
+              </span>
+            )}
+          </div>
           <div className="text-2xl md:text-3xl font-extrabold mt-1">{data.name}</div>
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2.5">
@@ -329,7 +365,7 @@ function DepartmentView({ id }: { id: number }) {
 
       <div className="flex flex-col gap-3">
         {data.quarters.map(q => (
-          <QuarterBlock key={q.quarter_number} dept={data} q={q} open={open.has(q.quarter_number)} onToggle={() => toggle(q.quarter_number)} reload={load} />
+          <QuarterBlock key={q.quarter_number} dept={data} q={q} projects={projects} open={open.has(q.quarter_number)} onToggle={() => toggle(q.quarter_number)} reload={load} />
         ))}
       </div>
 
@@ -337,6 +373,8 @@ function DepartmentView({ id }: { id: number }) {
         <DepartmentForm dept={data} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); load(); }} onDeleted={deleted} />
       )}
       {panelId !== null && <ObjectivePanel id={panelId} onClose={() => setPanelId(null)} onChanged={load} onOpen={setPanelId} />}
+      {taskPanel && <TaskPanel task={taskPanel} canChange onClose={() => setTaskPanel(null)} onChanged={load} />}
+    </OpenTask.Provider>
     </OpenObjective.Provider>
   );
 }
@@ -354,7 +392,7 @@ const ErrorNote = ({ text }: { text: string }) => (
 
 /* ============================================================ one quarter */
 
-function QuarterBlock({ dept, q, open, onToggle, reload }: { dept: DepartmentDetail; q: DepartmentQuarter; open: boolean; onToggle: () => void; reload: () => void }) {
+function QuarterBlock({ dept, q, projects, open, onToggle, reload }: { dept: DepartmentDetail; q: DepartmentQuarter; projects: Project[]; open: boolean; onToggle: () => void; reload: () => void }) {
   const { is_director, can_plan, is_hod } = dept.permissions;
   const canEditTarget = is_director || can_plan;
   const [editing, setEditing] = useState(false);
@@ -458,7 +496,7 @@ function QuarterBlock({ dept, q, open, onToggle, reload }: { dept: DepartmentDet
               </Btn>
             </div>
           )}
-          {showObjectives && <ObjectiveList dept={dept} q={q} reload={reload} />}
+          {showObjectives && <ObjectiveList dept={dept} q={q} projects={projects} reload={reload} />}
         </div>
       )}
     </div>
@@ -467,36 +505,44 @@ function QuarterBlock({ dept, q, open, onToggle, reload }: { dept: DepartmentDet
 
 /* ============================================================ objectives */
 
-function ObjectiveList({ dept, q, reload }: { dept: DepartmentDetail; q: DepartmentQuarter; reload: () => void }) {
+function ObjectiveList({ dept, q, projects, reload }: { dept: DepartmentDetail; q: DepartmentQuarter; projects: Project[]; reload: () => void }) {
   const [adding, setAdding] = useState(false);
   const people = useMemo(() => [dept.hod, ...dept.members].filter(Boolean) as PersonBrief[], [dept]);
   const { can_plan } = dept.permissions;
+  const nextObjNum = String(q.objectives_tree.length + 1);
 
   return (
     <div className="flex flex-col gap-2.5">
-      {q.objectives_tree.map((o, i) => <ObjectiveCard key={o.id} o={o} n={i + 1} dept={dept} q={q} people={people} reload={reload} />)}
+      {q.objectives_tree.map((o, i) => <ObjectiveCard key={o.id} o={o} n={i + 1} dept={dept} q={q} people={people} projects={projects} reload={reload} />)}
       {!q.objectives_tree.length && (
         <div className="text-[13px] text-text-secondary">
           No objectives yet.{can_plan && q.message ? ' Read the target above and add the first one.' : ''}
         </div>
       )}
       {can_plan && (adding
-        ? <ObjectiveForm people={people} defaultOwner={dept.hod?.id} q={q} onCancel={() => setAdding(false)}
+        ? <ObjectiveForm people={people} projects={projects} defaultOwner={dept.hod?.id} q={q} nextCode={nextObjNum} onCancel={() => setAdding(false)}
             onSubmit={async v => { await api.createObjective({ department_id: dept.id, fiscal_year: q.fiscal_year, quarter_number: q.quarter_number, ...v }); setAdding(false); reload(); }} />
-        : <div><Btn onClick={() => setAdding(true)}><Plus size={13} /> Add objective</Btn></div>)}
+        : <div><Btn onClick={() => setAdding(true)}><Plus size={13} /> Add objective {nextObjNum}</Btn></div>)}
     </div>
   );
 }
 
-function ObjectiveCard({ o, n, dept, q, people, reload }: { o: ObjectiveNode; n: number; dept: DepartmentDetail; q: DepartmentQuarter; people: PersonBrief[]; reload: () => void }) {
+function ObjectiveCard({ o, n, dept, q, people, projects, reload }: { o: ObjectiveNode; n: number; dept: DepartmentDetail; q: DepartmentQuarter; people: PersonBrief[]; projects: Project[]; reload: () => void }) {
   const [open, setOpen] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [editingProject, setEditingProject] = useState(false);
+  const { userProfile } = useStore();
+  const me = dept.me ?? userProfile?.id;
   const { can_plan } = dept.permissions;
+  const canEditProj = can_plan || (o.owner && String(o.owner.id) === String(me));
   const openPanel = useContext(OpenObjective);
+  const openTask = useContext(OpenTask);
+  const objCode = o.code || String(n);
+  const nextSubCode = `${objCode}.${o.children.length + 1}`;
 
   if (editing) {
-    return <ObjectiveForm people={people} initial={o} q={q} onCancel={() => setEditing(false)}
+    return <ObjectiveForm people={people} projects={projects} initial={o} q={q} onCancel={() => setEditing(false)}
       onSubmit={async v => { await api.updateObjective(o.id, v); setEditing(false); reload(); }} />;
   }
 
@@ -506,9 +552,49 @@ function ObjectiveCard({ o, n, dept, q, people, reload }: { o: ObjectiveNode; n:
         <button onClick={() => setOpen(!open)} aria-expanded={open} aria-label="Show sub-objectives" className="text-text-secondary hover:text-text-primary">
           <ChevronRight size={15} className={cn('transition-transform', open && 'rotate-90')} />
         </button>
-        <span className="text-[17px] font-extrabold text-accent-blue w-5 text-center">{n}</span>
+        <span className="text-[17px] font-extrabold text-accent-blue w-6 text-center">{objCode}</span>
         <div className="flex-1 min-w-0">
-          <button onClick={() => openPanel(o.id)} className="text-[13.5px] font-bold text-left hover:text-accent-blue">{o.title}</button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={() => openPanel(o.id)} className="text-[13.5px] font-bold text-left hover:text-accent-blue">{o.title}</button>
+            {editingProject ? (
+              <select
+                autoFocus
+                aria-label="Select project for objective"
+                value={o.own_project_id ?? o.project_id ?? ''}
+                onBlur={() => setEditingProject(false)}
+                onChange={async e => {
+                  const val = e.target.value ? Number(e.target.value) : null;
+                  await api.updateObjective(o.id, { project_id: val });
+                  setEditingProject(false);
+                  reload();
+                }}
+                className="text-[11px] rounded-md border border-accent-blue bg-background-primary px-1.5 py-0.5 text-text-primary"
+              >
+                <option value="">No project</option>
+                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            ) : o.project_name ? (
+              <button
+                type="button"
+                onClick={() => canEditProj && setEditingProject(true)}
+                title={canEditProj ? 'Click to change project' : o.project_name}
+                className={cn(
+                  'inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400',
+                  canEditProj && 'hover:bg-purple-500/20 cursor-pointer'
+                )}
+              >
+                <FolderKanban size={10} /> {o.project_name}
+              </button>
+            ) : canEditProj ? (
+              <button
+                type="button"
+                onClick={() => setEditingProject(true)}
+                className="inline-flex items-center gap-1 text-[10.5px] font-medium px-1.5 py-0.5 rounded-full border border-dashed border-border-subtle text-text-secondary hover:text-purple-600 hover:border-purple-400 cursor-pointer"
+              >
+                <FolderKanban size={10} /> + Project
+              </button>
+            ) : null}
+          </div>
           <div className="text-[12px] text-text-secondary flex flex-wrap gap-x-2">
             <span>{o.owner ? o.owner.name : 'Unassigned'}</span>
             {o.deadline && <span className={cn(o.overdue && 'text-accent-red font-semibold')}>· due {fmtDate(o.deadline)}</span>}
@@ -520,17 +606,26 @@ function ObjectiveCard({ o, n, dept, q, people, reload }: { o: ObjectiveNode; n:
       </div>
       {open && (
         <div className="border-t border-border-subtle">
-          {o.children.map((c, j) => <SubRow key={c.id} c={c} n={`${n}.${j + 1}`} dept={dept} q={q} people={people} reload={reload} />)}
+          {o.children.map((c, j) => <SubRow key={c.id} c={c} n={c.code || `${objCode}.${j + 1}`} dept={dept} q={q} people={people} projects={projects} reload={reload} />)}
           <div className="px-4 py-1.5 border-t border-border-subtle first:border-t-0 pl-12">
             {o.tasks.length > 0 && <div className="text-[10.5px] font-bold uppercase tracking-[0.06em] text-text-secondary pt-1">Tasks directly on this objective</div>}
-            <ObjectiveTasks objectiveId={o.id} tasks={o.tasks} people={people} onChanged={reload} />
+            <ObjectiveTasks
+              objectiveId={o.id}
+              tasks={o.tasks}
+              people={people}
+              onChanged={reload}
+              parentCode={objCode}
+              startIndex={o.children.length ? o.children.length + 1 : 1}
+              projectId={o.project_id}
+              onOpenTask={openTask}
+            />
           </div>
           {can_plan && (adding
             ? <div className="p-3 border-t border-border-subtle bg-background-primary">
-                <ObjectiveForm people={people} q={q} sub onCancel={() => setAdding(false)}
+                <ObjectiveForm people={people} projects={projects} defaultProject={o.project_id ?? undefined} q={q} sub nextCode={nextSubCode} onCancel={() => setAdding(false)}
                   onSubmit={async v => { await api.createObjective({ department_id: dept.id, fiscal_year: q.fiscal_year, quarter_number: q.quarter_number, parent_id: o.id, ...v }); setAdding(false); reload(); }} />
               </div>
-            : <div className="px-4 py-2 border-t border-border-subtle first:border-t-0"><Btn kind="ghost" onClick={() => setAdding(true)}><Plus size={13} /> Add sub-objective</Btn></div>)}
+            : <div className="px-4 py-2 border-t border-border-subtle first:border-t-0"><Btn kind="ghost" onClick={() => setAdding(true)}><Plus size={13} /> Add sub-objective {nextSubCode}</Btn></div>)}
           {!o.children.length && !can_plan && <div className="px-4 py-2.5 text-[12px] text-text-secondary">No sub-objectives yet.</div>}
         </div>
       )}
@@ -538,20 +633,65 @@ function ObjectiveCard({ o, n, dept, q, people, reload }: { o: ObjectiveNode; n:
   );
 }
 
-function SubRow({ c, n, dept, q, people, reload }: { c: ObjectiveNode; n: string; dept: DepartmentDetail; q: DepartmentQuarter; people: PersonBrief[]; reload: () => void }) {
+function SubRow({ c, n, dept, q, people, projects, reload }: { c: ObjectiveNode; n: string; dept: DepartmentDetail; q: DepartmentQuarter; people: PersonBrief[]; projects: Project[]; reload: () => void }) {
   const [editing, setEditing] = useState(false);
+  const [editingProject, setEditingProject] = useState(false);
+  const { userProfile } = useStore();
+  const me = dept.me ?? userProfile?.id;
+  const canEditProj = dept.permissions.can_plan || (c.owner && String(c.owner.id) === String(me));
   const openPanel = useContext(OpenObjective);
+  const openTask = useContext(OpenTask);
   if (editing) {
     return <div className="p-3 border-t border-border-subtle first:border-t-0 bg-background-primary">
-      <ObjectiveForm people={people} initial={c} q={q} sub onCancel={() => setEditing(false)} onSubmit={async v => { await api.updateObjective(c.id, v); setEditing(false); reload(); }} />
+      <ObjectiveForm people={people} projects={projects} initial={c} q={q} sub nextCode={n} onCancel={() => setEditing(false)} onSubmit={async v => { await api.updateObjective(c.id, v); setEditing(false); reload(); }} />
     </div>;
   }
   return (
     <div className="border-t border-border-subtle first:border-t-0">
     <div className="flex items-center gap-3 px-4 py-2.5 pl-12 text-[13px]">
-      <span className="text-[11.5px] text-text-secondary font-mono w-8">{n}</span>
+      <span className="text-[11.5px] text-accent-blue font-bold font-mono w-9">{n}</span>
       <div className="flex-1 min-w-0">
-        <button onClick={() => openPanel(c.id)} className="font-medium text-left hover:text-accent-blue">{c.title}</button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => openPanel(c.id)} className="font-medium text-left hover:text-accent-blue">{c.title}</button>
+          {editingProject ? (
+            <select
+              autoFocus
+              aria-label="Select project for sub-objective"
+              value={c.own_project_id ?? c.project_id ?? ''}
+              onBlur={() => setEditingProject(false)}
+              onChange={async e => {
+                const val = e.target.value ? Number(e.target.value) : null;
+                await api.updateObjective(c.id, { project_id: val });
+                setEditingProject(false);
+                reload();
+              }}
+              className="text-[10.5px] rounded-md border border-accent-blue bg-background-primary px-1.5 py-0.5 text-text-primary"
+            >
+              <option value="">No project</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          ) : c.project_name ? (
+            <button
+              type="button"
+              onClick={() => canEditProj && setEditingProject(true)}
+              title={canEditProj ? 'Click to change project' : c.project_name}
+              className={cn(
+                'inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400',
+                canEditProj && 'hover:bg-purple-500/20 cursor-pointer'
+              )}
+            >
+              <FolderKanban size={9} /> {c.project_name}
+            </button>
+          ) : canEditProj ? (
+            <button
+              type="button"
+              onClick={() => setEditingProject(true)}
+              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border border-dashed border-border-subtle text-text-secondary hover:text-purple-600 hover:border-purple-400 cursor-pointer"
+            >
+              <FolderKanban size={9} /> + Project
+            </button>
+          ) : null}
+        </div>
         <div className="text-[11.5px] text-text-secondary flex flex-wrap gap-x-2">
           <span className="inline-flex items-center gap-1"><Avatar p={c.owner} size={16} /> {c.owner ? c.owner.name : 'Unassigned'}</span>
           {c.deadline && <span className={cn('inline-flex items-center gap-1', c.overdue && 'text-accent-red font-semibold')}><Calendar size={11} /> {fmtDate(c.deadline)}</span>}
@@ -560,20 +700,36 @@ function SubRow({ c, n, dept, q, people, reload }: { c: ObjectiveNode; n: string
       <ItemProgress item={c} dept={dept} reload={reload} />
       {dept.permissions.can_plan && <RowActions onEdit={() => setEditing(true)} onDelete={async () => { await api.deleteObjective(c.id); reload(); }} />}
     </div>
-    <div className="pl-[92px] pr-4 pb-1.5 -mt-1">
-      <ObjectiveTasks objectiveId={c.id} tasks={c.tasks} people={people} onChanged={reload} />
+    <div className="pl-[84px] pr-4 pb-2 -mt-1">
+      <ObjectiveTasks objectiveId={c.id} tasks={c.tasks} people={people} onChanged={reload} parentCode={n} startIndex={1} projectId={c.project_id} onOpenTask={openTask} />
     </div>
     </div>
   );
 }
 
-/** Progress for one item. Leaf items can be updated by the planner or the person it is assigned to. */
+/** Progress for one item. Leaf items can be updated as a percentage by planners or assigned members. */
 function ItemProgress({ item, dept, reload }: { item: ObjectiveNode; dept: DepartmentDetail; reload: () => void }) {
   const { userProfile } = useStore();
-  const mine = item.owner && String(item.owner.id) === String(userProfile?.id);
+  const me = dept.me ?? userProfile?.id;
+  const mine = item.owner && String(item.owner.id) === String(me);
+  const assignedTask = item.tasks.some(t => t.assignee && String(t.assignee.id) === String(me));
   const fromTasks = item.progress_from === 'tasks';
-  const editable = !item.children.length && !fromTasks && (dept.permissions.can_plan || mine);
+  const editable = !item.children.length && (item.can_update_progress ?? (dept.permissions.can_plan || mine || assignedTask));
   const [error, setError] = useState('');
+  const [customPct, setCustomPct] = useState(String(Math.round(item.progress)));
+  useEffect(() => { setCustomPct(String(Math.round(item.progress))); }, [item.progress]);
+
+  const applyProgress = async (val: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(val)));
+    setError('');
+    try {
+      await api.updateObjective(item.id, { progress: clamped });
+      reload();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   const chip = item.status === 'done' ? <Chip tone="green"><CheckCircle2 size={11} /> Done</Chip>
     : item.overdue ? <Chip tone="red">Overdue</Chip>
     : item.status === 'in_progress' ? <Chip tone="blue">In progress</Chip> : <Chip tone="muted">Not started</Chip>;
@@ -584,11 +740,34 @@ function ItemProgress({ item, dept, reload }: { item: ObjectiveNode; dept: Depar
       {fromTasks && <Chip tone={item.status === 'done' ? 'green' : 'muted'}>{item.tasks.filter(t => t.done).length}/{item.tasks.length} tasks</Chip>}
       {editable && item.overdue && <Chip tone="red">Overdue</Chip>}
       {editable ? (
-        <select aria-label="Update progress" value={Math.round(item.progress / 10) * 10} title={error || 'Update progress'}
-          onChange={async e => { try { await api.updateObjective(item.id, { progress: Number(e.target.value) }); reload(); } catch (err: any) { setError(err.message); } }}
-          className="text-[11.5px] rounded-md border border-border-subtle bg-background-primary px-1.5 py-1 text-text-primary">
-          {Array.from({ length: 11 }, (_, i) => i * 10).map(v => <option key={v} value={v}>{v === 100 ? 'Done' : `${v}%`}</option>)}
-        </select>
+        <div className="flex items-center gap-1" title={error || 'Update progress %'}>
+          <select aria-label="Update progress preset" value={Math.round(item.progress / 5) * 5}
+            onChange={e => applyProgress(Number(e.target.value))}
+            className="text-[11.5px] rounded-md border border-border-subtle bg-background-primary px-1.5 py-1 text-text-primary cursor-pointer">
+            {Array.from({ length: 21 }, (_, i) => i * 5).map(v => <option key={v} value={v}>{v === 100 ? '100% Done' : `${v}%`}</option>)}
+          </select>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={customPct}
+            onChange={e => setCustomPct(e.target.value)}
+            onBlur={() => {
+              const n = Number(customPct);
+              if (!Number.isNaN(n) && n !== Math.round(item.progress)) applyProgress(n);
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                const n = Number(customPct);
+                if (!Number.isNaN(n)) applyProgress(n);
+              }
+            }}
+            aria-label="Custom progress percentage"
+            className="w-12 text-[11.5px] text-right rounded-md border border-border-subtle bg-background-primary px-1 py-1 text-text-primary"
+          />
+          <span className="text-[11px] text-text-secondary">%</span>
+        </div>
       ) : chip}
     </div>
   );
@@ -610,12 +789,13 @@ function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => 
   );
 }
 
-function ObjectiveForm({ people, initial, defaultOwner, q, sub, onSubmit, onCancel }: {
-  people: PersonBrief[]; initial?: ObjectiveNode; defaultOwner?: number; q: DepartmentQuarter; sub?: boolean;
-  onSubmit: (v: { title: string; owner_id: number | null; deadline: string | null }) => Promise<void>; onCancel: () => void;
+function ObjectiveForm({ people, projects, initial, defaultOwner, defaultProject, q, sub, nextCode, onSubmit, onCancel }: {
+  people: PersonBrief[]; projects: Project[]; initial?: ObjectiveNode; defaultOwner?: number; defaultProject?: number; q: DepartmentQuarter; sub?: boolean; nextCode?: string;
+  onSubmit: (v: { title: string; owner_id: number | null; project_id: number | null; deadline: string | null }) => Promise<void>; onCancel: () => void;
 }) {
   const [title, setTitle] = useState(initial?.title || '');
   const [owner, setOwner] = useState<number | ''>(initial?.owner?.id ?? defaultOwner ?? '');
+  const [projectId, setProjectId] = useState<number | ''>(initial?.own_project_id ?? initial?.project_id ?? defaultProject ?? '');
   const [deadline, setDeadline] = useState(initial?.deadline || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -623,17 +803,28 @@ function ObjectiveForm({ people, initial, defaultOwner, q, sub, onSubmit, onCanc
     e.preventDefault();
     if (!title.trim()) return setError(sub ? 'Name the sub-objective.' : 'Name the objective.');
     setBusy(true); setError('');
-    try { await onSubmit({ title: title.trim(), owner_id: owner || null, deadline: deadline || null }); }
+    try { await onSubmit({ title: title.trim(), owner_id: owner || null, project_id: projectId || null, deadline: deadline || null }); }
     catch (err: any) { setError(err.message); setBusy(false); }
   };
   return (
     <form onSubmit={submit} className="flex flex-col gap-2 rounded-xl border border-border-subtle bg-background-secondary p-3">
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_190px_160px] gap-2">
-        <input autoFocus value={title} onChange={e => setTitle(e.target.value)} maxLength={300} aria-label="Title"
-          placeholder={sub ? 'Sub-objective, e.g. Proposals to 15 merchants' : 'Objective, e.g. Sign 12 new merchants'} className={inputCls} />
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_165px_165px_145px] gap-2">
+        <div className="flex items-center gap-2">
+          {nextCode && (
+            <span className="font-mono text-[12px] font-bold px-2 py-1.5 rounded-lg bg-accent-blue/10 text-accent-blue shrink-0">
+              {nextCode}
+            </span>
+          )}
+          <input autoFocus value={title} onChange={e => setTitle(e.target.value)} maxLength={300} aria-label="Title"
+            placeholder={sub ? `Sub-objective ${nextCode || ''}, e.g. Proposals to 15 merchants` : `Objective ${nextCode || ''}, e.g. Sign 12 new merchants`} className={inputCls} />
+        </div>
         <select value={owner} onChange={e => setOwner(e.target.value ? Number(e.target.value) : '')} aria-label="Person in charge" className={inputCls}>
           <option value="">Unassigned</option>
           {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={projectId} onChange={e => setProjectId(e.target.value ? Number(e.target.value) : '')} aria-label="Project" className={inputCls}>
+          <option value="">No project</option>
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
         <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} aria-label="Deadline" className={inputCls} />
       </div>

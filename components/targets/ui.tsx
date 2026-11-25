@@ -104,7 +104,14 @@ export function DeptCard({ d, quarter }: { d: OverviewDepartment; quarter: Quart
       <div className="flex items-center gap-2.5">
         <Avatar p={d.hod} size={30} />
         <div className="flex-1 min-w-0">
-          <div className="text-[15px] font-extrabold text-text-primary leading-tight truncate">{d.name}</div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[15px] font-extrabold text-text-primary leading-tight truncate">{d.name}</span>
+            {d.short_code && (
+              <span className="font-mono text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-accent-blue/10 text-accent-blue shrink-0">
+                ##{d.short_code}
+              </span>
+            )}
+          </div>
           <div className="text-[12.5px] text-text-secondary truncate">{d.hod ? `${d.hod.name} · HOD` : 'No HOD yet'}</div>
         </div>
         <span className="text-[22px] font-extrabold text-text-primary">{d.progress === null ? '—' : `${Math.round(d.progress)}%`}</span>

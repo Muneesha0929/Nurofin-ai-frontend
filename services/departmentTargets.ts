@@ -24,12 +24,19 @@ export type ObjectiveStatus = 'not_started' | 'in_progress' | 'done';
 export interface ObjectiveNode {
   id: number;
   parent_id: number | null;
+  code?: string;
   title: string;
   description?: string | null;
   owner: PersonBrief | null;
+  project_id?: number | null;
+  own_project_id?: number | null;
+  project_name?: string | null;
+  project?: { id: number; name: string } | null;
   deadline: string | null;
   status: ObjectiveStatus;
   progress: number;
+  progress_manual?: boolean;
+  can_update_progress?: boolean;
   overdue: boolean;
   health?: Health;
   progress_from?: 'tasks' | 'children' | 'manual';
@@ -37,22 +44,58 @@ export interface ObjectiveNode {
   children: ObjectiveNode[];
 }
 
+export interface LinkedTaskFollowup {
+  id: number;
+  task_id: number;
+  user_id: number;
+  user_name: string;
+  user_avatar?: string | null;
+  content: string;
+  parent_id?: number | null;
+  attachments?: { name?: string; filename?: string; url: string }[];
+  is_followup_completed?: boolean;
+  completed_by_name?: string | null;
+  completed_at?: string | null;
+  created_at?: string | null;
+  replies?: LinkedTaskFollowup[];
+}
+
 export interface LinkedTask {
   id: number;
+  parent_id?: number | null;
+  code?: string;
   title: string;
+  description?: string | null;
   status: string;
+  priority?: string;
   done: boolean;
+  start_date?: string | null;
   deadline: string | null;
+  progress?: number;
   overdue: boolean;
+  project_id?: number | null;
+  project_name?: string | null;
+  quarter_id?: number | null;
   assignee: PersonBrief | null;
+  assigned_by?: PersonBrief | null;
+  followups?: LinkedTaskFollowup[];
+  followup_count?: number;
+  pending_followup_count?: number;
+  subtasks?: LinkedTask[];
 }
 
 export interface LinkableObjective {
   id: number;
+  code?: string;
+  next_task_code?: string;
+  tasks_count?: number;
   title: string;
   level: 'objective' | 'sub_objective';
+  parent_id?: number | null;
   parent_title: string | null;
-  department: { id: number; name: string };
+  project_id?: number | null;
+  project_name?: string | null;
+  department: { id: number; name: string; short_code?: string | null };
   task_quarter_id: number | null;   // the Task Center quarter tab this objective's tasks belong to
 }
 
@@ -71,9 +114,14 @@ export interface ObjectivesBoard {
 
 export interface TaskLinkInfo {
   objective_id: number;
+  objective_code?: string;
+  task_code?: string;
+  is_subtask_inherited?: boolean;
   title: string;
   level: 'objective' | 'sub_objective';
-  department: { id: number; name: string };
+  project_id?: number | null;
+  project_name?: string | null;
+  department: { id: number; name: string; short_code?: string | null };
   quarter: string;
 }
 
@@ -99,6 +147,7 @@ export interface TargetFields {
 export interface TargetDepartment {
   id: number;
   name: string;
+  short_code?: string;
   hod: PersonBrief | null;
   members: PersonBrief[];
 }
@@ -162,6 +211,7 @@ export interface DepartmentQuarter extends QuarterInfo, TargetFields, QuarterSta
 }
 
 export interface DepartmentDetail extends TargetDepartment {
+  me?: number;
   fiscal_year: number;
   fy_label: string;
   current: { fiscal_year: number; quarter_number: number };
@@ -178,12 +228,12 @@ export interface ObjectiveUpdateEntry {
 
 export interface ObjectiveDetail extends ObjectiveNode {
   level: 'objective' | 'sub_objective';
-  department: { id: number; name: string; hod: PersonBrief | null; members?: PersonBrief[] };
+  department: { id: number; name: string; short_code?: string; hod: PersonBrief | null; members?: PersonBrief[] };
   quarter: QuarterInfo;
   director_message: string | null;
-  parent: { id: number; title: string } | null;
+  parent: { id: number; title: string; code?: string; project_id?: number | null } | null;
   updates: ObjectiveUpdateEntry[];
-  permissions: { can_plan: boolean; can_update_progress: boolean; can_post: boolean };
+  permissions: { can_plan: boolean; can_update_progress: boolean; can_edit_project?: boolean; can_post: boolean };
 }
 
 export interface DeadlineItem {
@@ -227,9 +277,9 @@ export const departmentTargetsService = {
   listDepartments: () => call<TargetDepartment[]>('/departments'),
   getDepartment: (id: number, fy?: number) =>
     call<DepartmentDetail>(`/departments/${id}${fy ? `?fiscal_year=${fy}` : ''}`),
-  createDepartment: (data: { name: string; hod_id?: number | null; member_ids?: number[] }) =>
+  createDepartment: (data: { name: string; short_code?: string | null; hod_id?: number | null; member_ids?: number[] }) =>
     call<TargetDepartment>('/departments', json('POST', data)),
-  updateDepartment: (id: number, data: { name?: string; hod_id?: number | null; member_ids?: number[] }) =>
+  updateDepartment: (id: number, data: { name?: string; short_code?: string | null; hod_id?: number | null; member_ids?: number[] }) =>
     call<TargetDepartment>(`/departments/${id}`, json('PUT', data)),
   deleteDepartment: (id: number) => call<null>(`/departments/${id}`, json('DELETE')),
   createWidget: (fy: number, q: number, w: WidgetInput) => call<CompanyWidget>('/widgets', json('POST', { fiscal_year: fy, quarter_number: q, ...w })),
@@ -253,9 +303,9 @@ export const departmentTargetsService = {
   markSeen: (id: number, fy: number, q: number) =>
     call<null>(`/departments/${id}/quarters/${fy}/${q}/seen`, json('POST')),
 
-  createObjective: (data: { department_id: number; fiscal_year: number; quarter_number: number; parent_id?: number | null; title: string; description?: string; owner_id?: number | null; deadline?: string | null }) =>
+  createObjective: (data: { department_id: number; fiscal_year: number; quarter_number: number; parent_id?: number | null; title: string; description?: string; owner_id?: number | null; project_id?: number | null; deadline?: string | null }) =>
     call<{ id: number }>('/objectives', json('POST', data)),
-  updateObjective: (id: number, data: Partial<{ title: string; description: string; owner_id: number | null; deadline: string | null; status: ObjectiveStatus; progress: number }>) =>
+  updateObjective: (id: number, data: Partial<{ title: string; description: string; owner_id: number | null; project_id: number | null; deadline: string | null; status: ObjectiveStatus; progress: number }>) =>
     call<{ id: number }>(`/objectives/${id}`, json('PUT', data)),
   deleteObjective: (id: number) => call<null>(`/objectives/${id}`, json('DELETE')),
   getObjective: (id: number) => call<ObjectiveDetail>(`/objectives/${id}`),

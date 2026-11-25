@@ -78,6 +78,7 @@ export interface WCTask {
     description?: string | null;
   }[];
   parent_title?: string | null;
+  comments_count?: number;
   created_at: string | null;
   transfer_date?: string | null;
   transfer_to_name?: string | null;
@@ -231,6 +232,7 @@ export interface UpdateTaskPayload {
   scheduled_date?: string | null;
   scheduled_start_time?: string | null;
   scheduled_end_time?: string | null;
+  parent_id?: number | null;
 }
 
 export const workcenterService = {
@@ -297,6 +299,13 @@ export const workcenterService = {
     qs.append('status', status);
     taskIds.forEach(id => qs.append('task_ids', String(id)));
     return api(`${BASE}/bulk/status?${qs.toString()}`, { method: 'PUT' });
+  },
+
+  bulkUpdateParent: (taskIds: number[], parentId: number | null) => {
+    const qs = new URLSearchParams();
+    qs.append('parent_id', parentId ? String(parentId) : '0');
+    taskIds.forEach(id => qs.append('task_ids', String(id)));
+    return api(`${BASE}/bulk/parent?${qs.toString()}`, { method: 'PUT' });
   },
 
   getHistory: (taskId: number) =>

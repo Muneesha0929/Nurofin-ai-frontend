@@ -2,8 +2,10 @@
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { ObjectiveSelect, TaskObjectiveBadge, currentObjectiveOf, syncTaskObjective, useLinkableObjectives } from '@/components/targets/TaskObjectiveLink';
 import { FeatureSelect, TaskFeatureChips, currentFeatureOf, refreshTaskFeatures, syncTaskFeature, useLinkableFeatures } from '@/components/features/TaskFeatureLink';
-import { departmentTargetsService } from '@/services/departmentTargets';
+import { departmentTargetsService, BoardDepartment, ObjectiveNode, TaskLinkInfo } from '@/services/departmentTargets';
 import { ObjectivesBoard } from '@/components/targets/ObjectivesBoard';
+import { ObjectiveTasks } from '@/components/targets/ObjectiveTasks';
+import { ObjectivePanel } from '@/components/SidePanel';
 
 import { formatISTDateTime, formatISTDate, formatISTTime, accurateTimeAgo, formatTimestampWithAgo } from '@/utils/date';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -96,6 +98,12 @@ import {
   Github,
   Linkedin,
   Target as TargetIcon,
+  Building2,
+  CornerDownRight,
+  Link2,
+  GripVertical,
+  ChevronRight,
+  FolderKanban,
 } from 'lucide-react';
 
 /* ─── Constants ───────────────────────────────────────────────────────────── */
@@ -137,6 +145,16 @@ function todayStr(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+function getDeptDisplayCode(dept?: { name?: string | null; short_code?: string | null } | null): string {
+  if (!dept) return '';
+  const sc = (dept.short_code || '').trim().toUpperCase();
+  const low = (dept.name || '').trim().toLowerCase();
+  if (low.includes('product') || low.includes('beltrack')) return 'PROD';
+  if (sc === 'PRD') return 'PROD';
+  if (sc) return sc;
+  return (dept.name || '').slice(0, 4).toUpperCase();
+}
+
 /* ─── Main Execution Hub Component ────────────────────────────────────────── */
 
 export default function TaskCenterPage() {
@@ -145,44 +163,6 @@ export default function TaskCenterPage() {
   // Data State
   const [tasks, setTasks] = useState<WCTask[]>([]);
   const [taskFilterTab, setTaskFilterTab] = useState<'all' | 'my'>('all');
-
-  const filteredTasks = useMemo(() => {
-    if (taskFilterTab === 'all') return tasks;
-    if (!userProfile || !userProfile.id) return tasks;
-
-    const list: any[] = [];
-    const seenIds = new Set<number>();
-
-    const collectMyTasks = (t: any, parentTitle?: string, projId?: number | null, projName?: string | null, parentDeadline?: string | null, parentPriority?: string | null) => {
-      if (!t || !t.id) return;
-      const tProjId = t.project_id || projId;
-      const tProjName = t.project_name || projName;
-      const tDeadline = t.deadline || parentDeadline;
-      const tPriority = t.priority || parentPriority;
-      if (t.assigned_to_id != null && String(t.assigned_to_id) === String(userProfile.id)) {
-        if (!seenIds.has(Number(t.id))) {
-          seenIds.add(Number(t.id));
-          list.push({
-            ...t,
-            parent_title: t.parent_title || parentTitle,
-            project_id: tProjId,
-            project_name: tProjName,
-            deadline: tDeadline,
-            priority: tPriority,
-            assigned_to_name: t.assigned_to_name || userProfile.name,
-            assigned_to_avatar: t.assigned_to_avatar || userProfile.avatar,
-            subtasks: [],
-          });
-        }
-      }
-      if (t.subtasks && Array.isArray(t.subtasks)) {
-        t.subtasks.forEach((st: any) => collectMyTasks(st, t.title, tProjId, tProjName, tDeadline, tPriority));
-      }
-    };
-
-    tasks.forEach(task => collectMyTasks(task));
-    return list;
-  }, [tasks, taskFilterTab, userProfile]);
   const [totalTasks, setTotalTasks] = useState(0);
   const [summary, setSummary] = useState<WCSummary | null>(null);
   const [insights, setInsights] = useState<WCInsights | null>(null);
@@ -217,14 +197,101 @@ export default function TaskCenterPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [allUsers, setAllUsers] = useState<UserType[]>([]);
 
+  // Department (##) Explorer & task-link badges
+  const [boardDepts, setBoardDepts] = useState<BoardDepartment[]>([]);
+  const [boardQuarter, setBoardQuarter] = useState<{ fiscal_year: number; quarter_number: number; short: string } | null>(null);
+  const [showDeptExplorer, setShowDeptExplorer] = useState(false);
+  const [activeDeptId, setActiveDeptId] = useState<number | null>(null);
+  const [deptFilterId, setDeptFilterId] = useState<number | null>(null);
+  const [taskLinksMap, setTaskLinksMap] = useState<Record<string, TaskLinkInfo>>({});
+  const [deptObjectivePanelId, setDeptObjectivePanelId] = useState<number | null>(null);
+  const [newDeptTargetForm, setNewDeptTargetForm] = useState<{ deptId: number; parentId: number | null; nextNum: string } | null>(null);
+  const [newDeptTargetTitle, setNewDeptTargetTitle] = useState('');
+  const [newDeptTargetOwner, setNewDeptTargetOwner] = useState('');
+  const [newDeptTargetProject, setNewDeptTargetProject] = useState('');
+  const [newDeptTargetDeadline, setNewDeptTargetDeadline] = useState('');
+  const [savingDeptTarget, setSavingDeptTarget] = useState(false);
+
   // Filters State
   const [selectedQuarterId, setSelectedQuarterId] = useState<number | null>(null);
+  const [projectFilter, setProjectFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
   const [viewMode, setViewMode] = useState<'kanban' | 'timeline' | 'calendar' | 'gantt' | 'table' | 'workload' | 'analytics'>('kanban');
   const [activeTab, setActiveTab] = useState<'workspace' | 'objectives' | 'dashboard'>('workspace');
   const [defaultNewTaskStatus, setDefaultNewTaskStatus] = useState<string>('todo');
+
+  const filteredTasks = useMemo(() => {
+    const byTab = (() => {
+      if (taskFilterTab === 'all') return tasks;
+      if (!userProfile || !userProfile.id) return tasks;
+
+      const list: any[] = [];
+      const seenIds = new Set<number>();
+
+      const collectMyTasks = (t: any, parentTitle?: string, projId?: number | null, projName?: string | null, parentDeadline?: string | null, parentPriority?: string | null) => {
+        if (!t || !t.id) return;
+        const tProjId = t.project_id || projId;
+        const tProjName = t.project_name || projName;
+        const tDeadline = t.deadline || parentDeadline;
+        const tPriority = t.priority || parentPriority;
+        if (t.assigned_to_id != null && String(t.assigned_to_id) === String(userProfile.id)) {
+          if (!seenIds.has(Number(t.id))) {
+            seenIds.add(Number(t.id));
+            list.push({
+              ...t,
+              parent_title: t.parent_title || parentTitle,
+              project_id: tProjId,
+              project_name: tProjName,
+              deadline: tDeadline,
+              priority: tPriority,
+              assigned_to_name: t.assigned_to_name || userProfile.name,
+              assigned_to_avatar: t.assigned_to_avatar || userProfile.avatar,
+              subtasks: [],
+            });
+          }
+        }
+        if (t.subtasks && Array.isArray(t.subtasks)) {
+          t.subtasks.forEach((st: any) => collectMyTasks(st, t.title, tProjId, tProjName, tDeadline, tPriority));
+        }
+      };
+
+      tasks.forEach(task => collectMyTasks(task));
+      return list;
+    })();
+
+    const activeFilterDept = deptFilterId;
+    const hashQuery = searchQuery.trim().startsWith('##') ? searchQuery.trim().slice(2).toLowerCase() : '';
+    const activeProj = projectFilter.trim();
+    if (!activeFilterDept && !hashQuery && !activeProj) return byTab;
+
+    const matchesProjectTree = (item: any): boolean => {
+      if (!item) return false;
+      const itemLink = taskLinksMap[String(item.id)];
+      if (activeProj === '__all__') {
+        if (item.project_id || itemLink?.project_id) return true;
+      } else if (String(item.project_id || '') === activeProj || String(itemLink?.project_id || '') === activeProj) {
+        return true;
+      }
+      return Array.isArray(item.subtasks) && item.subtasks.some((st: any) => matchesProjectTree(st));
+    };
+
+    return byTab.filter(t => {
+      const link = taskLinksMap[String(t.id)];
+      if (activeProj && !matchesProjectTree(t)) return false;
+      if (activeFilterDept && link?.department?.id !== activeFilterDept) return false;
+      if (hashQuery) {
+        if (!link) return false;
+        const matchHash = (
+          (link.department.short_code || '').toLowerCase().includes(hashQuery) ||
+          link.department.name.toLowerCase().includes(hashQuery)
+        );
+        if (!matchHash) return false;
+      }
+      return true;
+    });
+  }, [tasks, taskFilterTab, userProfile, deptFilterId, projectFilter, searchQuery, taskLinksMap]);
 
 
 
@@ -260,14 +327,24 @@ export default function TaskCenterPage() {
 
   // ─── Data Loading ───────────────────────────────────────────────────────
 
+  const loadDeptBoard = useCallback(() => {
+    departmentTargetsService.board()
+      .then(b => {
+        setBoardDepts(b.departments || []);
+        setBoardQuarter(b.quarter || null);
+      })
+      .catch(() => {});
+  }, []);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const [tasksRes, summaryData, insightsData, quartersData, projectsData, usersData] = await Promise.all([
+      const isDeptCommand = searchQuery.trim().startsWith('##');
+      const [tasksRes, summaryData, insightsData, quartersData, projectsData, usersData, boardData] = await Promise.all([
         workcenterService.getTasks({
           quarter_id: selectedQuarterId ?? undefined,
-          search: searchQuery || undefined,
+          search: !isDeptCommand && searchQuery ? searchQuery : undefined,
           status: statusFilter || undefined,
           priority: priorityFilter || undefined,
           page_size: 200
@@ -277,6 +354,7 @@ export default function TaskCenterPage() {
         workcenterService.getQuarters().catch(() => []),
         projectsService.getProjects().catch(() => []),
         usersService.getUsers().catch(() => []),
+        departmentTargetsService.board().catch(() => null),
       ]);
 
       let filtered = tasksRes.tasks || [];
@@ -293,6 +371,27 @@ export default function TaskCenterPage() {
       setQuarters(quartersData || []);
       setProjects(projectsData || []);
       setAllUsers(usersData || []);
+      if (boardData) {
+        setBoardDepts(boardData.departments || []);
+        setBoardQuarter(boardData.quarter || null);
+      }
+
+      // Collect all task + subtask IDs for department link / hierarchical code badges
+      const ids: number[] = [];
+      const walkIds = (arr: any[]) => {
+        for (const item of arr || []) {
+          if (item?.id) ids.push(Number(item.id));
+          if (item?.subtasks?.length) walkIds(item.subtasks);
+        }
+      };
+      walkIds(filtered);
+      if (ids.length > 0) {
+        departmentTargetsService.taskLinks(ids.slice(0, 450))
+          .then(setTaskLinksMap)
+          .catch(() => {});
+      } else {
+        setTaskLinksMap({});
+      }
 
       if (!selectedQuarterId && quartersData && quartersData.length > 0) {
         const active = quartersData.find(q => q.status === 'active') || quartersData[0];
@@ -367,10 +466,63 @@ export default function TaskCenterPage() {
   const handleEditTask = async (payload: any) => {
     if (!editingTask) return;
     const { cos_objective_id = '', cos_objective_prev = '', cos_feature_id = '', cos_feature_prev = '', ...rest } = payload;
-    await workcenterService.updateTask(editingTask.id, rest);
+    await workcenterService.updateTask(editingTask.id, {
+      ...rest,
+      parent_id: rest.parent_id ? Number(rest.parent_id) : 0,
+    });
     await syncTaskObjective(editingTask.id, cos_objective_id, cos_objective_prev).catch(console.error);
     await syncTaskFeature(editingTask.id, cos_feature_id, cos_feature_prev).catch(console.error);
     await loadData();
+  };
+
+  const handleMoveTaskToParent = async (taskId: number, parentId: number | null) => {
+    try {
+      await workcenterService.updateTask(taskId, { parent_id: parentId ?? 0 });
+      await loadData();
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('task:created'));
+    } catch (err: any) {
+      alert(err.message || 'Failed to move task');
+    }
+  };
+
+  const handleBulkMoveParent = async (taskIds: number[], parentId: number | null) => {
+    if (!taskIds.length) return;
+    try {
+      await workcenterService.bulkUpdateParent(taskIds, parentId);
+      await loadData();
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('task:created'));
+    } catch (err: any) {
+      alert(err.message || 'Failed to move selected tasks');
+    }
+  };
+
+  const handleCreateDeptTarget = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDeptTargetForm || !newDeptTargetTitle.trim() || !boardQuarter) return;
+    setSavingDeptTarget(true);
+    try {
+      await departmentTargetsService.createObjective({
+        department_id: newDeptTargetForm.deptId,
+        fiscal_year: boardQuarter.fiscal_year,
+        quarter_number: boardQuarter.quarter_number,
+        parent_id: newDeptTargetForm.parentId,
+        title: newDeptTargetTitle.trim(),
+        owner_id: newDeptTargetOwner ? Number(newDeptTargetOwner) : null,
+        project_id: newDeptTargetProject ? Number(newDeptTargetProject) : null,
+        deadline: newDeptTargetDeadline || null,
+      });
+      setNewDeptTargetForm(null);
+      setNewDeptTargetTitle('');
+      setNewDeptTargetOwner('');
+      setNewDeptTargetProject('');
+      setNewDeptTargetDeadline('');
+      await loadData();
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('task:created'));
+    } catch (err: any) {
+      alert(err.message || 'Could not create target');
+    } finally {
+      setSavingDeptTarget(false);
+    }
   };
 
   const handleDeleteTask = async (id: number) => {
@@ -753,7 +905,7 @@ export default function TaskCenterPage() {
       </div>
 
       {activeTab === 'objectives' ? (
-        <ObjectivesBoard />
+        <ObjectivesBoard selectedProjectId={projectFilter === '__all__' ? '' : projectFilter} />
       ) : activeTab === 'workspace' ? (
         <div className="space-y-6">
           {/* SECTION 2: Quarter Management */}
@@ -828,13 +980,64 @@ export default function TaskCenterPage() {
 
           {/* Filter Toolbar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-background-secondary p-3 rounded-xl border border-border-subtle">
-            <input
-              type="text"
-              placeholder="Search tasks..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-background-primary border border-border-subtle text-xs rounded-lg px-3 py-2 text-text-primary outline-none focus:border-accent-blue transition-colors max-w-xs w-full font-medium"
-            />
+            <div className="flex items-center gap-2 flex-1 max-w-md">
+              <input
+                type="text"
+                placeholder="Search tasks... or type ##PROD for department"
+                value={searchQuery}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearchQuery(val);
+                  if (val.trim().startsWith('##')) {
+                    setShowDeptExplorer(true);
+                    const q = val.trim().slice(2).toLowerCase();
+                    if (q) {
+                      const match = boardDepts.find(d =>
+                        getDeptDisplayCode(d).toLowerCase() === q ||
+                        (d.short_code && d.short_code.toLowerCase() === q) ||
+                        d.name.toLowerCase().startsWith(q)
+                      );
+                      if (match) setActiveDeptId(match.id);
+                    }
+                  }
+                }}
+                className="bg-background-primary border border-border-subtle text-xs rounded-lg px-3 py-2 text-text-primary outline-none focus:border-accent-blue transition-colors w-full font-medium"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !showDeptExplorer;
+                  setShowDeptExplorer(next);
+                  if (next && activeDeptId === null && boardDepts.length > 0) {
+                    setActiveDeptId(-1);
+                  }
+                }}
+                className={cn(
+                  "px-3 py-2 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
+                  showDeptExplorer || deptFilterId
+                    ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                    : "bg-background-primary text-text-primary border-border-subtle hover:border-indigo-500/50"
+                )}
+                title="Browse all ## Departments, Objectives, Targets, Subtasks & Create Targets directly"
+              >
+                <Building2 className="w-3.5 h-3.5" />
+                <span>## Departments</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setProjectFilter(projectFilter === '__all__' ? '' : '__all__')}
+                className={cn(
+                  "px-3 py-2 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 shrink-0 cursor-pointer",
+                  projectFilter === '__all__'
+                    ? "bg-purple-600 text-white border-purple-600 shadow-xs"
+                    : "bg-background-primary text-text-primary border-border-subtle hover:border-purple-500/50"
+                )}
+                title="Show all Projects with their objectives, tasks, descriptions, progress & follow-ups"
+              >
+                <FolderKanban className="w-3.5 h-3.5" />
+                <span>All Projects</span>
+              </button>
+            </div>
             <div className="flex items-center gap-2 flex-wrap">
               <select
                 value={statusFilter}
@@ -858,18 +1061,16 @@ export default function TaskCenterPage() {
                 <option value="critical">🔴 Critical</option>
               </select>
               <select
-                value={''}
-                onChange={(e) => {
-                  const pid = e.target.value;
-                  if (pid) {
-                    setTasks(prev => prev.filter(t => String(t.project_id) === pid));
-                  } else {
-                    loadData();
-                  }
-                }}
-                className="bg-background-primary border border-border-subtle text-xs rounded-lg px-3 py-2 text-text-primary font-bold outline-none cursor-pointer"
+                aria-label="Filter by Project"
+                value={projectFilter}
+                onChange={(e) => setProjectFilter(e.target.value)}
+                className={cn(
+                  "bg-background-primary border text-xs rounded-lg px-3 py-2 font-bold outline-none cursor-pointer",
+                  projectFilter ? "border-purple-500 text-purple-600 dark:text-purple-400" : "border-border-subtle text-text-primary"
+                )}
               >
-                <option value="">All Projects</option>
+                <option value="">All Tasks (Default)</option>
+                <option value="__all__">All Projects (Full View)</option>
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -898,6 +1099,641 @@ export default function TaskCenterPage() {
               </div>
             </div>
           </div>
+
+          {/* ## DEPARTMENT EXPLORER & DIRECT TARGET/TASK CREATOR */}
+          {showDeptExplorer && (
+            <div className="bg-background-secondary border border-indigo-500/30 rounded-2xl p-4 space-y-4 shadow-md animate-in fade-in duration-150 text-left">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-border-subtle">
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                    <Building2 className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <div className="text-xs font-extrabold text-text-primary flex items-center gap-2">
+                      <span>Department Hub (## Shortcuts)</span>
+                      {boardQuarter && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-accent-blue/10 text-accent-blue">
+                          {boardQuarter.short}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-text-secondary">
+                      Select a ##department to see all its objectives, targets (1.1), tasks (1.1.1), subtasks (1.1.1.1), descriptions & follow-ups — or create targets directly here.
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {deptFilterId && (
+                    <button
+                      type="button"
+                      onClick={() => setDeptFilterId(null)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[11px] font-bold cursor-pointer"
+                    >
+                      Clear Task Board Filter
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowDeptExplorer(false)}
+                    className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-hover cursor-pointer"
+                    title="Close Department Hub"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Department ## shortcut pills */}
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => { setActiveDeptId(-1); setNewDeptTargetForm(null); }}
+                  className={cn(
+                    "px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer",
+                    (activeDeptId === -1 || activeDeptId === null)
+                      ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                      : "bg-background-primary text-text-primary border-border-subtle hover:border-indigo-500/50"
+                  )}
+                >
+                  <span>All Departments</span>
+                  <span className={cn("text-[10px] opacity-75", (activeDeptId === -1 || activeDeptId === null) ? "text-white" : "text-text-secondary")}>
+                    ({boardDepts.length})
+                  </span>
+                </button>
+                {boardDepts.map(d => {
+                  const isActive = activeDeptId === d.id;
+                  const code = getDeptDisplayCode(d);
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => { setActiveDeptId(d.id); setNewDeptTargetForm(null); }}
+                      className={cn(
+                        "px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer",
+                        isActive
+                          ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                          : "bg-background-primary text-text-primary border-border-subtle hover:border-indigo-500/50"
+                      )}
+                    >
+                      <span className={cn("font-mono text-[10.5px] px-1.5 py-0.2 rounded", isActive ? "bg-white/20 text-white" : "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400")}>
+                        ##{code}
+                      </span>
+                      <span>{d.name}</span>
+                      <span className={cn("text-[10px] opacity-75", isActive ? "text-white" : "text-text-secondary")}>
+                        ({d.objectives})
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Selected Department(s) Contents */}
+              {(() => {
+                const isShowingAllDepts = activeDeptId === -1 || activeDeptId === null;
+                const displayDepts = isShowingAllDepts ? boardDepts : boardDepts.filter(d => d.id === activeDeptId);
+                if (!displayDepts.length) {
+                  return <div className="text-xs text-text-secondary py-3">No departments available.</div>;
+                }
+                return (
+                  <div className="space-y-3">
+                    {displayDepts.map(activeDept => {
+                      const deptPeople = [activeDept.hod, ...activeDept.members].filter((p, i, a): p is { id: number; name: string; avatar?: string | null } => !!p && a.findIndex(x => x?.id === p.id) === i);
+                      const nextObjNum = (activeDept.objectives_tree?.length || 0) + 1;
+                      const isFilteringThisDept = deptFilterId === activeDept.id;
+                      const deptCode = getDeptDisplayCode(activeDept);
+
+                      return (
+                        <div key={activeDept.id} className="space-y-3 bg-background-primary/60 border border-border-subtle rounded-xl p-3.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-mono text-xs font-extrabold px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
+                                ##{deptCode}
+                              </span>
+                        <h4 className="text-sm font-extrabold text-text-primary truncate">{activeDept.name}</h4>
+                        <span className="text-[11px] text-text-secondary">
+                          · {activeDept.hod ? `HOD: ${activeDept.hod.name}` : 'No HOD'} · {activeDept.done}/{activeDept.items} done
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDeptFilterId(isFilteringThisDept ? null : activeDept.id)}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer",
+                            isFilteringThisDept
+                              ? "bg-accent-blue text-white border-accent-blue"
+                              : "bg-background-secondary text-text-primary border-border-subtle hover:border-accent-blue"
+                          )}
+                        >
+                          {isFilteringThisDept ? 'Showing on Board ✓' : 'Filter Task Board by Dept'}
+                        </button>
+                        {activeDept.can_plan && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewDeptTargetForm({ deptId: activeDept.id, parentId: null, nextNum: String(nextObjNum) });
+                              setNewDeptTargetTitle('');
+                              setNewDeptTargetProject(projectFilter && projectFilter !== '__all__' ? projectFilter : '');
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> Create Objective {nextObjNum}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {activeDept.message && (
+                      <div className="text-xs text-text-secondary bg-background-secondary border-l-2 border-indigo-500 px-3 py-2 rounded-r-lg">
+                        <span className="font-bold text-text-primary">Quarter Target: </span>{activeDept.message.split('\n')[0]}
+                      </div>
+                    )}
+
+                    {/* Create Objective / Sub-target inline form */}
+                    {newDeptTargetForm && newDeptTargetForm.deptId === activeDept.id && (
+                      <form onSubmit={handleCreateDeptTarget} className="p-3 rounded-xl border border-indigo-500/30 bg-indigo-500/5 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs font-extrabold px-2 py-1 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-400">
+                            {newDeptTargetForm.nextNum}
+                          </span>
+                          <input
+                            autoFocus
+                            value={newDeptTargetTitle}
+                            onChange={e => setNewDeptTargetTitle(e.target.value)}
+                            placeholder={newDeptTargetForm.parentId ? `Target ${newDeptTargetForm.nextNum} title...` : `Objective ${newDeptTargetForm.nextNum} title...`}
+                            className="flex-1 min-w-[200px] rounded-lg border border-border-subtle bg-background-primary px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-indigo-500"
+                          />
+                          <select
+                            value={newDeptTargetOwner}
+                            onChange={e => setNewDeptTargetOwner(e.target.value)}
+                            className="rounded-lg border border-border-subtle bg-background-primary px-2 py-1.5 text-xs text-text-primary"
+                          >
+                            <option value="">Owner...</option>
+                            {deptPeople.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                          <select
+                            value={newDeptTargetProject}
+                            onChange={e => setNewDeptTargetProject(e.target.value)}
+                            aria-label="Project for target"
+                            className="rounded-lg border border-border-subtle bg-background-primary px-2 py-1.5 text-xs text-text-primary"
+                          >
+                            <option value="">No project</option>
+                            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                          <input
+                            type="date"
+                            value={newDeptTargetDeadline}
+                            onChange={e => setNewDeptTargetDeadline(e.target.value)}
+                            className="rounded-lg border border-border-subtle bg-background-primary px-2 py-1.5 text-xs text-text-primary"
+                          />
+                          <button
+                            type="submit"
+                            disabled={savingDeptTarget || !newDeptTargetTitle.trim()}
+                            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-50 cursor-pointer"
+                          >
+                            {savingDeptTarget ? 'Saving…' : `Create ${newDeptTargetForm.nextNum}`}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNewDeptTargetForm(null)}
+                            className="px-2 py-1.5 text-xs text-text-secondary cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {/* Tree of Objectives -> Sub-targets -> Tasks -> Subtasks */}
+                    {activeDept.objectives_tree.length === 0 ? (
+                      <div className="text-xs text-text-secondary py-2">No objectives or targets under {activeDept.name} yet.</div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {activeDept.objectives_tree
+                          .filter(obj => !projectFilter || projectFilter === '__all__' || String(obj.project_id || '') === projectFilter || obj.children.some(c => String(c.project_id || '') === projectFilter) || obj.tasks.some(t => String(t.project_id || '') === projectFilter))
+                          .map((obj, oi) => {
+                          const objCode = obj.code || String(oi + 1);
+                          const nextSubNum = `${objCode}.${obj.children.length + 1}`;
+                          return (
+                            <div key={obj.id} className="rounded-xl border border-border-subtle bg-background-secondary overflow-hidden">
+                              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 bg-background-primary/40">
+                                <button
+                                  type="button"
+                                  onClick={() => setDeptObjectivePanelId(obj.id)}
+                                  className="flex items-center gap-2 text-left min-w-0 flex-1 hover:text-accent-blue cursor-pointer flex-wrap"
+                                >
+                                  <span className="font-mono text-xs font-extrabold px-2 py-0.5 rounded bg-accent-blue/15 text-accent-blue shrink-0">
+                                    {objCode}
+                                  </span>
+                                  <TargetIcon className="w-3.5 h-3.5 text-accent-blue shrink-0" />
+                                  <span className="text-xs font-bold text-text-primary truncate">{obj.title}</span>
+                                  {obj.project_name && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 shrink-0">
+                                      <FolderKanban className="w-2.5 h-2.5" /> {obj.project_name}
+                                    </span>
+                                  )}
+                                  <span className="text-[11px] font-bold text-text-secondary shrink-0">({Math.round(obj.progress)}%)</span>
+                                </button>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {obj.can_update_progress && !obj.children.length && (
+                                    <select
+                                      aria-label={`Progress % for ${obj.title}`}
+                                      value={Math.round(obj.progress / 5) * 5}
+                                      onChange={async e => {
+                                        await departmentTargetsService.updateObjective(obj.id, { progress: Number(e.target.value) });
+                                        await loadData();
+                                      }}
+                                      className="text-[11px] font-semibold rounded border border-border-subtle bg-background-primary px-1.5 py-0.5 text-text-primary cursor-pointer"
+                                    >
+                                      {Array.from({ length: 21 }, (_, k) => k * 5).map(v => <option key={v} value={v}>{v}%</option>)}
+                                    </select>
+                                  )}
+                                  {activeDept.can_plan && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setNewDeptTargetForm({ deptId: activeDept.id, parentId: obj.id, nextNum: nextSubNum });
+                                        setNewDeptTargetTitle('');
+                                        setNewDeptTargetProject(obj.project_id ? String(obj.project_id) : (projectFilter && projectFilter !== '__all__' ? projectFilter : ''));
+                                      }}
+                                      className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline px-2 py-0.5 rounded hover:bg-indigo-500/10 cursor-pointer"
+                                    >
+                                      + Add Target {nextSubNum}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Direct tasks on Objective */}
+                              <div className="pl-6 pr-3 py-1 border-t border-border-subtle/50">
+                                <ObjectiveTasks
+                                  objectiveId={obj.id}
+                                  tasks={obj.tasks}
+                                  people={deptPeople}
+                                  onChanged={loadData}
+                                  parentCode={objCode}
+                                  startIndex={obj.children.length ? obj.children.length + 1 : 1}
+                                  projectId={obj.project_id}
+                                  defaultExpanded={isShowingAllDepts}
+                                  onOpenTask={tid => handleSelectTask({ id: tid })}
+                                />
+                              </div>
+
+                              {/* Sub-targets (1.1, 1.2 ...) */}
+                              {obj.children.map((sub, si) => {
+                                const subCode = sub.code || `${objCode}.${si + 1}`;
+                                return (
+                                  <div key={sub.id} className="border-t border-border-subtle/70 pl-6 pr-3 py-2">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => setDeptObjectivePanelId(sub.id)}
+                                        className="flex items-center gap-2 text-left min-w-0 flex-1 hover:text-accent-blue cursor-pointer flex-wrap"
+                                      >
+                                        <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-accent-blue/10 text-accent-blue shrink-0">
+                                          {subCode}
+                                        </span>
+                                        <span className="text-xs font-semibold text-text-primary truncate">{sub.title}</span>
+                                        {sub.project_name && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 shrink-0">
+                                            <FolderKanban className="w-2.5 h-2.5" /> {sub.project_name}
+                                          </span>
+                                        )}
+                                        <span className="text-[10.5px] text-text-secondary shrink-0">
+                                          · {sub.owner?.name || 'Unassigned'} · {Math.round(sub.progress)}%
+                                        </span>
+                                      </button>
+                                      {sub.can_update_progress && !sub.children.length && (
+                                        <select
+                                          aria-label={`Progress % for ${sub.title}`}
+                                          value={Math.round(sub.progress / 5) * 5}
+                                          onChange={async e => {
+                                            await departmentTargetsService.updateObjective(sub.id, { progress: Number(e.target.value) });
+                                            await loadData();
+                                          }}
+                                          className="text-[10.5px] font-semibold rounded border border-border-subtle bg-background-primary px-1.5 py-0.5 text-text-primary cursor-pointer"
+                                        >
+                                          {Array.from({ length: 21 }, (_, k) => k * 5).map(v => <option key={v} value={v}>{v}%</option>)}
+                                        </select>
+                                      )}
+                                    </div>
+                                    <div className="pl-4">
+                                      <ObjectiveTasks
+                                        objectiveId={sub.id}
+                                        tasks={sub.tasks}
+                                        people={deptPeople}
+                                        onChanged={loadData}
+                                        parentCode={subCode}
+                                        startIndex={1}
+                                        projectId={sub.project_id}
+                                        defaultExpanded={isShowingAllDepts}
+                                        onOpenTask={tid => handleSelectTask({ id: tid })}
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* PROJECT OBJECTIVES, TASKS, DESCRIPTIONS & FOLLOW-UPS VIEW (All Projects or Particular Project) */}
+          {projectFilter && (() => {
+            const isAllProjects = projectFilter === '__all__';
+            const displayProjects = isAllProjects
+              ? projects
+              : projects.filter(p => String(p.id) === projectFilter);
+
+            const collectTreeTaskIds = (objs: ObjectiveNode[]): Set<number> => {
+              const s = new Set<number>();
+              const walkTasks = (ts: any[]) => {
+                for (const t of ts || []) {
+                  s.add(Number(t.id));
+                  walkTasks(t.subtasks || []);
+                }
+              };
+              const walkObjs = (ns: ObjectiveNode[]) => {
+                for (const n of ns || []) {
+                  walkTasks(n.tasks || []);
+                  walkObjs(n.children || []);
+                }
+              };
+              walkObjs(objs);
+              return s;
+            };
+
+            return (
+              <div className="bg-background-secondary border border-purple-500/30 rounded-2xl p-4 space-y-4 shadow-md text-left">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-border-subtle">
+                  <div className="flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-lg bg-purple-500/15 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+                      <FolderKanban className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <div className="text-xs font-extrabold text-text-primary flex items-center gap-2">
+                        <span>
+                          {isAllProjects
+                            ? `All Projects (${displayProjects.length})`
+                            : `Project View: ${displayProjects[0]?.name || `Project #${projectFilter}`}`}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-text-secondary">
+                        Showing all department objectives, sub-targets, codes, tasks, descriptions, progress %, and follow-ups.
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setProjectFilter('')}
+                    className="px-2.5 py-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 text-[11px] font-bold cursor-pointer"
+                  >
+                    Clear Project View
+                  </button>
+                </div>
+
+                {displayProjects.length === 0 ? (
+                  <div className="text-xs text-text-secondary py-2">No projects found.</div>
+                ) : (
+                  <div className="space-y-4">
+                    {displayProjects.map(proj => {
+                      const activeProjId = Number(proj.id);
+                      const projDepts = boardDepts
+                        .map(d => ({
+                          ...d,
+                          matchedObjectives: d.objectives_tree.filter(
+                            o => o.project_id === activeProjId ||
+                              o.children.some(c => c.project_id === activeProjId || c.tasks.some(t => t.project_id === activeProjId)) ||
+                              o.tasks.some(t => t.project_id === activeProjId)
+                          ),
+                        }))
+                        .filter(d => d.matchedObjectives.length > 0);
+
+                      const coveredTaskIds = collectTreeTaskIds(projDepts.flatMap(d => d.matchedObjectives));
+                      const standaloneTasks = tasks.filter(
+                        t => (String(t.project_id || '') === String(proj.id) || String(taskLinksMap[String(t.id)]?.project_id || '') === String(proj.id)) &&
+                          !coveredTaskIds.has(Number(t.id))
+                      );
+
+                      return (
+                        <div key={proj.id} className="rounded-xl border border-purple-500/25 bg-background-primary/40 p-3.5 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-border-subtle/70">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-extrabold text-text-primary">{proj.name}</span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-600 dark:text-purple-400">
+                                  {Math.round(proj.progress || 0)}% complete
+                                </span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-background-secondary border border-border-subtle text-text-secondary">
+                                  {projDepts.reduce((acc, d) => acc + d.matchedObjectives.length, 0)} objectives · {coveredTaskIds.size + standaloneTasks.length} tasks
+                                </span>
+                              </div>
+                              {proj.description && (
+                                <p className="text-[11.5px] text-text-secondary mt-1">{proj.description}</p>
+                              )}
+                            </div>
+                          </div>
+
+                          {projDepts.length === 0 && standaloneTasks.length === 0 ? (
+                            <div className="text-xs text-text-secondary py-1">
+                              No objectives or tasks assigned to {proj.name} yet.
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {projDepts.map(d => {
+                                const deptPeople = [d.hod, ...d.members].filter((p, i, a): p is { id: number; name: string; avatar?: string | null } => !!p && a.findIndex(x => x?.id === p.id) === i);
+                                const dCode = getDeptDisplayCode(d);
+                                return (
+                                  <div key={d.id} className="rounded-xl border border-border-subtle bg-background-secondary/50 p-3 space-y-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono text-[10.5px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
+                                        ##{dCode}
+                                      </span>
+                                      <span className="text-xs font-extrabold text-text-primary">{d.name}</span>
+                                    </div>
+                                    <div className="space-y-2">
+                                      {d.matchedObjectives.map((obj, oi) => {
+                                        const objCode = obj.code || String(oi + 1);
+                                        const matchedSubs = obj.children.filter(c => obj.project_id === activeProjId || c.project_id === activeProjId || c.tasks.some(t => t.project_id === activeProjId));
+                                        const matchedDirectTasks = obj.project_id === activeProjId ? obj.tasks : obj.tasks.filter(t => t.project_id === activeProjId);
+                                        return (
+                                          <div key={obj.id} className="rounded-xl border border-border-subtle bg-background-secondary overflow-hidden">
+                                            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 bg-background-primary/40">
+                                              <button
+                                                type="button"
+                                                onClick={() => setDeptObjectivePanelId(obj.id)}
+                                                className="flex items-center gap-2 text-left min-w-0 flex-1 hover:text-accent-blue cursor-pointer flex-wrap"
+                                              >
+                                                <span className="font-mono text-xs font-extrabold px-2 py-0.5 rounded bg-accent-blue/15 text-accent-blue shrink-0">
+                                                  {dCode} · {objCode}
+                                                </span>
+                                                <TargetIcon className="w-3.5 h-3.5 text-accent-blue shrink-0" />
+                                                <span className="text-xs font-bold text-text-primary">{obj.title}</span>
+                                                <span className="text-[11px] font-bold text-accent-blue shrink-0">{Math.round(obj.progress)}%</span>
+                                                <span className="text-[10.5px] text-text-secondary shrink-0">· {obj.owner?.name || 'Unassigned'}</span>
+                                              </button>
+                                              {obj.can_update_progress && !obj.children.length && (
+                                                <select
+                                                  aria-label={`Progress % for ${obj.title}`}
+                                                  value={Math.round(obj.progress / 5) * 5}
+                                                  onChange={async e => {
+                                                    await departmentTargetsService.updateObjective(obj.id, { progress: Number(e.target.value) });
+                                                    await loadData();
+                                                  }}
+                                                  className="text-[11px] font-semibold rounded border border-border-subtle bg-background-primary px-1.5 py-0.5 text-text-primary cursor-pointer"
+                                                >
+                                                  {Array.from({ length: 21 }, (_, k) => k * 5).map(v => <option key={v} value={v}>{v}%</option>)}
+                                                </select>
+                                              )}
+                                            </div>
+                                            {obj.description && (
+                                              <div className="px-3 py-1.5 text-[11.5px] text-text-secondary border-t border-border-subtle/50 bg-background-primary/20">
+                                                {obj.description}
+                                              </div>
+                                            )}
+                                            {(matchedDirectTasks.length > 0 || matchedSubs.length === 0) && (
+                                              <div className="pl-5 pr-3 py-1.5 border-t border-border-subtle/50">
+                                                <ObjectiveTasks
+                                                  objectiveId={obj.id}
+                                                  tasks={matchedDirectTasks}
+                                                  people={deptPeople}
+                                                  onChanged={loadData}
+                                                  parentCode={objCode}
+                                                  startIndex={obj.children.length ? obj.children.length + 1 : 1}
+                                                  projectId={activeProjId}
+                                                  defaultExpanded={true}
+                                                  onOpenTask={tid => handleSelectTask({ id: tid })}
+                                                />
+                                              </div>
+                                            )}
+                                            {matchedSubs.map((sub, si) => {
+                                              const subCode = sub.code || `${objCode}.${si + 1}`;
+                                              const subTasks = (obj.project_id === activeProjId || sub.project_id === activeProjId) ? sub.tasks : sub.tasks.filter(t => t.project_id === activeProjId);
+                                              return (
+                                                <div key={sub.id} className="border-t border-border-subtle/70 pl-6 pr-3 py-2">
+                                                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => setDeptObjectivePanelId(sub.id)}
+                                                      className="flex items-center gap-2 text-left min-w-0 flex-1 hover:text-accent-blue cursor-pointer flex-wrap"
+                                                    >
+                                                      <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-accent-blue/10 text-accent-blue shrink-0">
+                                                        {dCode} · {subCode}
+                                                      </span>
+                                                      <span className="text-xs font-semibold text-text-primary">{sub.title}</span>
+                                                      <span className="text-[10.5px] font-bold text-accent-blue shrink-0">{Math.round(sub.progress)}%</span>
+                                                      <span className="text-[10.5px] text-text-secondary shrink-0">· {sub.owner?.name || 'Unassigned'}</span>
+                                                    </button>
+                                                    {sub.can_update_progress && !sub.children.length && (
+                                                      <select
+                                                        aria-label={`Progress % for ${sub.title}`}
+                                                        value={Math.round(sub.progress / 5) * 5}
+                                                        onChange={async e => {
+                                                          await departmentTargetsService.updateObjective(sub.id, { progress: Number(e.target.value) });
+                                                          await loadData();
+                                                        }}
+                                                        className="text-[10.5px] font-semibold rounded border border-border-subtle bg-background-primary px-1.5 py-0.5 text-text-primary cursor-pointer"
+                                                      >
+                                                        {Array.from({ length: 21 }, (_, k) => k * 5).map(v => <option key={v} value={v}>{v}%</option>)}
+                                                      </select>
+                                                    )}
+                                                  </div>
+                                                  {sub.description && (
+                                                    <div className="text-[11px] text-text-secondary mb-1 pl-6">{sub.description}</div>
+                                                  )}
+                                                  <div className="pl-4">
+                                                    <ObjectiveTasks
+                                                      objectiveId={sub.id}
+                                                      tasks={subTasks}
+                                                      people={deptPeople}
+                                                      onChanged={loadData}
+                                                      parentCode={subCode}
+                                                      startIndex={1}
+                                                      projectId={activeProjId}
+                                                      defaultExpanded={true}
+                                                      onOpenTask={tid => handleSelectTask({ id: tid })}
+                                                    />
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+
+                              {standaloneTasks.length > 0 && (
+                                <div className="rounded-xl border border-border-subtle bg-background-secondary p-3 space-y-2">
+                                  <div className="text-[10.5px] font-bold uppercase tracking-wider text-text-secondary">
+                                    Project Tasks ({standaloneTasks.length})
+                                  </div>
+                                  <div className="divide-y divide-border-subtle/50">
+                                    {standaloneTasks.map(st => {
+                                      const stLink = taskLinksMap[String(st.id)];
+                                      return (
+                                        <div key={st.id} className="py-2 flex flex-wrap items-start justify-between gap-2">
+                                          <div className="min-w-0 flex-1 space-y-1">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              {stLink && (
+                                                <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
+                                                  {getDeptDisplayCode(stLink.department)}{stLink.task_code ? ` · ${stLink.task_code}` : ''}
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={() => handleSelectTask(st)}
+                                                className="text-xs font-bold text-text-primary hover:text-accent-blue text-left cursor-pointer"
+                                              >
+                                                {st.title}
+                                              </button>
+                                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                                                {Math.round(st.status === 'completed' || st.status === 'done' ? 100 : (st.progress ?? 0))}%
+                                              </span>
+                                              {(st.comments_count ?? 0) > 0 && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => { setDetailDefaultTab('updates'); handleSelectTask(st); }}
+                                                  className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 cursor-pointer"
+                                                >
+                                                  <MessageSquare className="w-2.5 h-2.5" /> {st.comments_count} follow-up{st.comments_count === 1 ? '' : 's'}
+                                                </button>
+                                              )}
+                                            </div>
+                                            {st.description && (
+                                              <p className="text-[11px] text-text-secondary">{st.description}</p>
+                                            )}
+                                          </div>
+                                          <div className="text-[10.5px] text-text-secondary shrink-0">
+                                            {st.assigned_to_name || 'Unassigned'} {st.deadline ? `· ${st.deadline}` : ''}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Main Layout: Full Width Tasks */}
           <div className="flex flex-col gap-4">
@@ -947,6 +1783,10 @@ export default function TaskCenterPage() {
               {viewMode === 'kanban' ? (
                 <GroupedTaskFeed 
                   tasks={filteredTasks} 
+                  taskLinksMap={taskLinksMap}
+                  allTasksForParenting={tasks}
+                  onMoveTaskToParent={handleMoveTaskToParent}
+                  onBulkMoveParent={handleBulkMoveParent}
                   onSelectTask={(taskItem) => {
                     setDetailDefaultTab('details');
                     handleSelectTask(taskItem);
@@ -974,7 +1814,7 @@ export default function TaskCenterPage() {
                   }}
                 />
               ) : (
-                <TaskTableView tasks={filteredTasks} onSelectTask={handleSelectTask} />
+                <TaskTableView tasks={filteredTasks} taskLinksMap={taskLinksMap} onSelectTask={handleSelectTask} />
               )}
             </div>
           </div>
@@ -1342,7 +2182,17 @@ export default function TaskCenterPage() {
         defaultStatus={defaultNewTaskStatus}
         objectives={linkable.objectives}
         objectivesQuarter={linkable.quarterShort}
+        allTasks={tasks}
       />
+
+      {deptObjectivePanelId !== null && (
+        <ObjectivePanel
+          id={deptObjectivePanelId}
+          onClose={() => setDeptObjectivePanelId(null)}
+          onChanged={loadData}
+          onOpen={setDeptObjectivePanelId}
+        />
+      )}
 
 
       {/* Task Detail Dialog */}
@@ -1360,6 +2210,9 @@ export default function TaskCenterPage() {
         onSelectTask={handleSelectTask}
         defaultTab={detailDefaultTab}
         onAddSubtask={(parent) => { setCreateSubtaskForParent(parent); setShowCreateEdit(true); }}
+        allTasks={tasks}
+        onBulkMoveParent={handleBulkMoveParent}
+        onMoveTaskToParent={handleMoveTaskToParent}
       />
 
       {/* Transfer Dialog */}
@@ -1548,29 +2401,90 @@ export default function TaskCenterPage() {
 
 /* ─── Kanban Board ────────────────────────────────────────────────────────── */
 
-function RecursiveWorkcenterSubtaskList({ subtasks, onSelectTask, onStatusChange, onEditTask, onDeleteTask, onAddSubtask, onFollowUpTask, depth = 1 }: any) {
+function RecursiveWorkcenterSubtaskList({
+  subtasks,
+  onSelectTask,
+  onStatusChange,
+  onEditTask,
+  onDeleteTask,
+  onAddSubtask,
+  onFollowUpTask,
+  taskLinksMap = {},
+  onMoveTaskToParent,
+  depth = 1,
+}: any) {
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
   if (!subtasks || subtasks.length === 0) return null;
   return (
     <div className="grid grid-cols-1 gap-1.5 w-full">
       {subtasks.map((st: any) => {
         const isCompleted = st.status === 'completed' || st.status === 'done';
         const hasChildren = st.subtasks && st.subtasks.length > 0;
+        const linkInfo = taskLinksMap[String(st.id)];
         return (
           <div key={st.id} className="w-full">
-            <div 
+            <div
+              draggable={!!onMoveTaskToParent}
+              onDragStart={e => {
+                e.stopPropagation();
+                e.dataTransfer.setData('application/x-nurofin-task-id', String(st.id));
+                e.dataTransfer.setData('text/plain', String(st.id));
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+              onDragOver={e => {
+                if (onMoveTaskToParent && e.dataTransfer.types.includes('application/x-nurofin-task-id')) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDragOverId(st.id);
+                }
+              }}
+              onDragLeave={() => setDragOverId(prev => (prev === st.id ? null : prev))}
+              onDrop={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragOverId(null);
+                const draggedId = Number(e.dataTransfer.getData('application/x-nurofin-task-id') || e.dataTransfer.getData('text/plain'));
+                if (onMoveTaskToParent && draggedId && draggedId !== st.id) {
+                  onMoveTaskToParent(draggedId, st.id);
+                }
+              }}
               onClick={e => {
                 e.stopPropagation();
                 onSelectTask(st);
               }}
-              className="p-2.5 sm:p-2 bg-background-secondary/50 border border-border-subtle/40 rounded-lg hover:bg-surface-hover/30 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px] mb-1.5"
+              className={cn(
+                "p-2.5 sm:p-2 bg-background-secondary/50 border rounded-lg hover:bg-surface-hover/30 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px] mb-1.5 cursor-pointer",
+                dragOverId === st.id ? "border-purple-500 bg-purple-500/10 ring-1 ring-purple-500/40" : "border-border-subtle/40"
+              )}
               style={{ paddingLeft: `${Math.min(24, Math.max(8, (depth - 1) * 10 + 8))}px` }}
             >
               {/* Desktop columns layout */}
               <div className="hidden lg:flex items-center w-full gap-2 2xl:gap-4 min-w-[860px] 2xl:min-w-[990px]">
                 {/* 1. Title */}
                 <div className="flex-1 min-w-[120px] flex items-center gap-2 pr-4 pl-2">
+                  {onMoveTaskToParent && (
+                    <span className="text-text-muted/60 cursor-grab shrink-0" title="Drag onto another task to move">
+                      <GripVertical className="w-3 h-3" />
+                    </span>
+                  )}
                   <div className={cn("w-3.5 h-3.5 rounded border flex items-center justify-center text-[9px] font-bold flex-shrink-0", isCompleted ? "bg-accent-green border-accent-green text-white" : "border-text-muted/40 text-transparent")}>✓</div>
+                  {linkInfo?.task_code && (
+                    <span className="font-mono text-[9.5px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 shrink-0">
+                      {getDeptDisplayCode(linkInfo.department)} · {linkInfo.task_code}
+                    </span>
+                  )}
                   <span title={st.title} className={cn("font-medium line-clamp-2 break-words", isCompleted && "line-through text-text-muted")}>{st.title}</span>
+                </div>
+
+                {/* 1.25 Department & Code */}
+                <div className="w-24 flex-shrink-0 text-[10px]">
+                  {linkInfo ? (
+                    <span className="font-mono text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 inline-block" title={`${linkInfo.department.name}: ${linkInfo.title}`}>
+                      {getDeptDisplayCode(linkInfo.department)}{linkInfo.task_code ? ` · ${linkInfo.task_code}` : ''}
+                    </span>
+                  ) : (
+                    <span className="text-text-muted">—</span>
+                  )}
                 </div>
 
                 {/* 1.5 Description */}
@@ -1678,6 +2592,16 @@ function RecursiveWorkcenterSubtaskList({ subtasks, onSelectTask, onStatusChange
                       title="Edit Subtask"
                     >
                       <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {onMoveTaskToParent && (
+                    <button
+                      type="button"
+                      onClick={() => onMoveTaskToParent(st.id, null)}
+                      className="p-1 rounded hover:bg-background-primary text-text-muted hover:text-accent-orange transition-colors"
+                      title="Make Top-Level Task (Detach from parent)"
+                    >
+                      <ArrowUpRight className="w-3.5 h-3.5" />
                     </button>
                   )}
                   {onDeleteTask && (
@@ -1789,6 +2713,8 @@ function RecursiveWorkcenterSubtaskList({ subtasks, onSelectTask, onStatusChange
                 depth={depth + 1}
                 onAddSubtask={onAddSubtask}
                 onFollowUpTask={onFollowUpTask}
+                taskLinksMap={taskLinksMap}
+                onMoveTaskToParent={onMoveTaskToParent}
               />
             )}
           </div>
@@ -1810,6 +2736,10 @@ function GroupedTaskFeed({
   onDeleteTask,
   onAddSubtask,
   onFollowUpTask,
+  taskLinksMap = {},
+  allTasksForParenting = [],
+  onMoveTaskToParent,
+  onBulkMoveParent,
 }: {
   tasks: WCTask[];
   onSelectTask: (t: any) => void;
@@ -1822,6 +2752,10 @@ function GroupedTaskFeed({
   onDeleteTask?: (id: number) => void;
   onAddSubtask?: (parent: WCTask) => void;
   onFollowUpTask?: (task: any) => void;
+  taskLinksMap?: Record<string, TaskLinkInfo>;
+  allTasksForParenting?: WCTask[];
+  onMoveTaskToParent?: (taskId: number, parentId: number | null) => Promise<void>;
+  onBulkMoveParent?: (taskIds: number[], parentId: number | null) => Promise<void>;
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     in_progress: true,
@@ -1834,6 +2768,19 @@ function GroupedTaskFeed({
   };
 
   const [expandedTasks, setExpandedTasks] = useState<Record<number, boolean>>({});
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(new Set());
+  const [bulkTargetParentId, setBulkTargetParentId] = useState<string>('');
+  const [bulkMoving, setBulkMoving] = useState(false);
+  const [dragOverTaskId, setDragOverTaskId] = useState<number | null>(null);
+
+  const toggleSelectTask = (id: number, e: React.MouseEvent | React.ChangeEvent) => {
+    e.stopPropagation();
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   const toggleExpandTask = (taskId: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1845,8 +2792,58 @@ function GroupedTaskFeed({
   const [newSubtaskDescription, setNewSubtaskDescription] = useState('');
   const [newSubtaskAssigneeId, setNewSubtaskAssigneeId] = useState('');
 
+  const parentSelectCandidates = useMemo(() => {
+    const source = allTasksForParenting.length ? allTasksForParenting : tasks;
+    return source.filter(t => !selectedTaskIds.has(t.id));
+  }, [allTasksForParenting, tasks, selectedTaskIds]);
+
   return (
     <div className="space-y-4">
+      {selectedTaskIds.size > 0 && onBulkMoveParent && (
+        <div className="sticky top-2 z-30 bg-background-secondary border border-purple-500/40 rounded-xl p-3 shadow-lg flex flex-wrap items-center justify-between gap-3 animate-in fade-in duration-150">
+          <div className="flex items-center gap-2 text-xs font-bold text-text-primary">
+            <CornerDownRight className="w-4 h-4 text-purple-500" />
+            <span>{selectedTaskIds.size} {selectedTaskIds.size === 1 ? 'task' : 'tasks'} selected — Make subtask under:</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={bulkTargetParentId}
+              onChange={e => setBulkTargetParentId(e.target.value)}
+              className="bg-background-primary border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary outline-none max-w-xs"
+            >
+              <option value="">Choose parent task...</option>
+              {parentSelectCandidates.map(pt => (
+                <option key={pt.id} value={pt.id}>
+                  {taskLinksMap[String(pt.id)]?.task_code ? `[${taskLinksMap[String(pt.id)].task_code}] ` : ''}{pt.title}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={!bulkTargetParentId || bulkMoving}
+              onClick={async () => {
+                if (!bulkTargetParentId) return;
+                setBulkMoving(true);
+                await onBulkMoveParent([...selectedTaskIds], Number(bulkTargetParentId));
+                setSelectedTaskIds(new Set());
+                setBulkTargetParentId('');
+                setBulkMoving(false);
+              }}
+              className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold disabled:opacity-50 cursor-pointer flex items-center gap-1"
+            >
+              {bulkMoving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              Move as Subtasks
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSelectedTaskIds(new Set()); setBulkTargetParentId(''); }}
+              className="px-2.5 py-1.5 text-xs font-semibold text-text-secondary hover:text-text-primary cursor-pointer"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
       {STATUS_COLS.map(col => {
         const colTasks = col.key === 'in_progress'
           ? tasks.filter(t => t.status !== 'completed' && t.status !== 'done' && t.status !== 'blocked')
@@ -1878,8 +2875,9 @@ function GroupedTaskFeed({
               <div className="divide-y divide-border-subtle/50 bg-background-primary overflow-x-auto scrollbar-thin">
                 {/* Column Headers Row */}
                 {colTasks.length > 0 && (
-                  <div className="hidden lg:flex items-center p-3.5 bg-background-secondary/40 border-b border-border-subtle text-[9px] 2xl:text-[10px] font-extrabold text-text-muted uppercase tracking-normal 2xl:tracking-wider select-none box-content gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[920px] min-[1366px]:min-w-[1030px] 2xl:min-w-[1280px]">
+                  <div className="hidden lg:flex items-center p-3.5 bg-background-secondary/40 border-b border-border-subtle text-[9px] 2xl:text-[10px] font-extrabold text-text-muted uppercase tracking-normal 2xl:tracking-wider select-none box-content gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[980px] min-[1366px]:min-w-[1110px] 2xl:min-w-[1360px]">
                     <div className="flex-1 min-w-[96px] min-[1366px]:min-w-[120px] pr-2 min-[1366px]:pr-4">Task & Project</div>
+                    <div className="w-24 min-[1366px]:w-28 flex-shrink-0">Department</div>
                     <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Start Date</div>
                     <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">End Date</div>
                     <div className="w-[68px] min-[1366px]:w-[76px] 2xl:w-24 flex-shrink-0">Completion Date</div>
@@ -1906,18 +2904,90 @@ function GroupedTaskFeed({
                   return (
                     <div 
                       key={task.id} 
+                      draggable={!!onMoveTaskToParent}
+                      onDragStart={e => {
+                        e.dataTransfer.setData('application/x-nurofin-task-id', String(task.id));
+                        e.dataTransfer.setData('text/plain', String(task.id));
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragOver={e => {
+                        if (onMoveTaskToParent && e.dataTransfer.types.includes('application/x-nurofin-task-id')) {
+                          e.preventDefault();
+                          setDragOverTaskId(task.id);
+                        }
+                      }}
+                      onDragLeave={() => setDragOverTaskId(prev => (prev === task.id ? null : prev))}
+                      onDrop={e => {
+                        e.preventDefault();
+                        setDragOverTaskId(null);
+                        const draggedId = Number(e.dataTransfer.getData('application/x-nurofin-task-id') || e.dataTransfer.getData('text/plain'));
+                        if (onMoveTaskToParent && draggedId && draggedId !== task.id) {
+                          onMoveTaskToParent(draggedId, task.id);
+                        }
+                      }}
                       onClick={() => onSelectTask(task)}
-                      className="p-3.5 hover:bg-surface-hover/30 transition-all cursor-pointer text-left space-y-3 relative group"
+                      className={cn(
+                        "p-3.5 hover:bg-surface-hover/30 transition-all cursor-pointer text-left space-y-3 relative group",
+                        dragOverTaskId === task.id && "bg-purple-500/10 ring-2 ring-purple-500/50 rounded-lg",
+                        selectedTaskIds.has(task.id) && "bg-accent-blue/5"
+                      )}
                     >
+                      {dragOverTaskId === task.id && (
+                        <div className="text-[11px] font-bold text-purple-600 dark:text-purple-400">
+                          Drop to make subtask under &ldquo;{task.title}&rdquo;
+                        </div>
+                      )}
                       {/* Main Task Metadata Row */}
                       {/* Desktop Aligned Row */}
-                      <div className="hidden lg:flex items-center w-full gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[920px] min-[1366px]:min-w-[1030px] 2xl:min-w-[1280px]">
+                      <div className="hidden lg:flex items-center w-full gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[980px] min-[1366px]:min-w-[1110px] 2xl:min-w-[1360px]">
                         {/* 1. Title & Project */}
                         <div className="flex-1 min-w-[96px] min-[1366px]:min-w-[120px] pr-2 min-[1366px]:pr-4">
-                          <h4 title={task.title} className="text-xs font-bold text-text-primary hover:text-accent-blue transition-colors leading-snug line-clamp-2 break-words">
-                            {idx + 1}. {task.title}
-                          </h4>
+                          <div className="flex items-start gap-2">
+                            {onBulkMoveParent && (
+                              <input
+                                type="checkbox"
+                                checked={selectedTaskIds.has(task.id)}
+                                onClick={e => e.stopPropagation()}
+                                onChange={e => toggleSelectTask(task.id, e)}
+                                title="Select task to nest under another task"
+                                className="mt-0.5 accent-purple-600 shrink-0 cursor-pointer"
+                              />
+                            )}
+                            {onMoveTaskToParent && (
+                              <span
+                                onClick={e => e.stopPropagation()}
+                                className="mt-0.5 text-text-muted/50 group-hover:text-text-muted cursor-grab shrink-0"
+                                title="Drag onto another task to make it a subtask"
+                              >
+                                <GripVertical className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                            <h4 title={task.title} className="text-xs font-bold text-text-primary hover:text-accent-blue transition-colors leading-snug line-clamp-2 break-words">
+                              {idx + 1}. {task.title}
+                            </h4>
+                          </div>
+                          {task.description && (
+                            <p className="text-[10.5px] text-text-secondary line-clamp-1 mt-1 pl-0.5">
+                              {task.description}
+                            </p>
+                          )}
                           <div className="flex flex-wrap gap-2 mt-1.5">
+                            {taskLinksMap[String(task.id)] && (
+                              <span className="inline-flex items-center gap-1 text-[9.5px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full">
+                                <span className="font-mono">
+                                  {getDeptDisplayCode(taskLinksMap[String(task.id)].department)}
+                                  {taskLinksMap[String(task.id)].task_code ? ` · ${taskLinksMap[String(task.id)].task_code}` : ''}
+                                </span>
+                              </span>
+                            )}
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full">
+                              {Math.round(task.status === 'completed' || task.status === 'done' ? 100 : (task.progress ?? 0))}%
+                            </span>
+                            {(task.comments_count ?? 0) > 0 && (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-full">
+                                <MessageSquare className="w-2.5 h-2.5" /> {task.comments_count} follow-up{task.comments_count === 1 ? '' : 's'}
+                              </span>
+                            )}
                             <TaskFeatureChips taskId={task.id} />
                             {task.parent_title && (
                               <span className="inline-flex items-center gap-1 text-[9px] font-bold text-accent-purple bg-accent-purple/5 border border-accent-purple/10 px-2 py-0.5 rounded-full">
@@ -1932,6 +3002,28 @@ function GroupedTaskFeed({
                               </span>
                             )}
                           </div>
+                        </div>
+
+                        {/* 1.5 Department & Objective Code */}
+                        <div className="w-24 min-[1366px]:w-28 flex-shrink-0">
+                          {(() => {
+                            const link = taskLinksMap[String(task.id)];
+                            if (!link) return <span className="text-[10px] text-text-muted">—</span>;
+                            const dCode = getDeptDisplayCode(link.department);
+                            return (
+                              <div className="flex flex-col gap-0.5">
+                                <span
+                                  className="inline-flex items-center gap-1 w-fit font-mono text-[9.5px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400"
+                                  title={`${link.department.name} · Objective ${link.objective_code || ''}: ${link.title}`}
+                                >
+                                  {dCode}{link.task_code ? ` · ${link.task_code}` : ''}
+                                </span>
+                                <span className="text-[9px] text-text-secondary truncate max-w-[105px]" title={link.title}>
+                                  {link.objective_code ? `${link.objective_code} ` : ''}{link.title}
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </div>
 
                         {/* 2. Start Date */}
@@ -2295,6 +3387,9 @@ function GroupedTaskFeed({
                               onDeleteTask={onDeleteTask}
                               depth={1}
                               onAddSubtask={onAddSubtask}
+                              onFollowUpTask={onFollowUpTask}
+                              taskLinksMap={taskLinksMap}
+                              onMoveTaskToParent={onMoveTaskToParent}
                             />
                           </div>
                         </div>
@@ -2318,17 +3413,20 @@ function GroupedTaskFeed({
 
 function TaskTableView({
   tasks,
+  taskLinksMap = {},
   onSelectTask,
 }: {
   tasks: WCTask[];
+  taskLinksMap?: Record<string, TaskLinkInfo>;
   onSelectTask: (t: any) => void;
 }) {
   return (
     <div className="bg-background-secondary border border-border-subtle rounded-xl overflow-x-auto scrollbar-thin text-left shadow-sm">
-      <Table className="min-w-[1100px]">
+      <Table className="min-w-[1200px]">
         <TableHeader>
           <TableRow>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Title</TableHead>
+            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Department</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Assignee</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Project</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Priority</TableHead>
@@ -2339,9 +3437,28 @@ function TaskTableView({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {tasks.map(task => (
+          {tasks.map(task => {
+            const link = taskLinksMap[String(task.id)];
+            return (
             <TableRow key={task.id} onClick={() => onSelectTask(task)} className="cursor-pointer hover:bg-surface-hover transition-colors">
-              <TableCell className="font-bold text-xs">{task.title}</TableCell>
+              <TableCell className="font-bold text-xs">
+                <div>{task.title}</div>
+                {task.description && <div className="text-[10.5px] font-normal text-text-secondary line-clamp-1 mt-0.5">{task.description}</div>}
+              </TableCell>
+              <TableCell>
+                {link ? (
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-mono text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 w-fit">
+                      {getDeptDisplayCode(link.department)}{link.task_code ? ` · ${link.task_code}` : ''}
+                    </span>
+                    <span className="text-[10px] text-text-secondary truncate max-w-[140px]" title={link.title}>
+                      {link.objective_code ? `${link.objective_code} ` : ''}{link.title}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-[11px] text-text-muted">—</span>
+                )}
+              </TableCell>
               <TableCell>
                 {task.assigned_to_name ? (
                   <div className="flex items-center gap-2">
@@ -2363,10 +3480,11 @@ function TaskTableView({
                 </span>
               </TableCell>
               <TableCell className="text-[11px] text-text-secondary font-medium">{task.deadline || '—'}</TableCell>
+              <TableCell className="text-[11px] text-text-secondary font-medium">{task.actual_completion_date || '—'}</TableCell>
               <TableCell>
                 <div className="flex items-center gap-1.5">
                   <div className={cn("w-1.5 h-1.5 rounded-full", getStatusDot(task.status))} />
-                  <span className="text-[11px] font-bold">{getStatusLabel(task.status)}</span>
+                  <span className="text-[11px] font-bold">{getStatusLabel(task.status)} ({Math.round(task.status === 'completed' || task.status === 'done' ? 100 : (task.progress ?? 0))}%)</span>
                 </div>
               </TableCell>
               <TableCell onClick={e => e.stopPropagation()} className="text-center">
@@ -2377,14 +3495,15 @@ function TaskTableView({
                   title="View updates or post a follow-up"
                 >
                   <MessageSquare className="w-3 h-3" />
-                  <span>Follow-up</span>
+                  <span>{(task.comments_count ?? 0) > 0 ? `${task.comments_count} Follow-up${task.comments_count === 1 ? '' : 's'}` : 'Follow-up'}</span>
                 </button>
               </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
           {tasks.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6} className="text-center py-12 text-[11px] text-text-muted">No tasks found</TableCell>
+              <TableCell colSpan={9} className="text-center py-12 text-[11px] text-text-muted">No tasks found</TableCell>
             </TableRow>
           )}
         </TableBody>
@@ -2475,6 +3594,9 @@ function TaskDetailDialog({
   onSelectTask,
   onAddSubtask,
   defaultTab,
+  allTasks = [],
+  onBulkMoveParent,
+  onMoveTaskToParent,
 }: {
   task: WCTask | null;
   open: boolean;
@@ -2489,12 +3611,19 @@ function TaskDetailDialog({
   onSelectTask?: (taskItem: { id: number }) => void;
   onAddSubtask?: (parent: WCTask) => void;
   defaultTab?: 'details' | 'updates' | 'history' | 'transfers';
+  allTasks?: WCTask[];
+  onBulkMoveParent?: (taskIds: number[], parentId: number | null) => Promise<void>;
+  onMoveTaskToParent?: (taskId: number, parentId: number | null) => Promise<void>;
 }) {
   const [history, setHistory] = useState<WCHistoryEntry[]>([]);
   const [transfers, setTransfers] = useState<WCTransfer[]>([]);
   const [activeTab, setActiveTab] = useState<'details' | 'updates' | 'history' | 'transfers'>(defaultTab || 'details');
   const lastTaskIdRef = useRef<number | null>(null);
   const { userProfile } = useStore();
+  const [showAttachSubtask, setShowAttachSubtask] = useState(false);
+  const [attachSubSearch, setAttachSubSearch] = useState('');
+  const [attachSelectedIds, setAttachSelectedIds] = useState<Set<number>>(new Set());
+  const [attachingBusy, setAttachingBusy] = useState(false);
 
   // Comments / Updates state
   const [comments, setComments] = useState<TaskComment[]>([]);
@@ -2760,14 +3889,31 @@ function TaskDetailDialog({
                 <TaskFeatureChips taskId={task.id} size="md" />
               </div>
             </div>
-            {task.parent_id && onSelectTask && (
-              <button
-                type="button"
-                onClick={() => onSelectTask({ id: task.parent_id! })}
-                className="text-[11px] text-accent-blue hover:underline font-bold flex items-center gap-1 flex-shrink-0 px-2.5 py-1 rounded bg-accent-blue/10 border border-accent-blue/20"
-              >
-                ← View Main Task
-              </button>
+            {task.parent_id && (
+              <div className="flex items-center gap-2 shrink-0">
+                {onSelectTask && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectTask({ id: task.parent_id! })}
+                    className="text-[11px] text-accent-blue hover:underline font-bold flex items-center gap-1 flex-shrink-0 px-2.5 py-1 rounded bg-accent-blue/10 border border-accent-blue/20 cursor-pointer"
+                  >
+                    ← View Main Task
+                  </button>
+                )}
+                {onMoveTaskToParent && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await onMoveTaskToParent(task.id, null);
+                      onRefreshTask(task.id);
+                    }}
+                    className="text-[11px] text-accent-orange hover:underline font-bold flex items-center gap-1 flex-shrink-0 px-2.5 py-1 rounded bg-accent-orange/10 border border-accent-orange/20 cursor-pointer"
+                    title="Detach from parent and promote to top-level task"
+                  >
+                    Make Top-Level
+                  </button>
+                )}
+              </div>
             )}
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 mt-2.5 pt-2 border-t border-border-subtle/40">
@@ -2986,22 +4132,113 @@ function TaskDetailDialog({
               </div>
             </div>
 
-            {((task.subtasks && task.subtasks.length > 0) || !task.parent_id) && (
+            {((task.subtasks && task.subtasks.length > 0) || !task.parent_id || true) && (
               <div className="space-y-3 pt-3 border-t border-border-subtle/50 text-left">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block">
                     Subtasks ({task.subtasks?.filter(s => s.status === 'completed').length ?? 0}/{task.subtasks?.length ?? 0})
                   </span>
-                  {onAddSubtask && (
-                    <button
-                      type="button"
-                      onClick={() => onAddSubtask(task)}
-                      className="text-[9px] font-bold text-accent-blue hover:underline flex items-center gap-0.5"
-                    >
-                      <Plus className="w-3 h-3" /> {task.parent_id ? 'Add Sub-subtask' : 'Add Subtask'}
-                    </button>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {onBulkMoveParent && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAttachSubtask(!showAttachSubtask);
+                          setAttachSelectedIds(new Set());
+                          setAttachSubSearch('');
+                        }}
+                        className="text-[10px] font-bold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <Link2 className="w-3 h-3" /> Attach Existing Tasks
+                      </button>
+                    )}
+                    {onAddSubtask && (
+                      <button
+                        type="button"
+                        onClick={() => onAddSubtask(task)}
+                        className="text-[10px] font-bold text-accent-blue hover:underline flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" /> {task.parent_id ? 'Add Sub-subtask' : 'Add Subtask'}
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {showAttachSubtask && onBulkMoveParent && (
+                  <div className="p-2.5 rounded-xl border border-purple-500/30 bg-background-primary space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-text-primary">Select existing tasks to make subtasks under &ldquo;{task.title}&rdquo;</span>
+                      <button type="button" onClick={() => setShowAttachSubtask(false)} className="text-text-muted hover:text-text-primary cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                    <input
+                      autoFocus
+                      value={attachSubSearch}
+                      onChange={e => setAttachSubSearch(e.target.value)}
+                      placeholder="Search existing tasks..."
+                      className="w-full rounded-lg border border-border-subtle bg-background-secondary px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-purple-500"
+                    />
+                    <div className="max-h-40 overflow-y-auto space-y-1 pr-1">
+                      {(() => {
+                        const existingSubIds = new Set((task.subtasks || []).map(s => s.id));
+                        const flat: WCTask[] = [];
+                        const walk = (arr: any[]) => {
+                          for (const it of arr || []) {
+                            flat.push(it);
+                            if (it.subtasks?.length) walk(it.subtasks);
+                          }
+                        };
+                        walk(allTasks);
+                        const q = attachSubSearch.toLowerCase().trim();
+                        const candidates = flat.filter(ct =>
+                          ct.id !== task.id &&
+                          !existingSubIds.has(ct.id) &&
+                          ct.parent_id !== task.id &&
+                          (!q || ct.title.toLowerCase().includes(q) || (ct.project_name || '').toLowerCase().includes(q))
+                        );
+                        if (candidates.length === 0) {
+                          return <div className="text-center py-2 text-[11px] text-text-muted">No matching tasks available.</div>;
+                        }
+                        return candidates.map(ct => {
+                          const checked = attachSelectedIds.has(ct.id);
+                          return (
+                            <label key={ct.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer text-[11.5px]">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  const next = new Set(attachSelectedIds);
+                                  checked ? next.delete(ct.id) : next.add(ct.id);
+                                  setAttachSelectedIds(next);
+                                }}
+                                className="accent-purple-600 shrink-0"
+                              />
+                              <span className="font-medium text-text-primary truncate flex-1">{ct.title}</span>
+                              {ct.assigned_to_name && <span className="text-[10px] text-text-secondary shrink-0">{ct.assigned_to_name}</span>}
+                            </label>
+                          );
+                        });
+                      })()}
+                    </div>
+                    <div className="flex justify-end gap-2 pt-1 border-t border-border-subtle">
+                      <button
+                        type="button"
+                        disabled={attachingBusy || attachSelectedIds.size === 0}
+                        onClick={async () => {
+                          setAttachingBusy(true);
+                          await onBulkMoveParent([...attachSelectedIds], task.id);
+                          setAttachingBusy(false);
+                          setShowAttachSubtask(false);
+                          setAttachSelectedIds(new Set());
+                          onRefreshTask(task.id);
+                        }}
+                        className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                      >
+                        {attachingBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                        Make Subtasks ({attachSelectedIds.size})
+                      </button>
+                    </div>
+                  </div>
+                )}
                 
                 <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
                   {task.subtasks && (
@@ -3520,6 +4757,7 @@ function CreateEditTaskDialog({
   defaultStatus,
   objectives = [],
   objectivesQuarter = '',
+  allTasks = [],
 }: {
   objectives?: import('@/services/departmentTargets').LinkableObjective[];
   objectivesQuarter?: string;
@@ -3533,6 +4771,7 @@ function CreateEditTaskDialog({
   quarters: WCQuarter[];
   selectedQuarterId: number | null;
   defaultStatus?: string;
+  allTasks?: WCTask[];
 }) {
   const isEdit = !!task;
   interface FormSubtask {
@@ -3792,6 +5031,47 @@ function CreateEditTaskDialog({
               if (tq) setForm(f => ({ ...f, quarter_id: String(tq) }));
             }}
             className="w-full h-9 bg-background-secondary border border-border-subtle rounded-md px-2 text-[11px] text-text-primary outline-none normal-case" />
+          {objectiveId && (() => {
+            const chosenObj = objectives.find(o => String(o.id) === objectiveId);
+            if (!chosenObj?.next_task_code) return null;
+            return (
+              <div className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
+                <span className="font-mono px-1.5 py-0.5 rounded bg-indigo-500/10">{chosenObj.next_task_code}</span>
+                <span>Will be numbered {chosenObj.next_task_code} under {chosenObj.department.short_code ? `##${chosenObj.department.short_code}` : chosenObj.department.name}</span>
+              </div>
+            );
+          })()}
+          {allTasks.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-text-secondary uppercase">Parent Task (Optional — Make Subtask Of)</label>
+              <select
+                value={form.parent_id}
+                onChange={e => setForm(f => ({ ...f, parent_id: e.target.value }))}
+                className="w-full h-9 bg-background-secondary border border-border-subtle rounded-md px-2 text-[11px] text-text-primary outline-none normal-case"
+              >
+                <option value="">None (Top-level Task)</option>
+                {(() => {
+                  const excluded = new Set<number>();
+                  const collectDesc = (t: WCTask) => {
+                    excluded.add(t.id);
+                    (t.subtasks || []).forEach((s: any) => collectDesc(s));
+                  };
+                  if (task) collectDesc(task);
+                  const opts: { id: number; label: string }[] = [];
+                  const walk = (arr: any[], depth = 0) => {
+                    for (const item of arr) {
+                      if (!excluded.has(item.id)) {
+                        opts.push({ id: item.id, label: `${'↳ '.repeat(depth)}${item.title}` });
+                        if (item.subtasks?.length) walk(item.subtasks, depth + 1);
+                      }
+                    }
+                  };
+                  walk(allTasks);
+                  return opts.map(o => <option key={o.id} value={o.id}>{o.label}</option>);
+                })()}
+              </select>
+            </div>
+          )}
           <FeatureSelect features={features} value={featureId} onChange={setFeatureId}
             className="w-full h-9 bg-background-secondary border border-border-subtle rounded-md px-2 text-[11px] text-text-primary outline-none normal-case" />
           <div className="grid grid-cols-3 gap-3">

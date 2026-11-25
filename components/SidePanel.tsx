@@ -2,9 +2,11 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { X, Target, Calendar, ExternalLink, Send, Hash, CornerDownRight, Clock, User, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { X, Target, Calendar, ExternalLink, Send, Hash, CornerDownRight, Clock, User, AlertCircle, CheckCircle2, FolderKanban } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { departmentTargetsService as api, ObjectiveDetail, PersonBrief } from '@/services/departmentTargets';
+import { projectsService } from '@/services/projects';
+import { Project } from '@/types';
 import { workcenterService, WCTask } from '@/services/workcenter';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { ProgressBar } from '@/components/QuarterGoalHero';
@@ -63,15 +65,34 @@ const Label = ({ children }: { children: React.ReactNode }) => <div className="t
 
 export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number; onClose: () => void; onChanged?: () => void; onOpen?: (id: number) => void }) {
   const [o, setO] = useState<ObjectiveDetail | null>(null);
+  const [taskPanel, setTaskPanel] = useState<WCTask | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [customPct, setCustomPct] = useState('0');
   const [error, setError] = useState('');
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => { api.getObjective(id).then(setO).catch(e => setError(e.message)); }, [id]);
+  const load = useCallback(() => {
+    api.getObjective(id).then(res => {
+      setO(res);
+      setCustomPct(String(Math.round(res.progress)));
+    }).catch(e => setError(e.message));
+  }, [id]);
   useEffect(() => { setO(null); load(); }, [load]);
+  useEffect(() => { projectsService.getProjects().then(setProjects).catch(() => {}); }, []);
+
+  const openTask = useCallback((taskId: number) => {
+    workcenterService.getTask(taskId).then(setTaskPanel).catch(() => {});
+  }, []);
 
   const setProgress = async (v: number) => {
-    try { await api.updateObjective(id, { progress: v }); load(); onChanged?.(); } catch (e: any) { setError(e.message); }
+    const clamped = Math.max(0, Math.min(100, Math.round(v)));
+    setError('');
+    try { await api.updateObjective(id, { progress: clamped }); load(); onChanged?.(); } catch (e: any) { setError(e.message); }
+  };
+  const setProject = async (pid: number | null) => {
+    setError('');
+    try { await api.updateObjective(id, { project_id: pid }); load(); onChanged?.(); } catch (e: any) { setError(e.message); }
   };
   const post = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,26 +103,46 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
 
   if (!o) return <Shell eyebrow="Objective" title={error || 'Loading…'} onClose={onClose}>{null}</Shell>;
   const level = o.level === 'objective' ? 'Objective' : 'Sub-objective';
+  const deptTag = o.department.short_code ? `##${o.department.short_code} · ` : '';
 
   return (
-    <Shell eyebrow={`${o.department.name} · ${o.quarter.short} · ${level}`} title={o.title} onClose={onClose}>
+    <>
+    <Shell eyebrow={`${deptTag}${o.department.name} · ${o.quarter.short} · ${level}${o.code ? ` ${o.code}` : ''}`} title={o.code ? `${o.code} ${o.title}` : o.title} onClose={onClose}>
       <div>
         <Label>Why this matters</Label>
         <div className="border border-border-subtle rounded-xl overflow-hidden text-[13px]">
-          <div className="px-3 py-2.5 grid grid-cols-[100px_1fr] gap-2"><span className="text-text-secondary text-[11.5px] font-semibold">Director → {o.department.name.split(' ')[0]}</span><span className="line-clamp-3">{o.director_message || 'No target written yet.'}</span></div>
+          <div className="px-3 py-2.5 grid grid-cols-[100px_1fr] gap-2"><span className="text-text-secondary text-[11.5px] font-semibold">Director → {o.department.short_code || o.department.name.split(' ')[0]}</span><span className="line-clamp-3">{o.director_message || 'No target written yet.'}</span></div>
           {o.parent && (
             <button onClick={() => onOpen?.(o.parent!.id)} className="w-full text-left px-3 py-2.5 grid grid-cols-[100px_1fr] gap-2 border-t border-border-subtle hover:bg-surface-hover">
-              <span className="text-text-secondary text-[11.5px] font-semibold">Objective</span><span className="font-medium">{o.parent.title}</span>
+              <span className="text-text-secondary text-[11.5px] font-semibold">Objective {o.parent.code || ''}</span><span className="font-medium">{o.parent.title}</span>
             </button>
           )}
-          <div className="px-3 py-2.5 grid grid-cols-[100px_1fr] gap-2 border-t border-border-subtle bg-accent-blue/10"><span className="text-text-secondary text-[11.5px] font-semibold">{level}</span><span className="font-semibold">{o.title}</span></div>
+          <div className="px-3 py-2.5 grid grid-cols-[100px_1fr] gap-2 border-t border-border-subtle bg-accent-blue/10"><span className="text-text-secondary text-[11.5px] font-semibold">{level} {o.code || ''}</span><span className="font-semibold">{o.title}</span></div>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 text-[13px]">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[13px]">
         <div><Label>Person</Label><span className="flex items-center gap-1.5"><Avatar p={o.owner} size={20} />{o.owner ? o.owner.name : 'Unassigned'}</span></div>
         <div><Label>Deadline</Label><span className={cn(o.overdue && 'text-accent-red font-semibold')}>{fmtDay(o.deadline) || '—'}</span></div>
         <div><Label>Status</Label><StatusChip status={o.status} overdue={o.overdue} /></div>
+        <div>
+          <Label>Project</Label>
+          {(o.permissions.can_edit_project ?? o.permissions.can_plan) ? (
+            <select
+              aria-label="Project"
+              value={o.own_project_id ?? o.project_id ?? ''}
+              onChange={e => setProject(e.target.value ? Number(e.target.value) : null)}
+              className="w-full text-[12px] rounded-lg border border-border-subtle bg-background-primary px-2 py-1 text-text-primary"
+            >
+              <option value="">No project</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-[12.5px] font-medium">
+              {o.project_name ? <><FolderKanban size={12} className="text-purple-500" /> {o.project_name}</> : '—'}
+            </span>
+          )}
+        </div>
       </div>
 
       {o.description && <div><Label>Description</Label><p className="text-[13.5px] leading-relaxed whitespace-pre-line">{o.description}</p></div>}
@@ -109,18 +150,49 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
       <div>
         <Label>Progress · {Math.round(o.progress)}%</Label>
         {o.permissions.can_update_progress ? (
-          <div className="flex flex-wrap gap-1.5">
-            {[0, 25, 50, 75, 100].map(v => (
-              <button key={v} onClick={() => setProgress(v)}
-                className={cn('px-3 py-1.5 rounded-lg border text-[12px] font-semibold', Math.round(o.progress) === v ? 'bg-accent-blue text-white border-accent-blue' : 'border-border-subtle text-text-secondary hover:text-text-primary')}>
-                {v === 100 ? 'Done' : `${v}%`}
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[0, 10, 25, 50, 75, 100].map(v => (
+                <button key={v} onClick={() => setProgress(v)}
+                  className={cn('px-2.5 py-1.5 rounded-lg border text-[12px] font-semibold cursor-pointer', Math.round(o.progress) === v ? 'bg-accent-blue text-white border-accent-blue' : 'border-border-subtle text-text-secondary hover:text-text-primary')}>
+                  {v === 100 ? '100% Done' : `${v}%`}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] text-text-secondary">Custom %:</span>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={customPct}
+                onChange={e => setCustomPct(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const n = Number(customPct);
+                    if (!Number.isNaN(n)) setProgress(n);
+                  }
+                }}
+                aria-label="Custom progress percentage"
+                className="w-16 rounded-lg border border-border-subtle bg-background-primary px-2 py-1 text-[12.5px] text-right text-text-primary"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const n = Number(customPct);
+                  if (!Number.isNaN(n)) setProgress(n);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-accent-blue/15 text-accent-blue hover:bg-accent-blue/25 text-[12px] font-semibold cursor-pointer"
+              >
+                Save %
               </button>
-            ))}
+            </div>
           </div>
         ) : (
           <>
             <ProgressBar value={o.progress} className="h-2" />
-            <div className="text-[11.5px] text-text-secondary mt-1.5">{o.children.length || o.tasks.length ? 'Rolls up from the sub-objectives and tasks under it.' : 'The person in charge and the HOD update progress.'}</div>
+            <div className="text-[11.5px] text-text-secondary mt-1.5">{o.children.length ? 'Rolls up from the sub-objectives under it.' : 'The person in charge, task assignee, or HOD updates progress.'}</div>
           </>
         )}
       </div>
@@ -129,8 +201,9 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
         <div>
           <Label>Sub-objectives · {o.children.filter(c => c.status === 'done').length} of {o.children.length} done</Label>
           <div className="border border-border-subtle rounded-xl overflow-hidden">
-            {o.children.map(c => (
+            {o.children.map((c, idx) => (
               <button key={c.id} onClick={() => onOpen?.(c.id)} className="w-full text-left flex items-center gap-2.5 px-3 py-2.5 border-t border-border-subtle first:border-t-0 hover:bg-surface-hover">
+                <span className="font-mono text-[11.5px] font-bold text-accent-blue w-8 shrink-0">{c.code || (o.code ? `${o.code}.${idx + 1}` : '')}</span>
                 <Avatar p={c.owner} size={22} />
                 <span className="flex-1 min-w-0"><span className="block text-[13px] font-medium truncate">{c.title}</span><span className="block text-[11.5px] text-text-secondary">{c.owner?.name || 'Unassigned'} · {fmtDay(c.deadline)} · {Math.round(c.progress)}%</span></span>
                 <StatusChip status={c.status} overdue={c.overdue} />
@@ -144,6 +217,10 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
         <Label>Tasks from the Task center{o.tasks.length ? ` · ${o.tasks.filter(t => t.done).length} of ${o.tasks.length} done` : ''}</Label>
         <ObjectiveTasks objectiveId={o.id} tasks={o.tasks}
           people={[o.department.hod, ...(o.department.members || [])].filter((p, i, a): p is PersonBrief => !!p && a.findIndex(x => x?.id === p.id) === i)}
+          parentCode={o.code}
+          startIndex={o.children.length ? o.children.length + 1 : 1}
+          projectId={o.project_id}
+          onOpenTask={openTask}
           onChanged={() => { load(); onChanged?.(); }} />
       </div>
 
@@ -172,6 +249,8 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
       {error && <div className="text-[12.5px] text-accent-red">{error}</div>}
       <Link href={`/departments?id=${o.department.id}`} className="text-[12.5px] font-semibold text-accent-blue inline-flex items-center gap-1"><Target size={13} /> Open {o.department.name}</Link>
     </Shell>
+    {taskPanel && <TaskPanel task={taskPanel} canChange onClose={() => setTaskPanel(null)} onChanged={() => { load(); onChanged?.(); }} />}
+    </>
   );
 }
 
