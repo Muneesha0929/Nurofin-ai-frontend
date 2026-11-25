@@ -1812,9 +1812,16 @@ export default function TaskCenterPage() {
                     setDetailDefaultTab('updates');
                     handleSelectTask(task);
                   }}
+                  onOpenObjective={(objId) => setDeptObjectivePanelId(objId)}
                 />
               ) : (
-                <TaskTableView tasks={filteredTasks} taskLinksMap={taskLinksMap} onSelectTask={handleSelectTask} />
+                <TaskTableView
+                  tasks={filteredTasks}
+                  taskLinksMap={taskLinksMap}
+                  onSelectTask={handleSelectTask}
+                  onRefresh={loadData}
+                  onOpenObjective={(objId) => setDeptObjectivePanelId(objId)}
+                />
               )}
             </div>
           </div>
@@ -2206,7 +2213,7 @@ export default function TaskCenterPage() {
         onTransfer={t => { setTransferTask(t); setTransferOpen(true); }}
         onStatusChange={handleStatusChange}
         allUsers={allUsers}
-        onRefreshTask={id => handleSelectTask({ id })}
+        onRefreshTask={id => { handleSelectTask({ id }); loadData(); }}
         onSelectTask={handleSelectTask}
         defaultTab={detailDefaultTab}
         onAddSubtask={(parent) => { setCreateSubtaskForParent(parent); setShowCreateEdit(true); }}
@@ -2401,6 +2408,90 @@ export default function TaskCenterPage() {
 
 /* ─── Kanban Board ────────────────────────────────────────────────────────── */
 
+function CompletionDateCell({
+  task,
+  onSaved,
+}: {
+  task: any;
+  onSaved?: () => void;
+}) {
+  const [showHistory, setShowHistory] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const historyList: any[] = task.completion_date_history || [];
+
+  return (
+    <div className="relative flex items-center gap-1" onClick={e => e.stopPropagation()}>
+      <input
+        type="date"
+        aria-label="Actual Completion Date"
+        value={task.actual_completion_date || ''}
+        disabled={saving}
+        onChange={async e => {
+          const val = e.target.value;
+          setSaving(true);
+          try {
+            await workcenterService.updateTask(task.id, { actual_completion_date: val });
+            onSaved?.();
+          } finally {
+            setSaving(false);
+          }
+        }}
+        className="w-[104px] bg-background-secondary border border-border-subtle rounded px-1.5 py-0.5 text-[10px] font-bold text-text-primary outline-none focus:border-accent-blue cursor-pointer"
+      />
+      {historyList.length > 0 && (
+        <button
+          type="button"
+          onClick={e => {
+            e.stopPropagation();
+            setShowHistory(v => !v);
+          }}
+          title={`View actual completion date change history (${historyList.length})`}
+          className={cn(
+            "p-1 rounded border text-[9px] font-bold cursor-pointer transition-colors shrink-0 inline-flex items-center gap-0.5",
+            showHistory
+              ? "bg-accent-blue text-white border-accent-blue"
+              : "bg-background-secondary border-border-subtle text-text-secondary hover:text-accent-blue hover:border-accent-blue"
+          )}
+        >
+          <History className="w-3 h-3" />
+          <span>{historyList.length}</span>
+        </button>
+      )}
+      {showHistory && historyList.length > 0 && (
+        <div
+          onClick={e => e.stopPropagation()}
+          className="absolute right-0 top-7 z-40 w-64 rounded-xl border border-border-subtle bg-background-primary shadow-xl p-2.5 space-y-1.5 text-left"
+        >
+          <div className="flex items-center justify-between border-b border-border-subtle pb-1">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-text-primary flex items-center gap-1">
+              <History className="w-3 h-3 text-accent-blue" /> Completion Date History
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowHistory(false)}
+              className="text-text-muted hover:text-text-primary cursor-pointer"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="max-h-40 overflow-y-auto space-y-1.5">
+            {historyList.map((h: any) => (
+              <div key={h.id} className="text-[10px] bg-background-secondary/70 rounded-lg px-2 py-1.5 space-y-0.5">
+                <div className="font-bold text-text-primary">
+                  {h.old_value || 'Not set'} → {h.new_value || 'Cleared'}
+                </div>
+                <div className="text-[9px] text-text-secondary">
+                  {h.changed_by || 'User'}{h.changed_at ? ` · ${formatISTDateTime(h.changed_at)}` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RecursiveWorkcenterSubtaskList({
   subtasks,
   onSelectTask,
@@ -2409,6 +2500,8 @@ function RecursiveWorkcenterSubtaskList({
   onDeleteTask,
   onAddSubtask,
   onFollowUpTask,
+  onOpenObjective,
+  onRefresh,
   taskLinksMap = {},
   onMoveTaskToParent,
   depth = 1,
@@ -2453,35 +2546,49 @@ function RecursiveWorkcenterSubtaskList({
                 onSelectTask(st);
               }}
               className={cn(
-                "p-2.5 sm:p-2 bg-background-secondary/50 border rounded-lg hover:bg-surface-hover/30 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px] mb-1.5 cursor-pointer",
+                "group/sub relative p-2.5 sm:p-2 bg-background-secondary/50 border rounded-lg hover:bg-surface-hover/30 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-[11px] mb-1.5 cursor-pointer",
                 dragOverId === st.id ? "border-purple-500 bg-purple-500/10 ring-1 ring-purple-500/40" : "border-border-subtle/40"
               )}
               style={{ paddingLeft: `${Math.min(24, Math.max(8, (depth - 1) * 10 + 8))}px` }}
             >
               {/* Desktop columns layout */}
-              <div className="hidden lg:flex items-center w-full gap-2 2xl:gap-4 min-w-[860px] 2xl:min-w-[990px]">
+              <div className="hidden lg:flex items-center w-full gap-2 2xl:gap-4 min-w-[1060px] 2xl:min-w-[1220px]">
                 {/* 1. Title */}
-                <div className="flex-1 min-w-[120px] flex items-center gap-2 pr-4 pl-2">
+                <div className="flex-1 min-w-[180px] flex items-center gap-2 pr-3 pl-2">
                   {onMoveTaskToParent && (
-                    <span className="text-text-muted/60 cursor-grab shrink-0" title="Drag onto another task to move">
+                    <span className="hidden group-hover/sub:inline-flex text-text-muted/70 hover:text-text-primary cursor-grab shrink-0" title="Drag onto another task to move">
                       <GripVertical className="w-3 h-3" />
                     </span>
                   )}
                   <div className={cn("w-3.5 h-3.5 rounded border flex items-center justify-center text-[9px] font-bold flex-shrink-0", isCompleted ? "bg-accent-green border-accent-green text-white" : "border-text-muted/40 text-transparent")}>✓</div>
-                  {linkInfo?.task_code && (
-                    <span className="font-mono text-[9.5px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 shrink-0">
-                      {getDeptDisplayCode(linkInfo.department)} · {linkInfo.task_code}
-                    </span>
-                  )}
                   <span title={st.title} className={cn("font-medium line-clamp-2 break-words", isCompleted && "line-through text-text-muted")}>{st.title}</span>
                 </div>
 
-                {/* 1.25 Department & Code */}
+                {/* 1.2 Code */}
+                <div className="w-20 flex-shrink-0 text-[10px]">
+                  {linkInfo ? (
+                    <span className="font-mono text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 inline-block">
+                      {linkInfo.project_code || linkInfo.task_code || linkInfo.objective_code}
+                    </span>
+                  ) : (
+                    <span className="text-text-muted">—</span>
+                  )}
+                </div>
+
+                {/* 1.3 Department */}
                 <div className="w-24 flex-shrink-0 text-[10px]">
                   {linkInfo ? (
-                    <span className="font-mono text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 inline-block" title={`${linkInfo.department.name}: ${linkInfo.title}`}>
-                      {getDeptDisplayCode(linkInfo.department)}{linkInfo.task_code ? ` · ${linkInfo.task_code}` : ''}
-                    </span>
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        onOpenObjective?.(linkInfo.objective_id);
+                      }}
+                      title={`${linkInfo.department.name}: ${linkInfo.title} (click to view full objective, descriptions & follow-ups)`}
+                      className="font-mono text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 inline-block cursor-pointer truncate max-w-full"
+                    >
+                      {getDeptDisplayCode(linkInfo.department)}
+                    </button>
                   ) : (
                     <span className="text-text-muted">—</span>
                   )}
@@ -2497,9 +2604,14 @@ function RecursiveWorkcenterSubtaskList({
                   {st.start_date ? st.start_date : '—'}
                 </div>
 
-                {/* 3. End Date */}
-                <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
+                {/* 3. Target Date (fixed) */}
+                <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary" title="Initial Target Date (fixed)">
                   {st.deadline ? st.deadline : '—'}
+                </div>
+
+                {/* 3.5 Actual Completion Date (editable + hidden history) */}
+                <div className="w-32 flex-shrink-0">
+                  <CompletionDateCell task={st} onSaved={onRefresh} />
                 </div>
 
                 {/* 4. Overdue Days */}
@@ -2713,6 +2825,8 @@ function RecursiveWorkcenterSubtaskList({
                 depth={depth + 1}
                 onAddSubtask={onAddSubtask}
                 onFollowUpTask={onFollowUpTask}
+                onOpenObjective={onOpenObjective}
+                onRefresh={onRefresh}
                 taskLinksMap={taskLinksMap}
                 onMoveTaskToParent={onMoveTaskToParent}
               />
@@ -2736,6 +2850,7 @@ function GroupedTaskFeed({
   onDeleteTask,
   onAddSubtask,
   onFollowUpTask,
+  onOpenObjective,
   taskLinksMap = {},
   allTasksForParenting = [],
   onMoveTaskToParent,
@@ -2752,6 +2867,7 @@ function GroupedTaskFeed({
   onDeleteTask?: (id: number) => void;
   onAddSubtask?: (parent: WCTask) => void;
   onFollowUpTask?: (task: any) => void;
+  onOpenObjective?: (objectiveId: number) => void;
   taskLinksMap?: Record<string, TaskLinkInfo>;
   allTasksForParenting?: WCTask[];
   onMoveTaskToParent?: (taskId: number, parentId: number | null) => Promise<void>;
@@ -2875,12 +2991,13 @@ function GroupedTaskFeed({
               <div className="divide-y divide-border-subtle/50 bg-background-primary overflow-x-auto scrollbar-thin">
                 {/* Column Headers Row */}
                 {colTasks.length > 0 && (
-                  <div className="hidden lg:flex items-center p-3.5 bg-background-secondary/40 border-b border-border-subtle text-[9px] 2xl:text-[10px] font-extrabold text-text-muted uppercase tracking-normal 2xl:tracking-wider select-none box-content gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[980px] min-[1366px]:min-w-[1110px] 2xl:min-w-[1360px]">
-                    <div className="flex-1 min-w-[96px] min-[1366px]:min-w-[120px] pr-2 min-[1366px]:pr-4">Task & Project</div>
+                  <div className="hidden lg:flex items-center p-3.5 bg-background-secondary/40 border-b border-border-subtle text-[9px] 2xl:text-[10px] font-extrabold text-text-muted uppercase tracking-normal 2xl:tracking-wider select-none box-content gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[1140px] min-[1366px]:min-w-[1260px] 2xl:min-w-[1480px]">
+                    <div className="flex-1 min-w-[200px] min-[1366px]:min-w-[230px] pr-2 min-[1366px]:pr-4">Task & Project</div>
+                    <div className="w-20 min-[1366px]:w-24 flex-shrink-0">Code</div>
                     <div className="w-24 min-[1366px]:w-28 flex-shrink-0">Department</div>
                     <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Start Date</div>
-                    <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">End Date</div>
-                    <div className="w-[68px] min-[1366px]:w-[76px] 2xl:w-24 flex-shrink-0">Completion Date</div>
+                    <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Target Date</div>
+                    <div className="w-[124px] min-[1366px]:w-[132px] flex-shrink-0">Actual Completion</div>
                     <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Overdue Days</div>
                     <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Assignee</div>
                     <div className="w-[68px] min-[1366px]:w-[76px] 2xl:w-24 flex-shrink-0">Transferred Info</div>
@@ -2939,28 +3056,37 @@ function GroupedTaskFeed({
                       )}
                       {/* Main Task Metadata Row */}
                       {/* Desktop Aligned Row */}
-                      <div className="hidden lg:flex items-center w-full gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[980px] min-[1366px]:min-w-[1110px] 2xl:min-w-[1360px]">
-                        {/* 1. Title & Project */}
-                        <div className="flex-1 min-w-[96px] min-[1366px]:min-w-[120px] pr-2 min-[1366px]:pr-4">
-                          <div className="flex items-start gap-2">
-                            {onBulkMoveParent && (
-                              <input
-                                type="checkbox"
-                                checked={selectedTaskIds.has(task.id)}
+                      <div className="hidden lg:flex items-center w-full gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[1140px] min-[1366px]:min-w-[1260px] 2xl:min-w-[1480px]">
+                        {/* 1. Title & Project (drag/select hidden until hovered or selected so full task name stays clear) */}
+                        <div className="flex-1 min-w-[200px] min-[1366px]:min-w-[230px] pr-2 min-[1366px]:pr-4 relative">
+                          <div className="flex items-start gap-1.5">
+                            {(onBulkMoveParent || onMoveTaskToParent) && (
+                              <div
                                 onClick={e => e.stopPropagation()}
-                                onChange={e => toggleSelectTask(task.id, e)}
-                                title="Select task to nest under another task"
-                                className="mt-0.5 accent-purple-600 shrink-0 cursor-pointer"
-                              />
-                            )}
-                            {onMoveTaskToParent && (
-                              <span
-                                onClick={e => e.stopPropagation()}
-                                className="mt-0.5 text-text-muted/50 group-hover:text-text-muted cursor-grab shrink-0"
-                                title="Drag onto another task to make it a subtask"
+                                className={cn(
+                                  "items-center gap-1 mt-0.5 shrink-0",
+                                  selectedTaskIds.has(task.id) ? "flex" : "hidden group-hover:flex"
+                                )}
                               >
-                                <GripVertical className="w-3.5 h-3.5" />
-                              </span>
+                                {onBulkMoveParent && (
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedTaskIds.has(task.id)}
+                                    onClick={e => e.stopPropagation()}
+                                    onChange={e => toggleSelectTask(task.id, e)}
+                                    title="Select task to nest under another task"
+                                    className="accent-purple-600 shrink-0 cursor-pointer"
+                                  />
+                                )}
+                                {onMoveTaskToParent && (
+                                  <span
+                                    className="text-text-muted hover:text-text-primary cursor-grab shrink-0"
+                                    title="Drag onto another task to make it a subtask"
+                                  >
+                                    <GripVertical className="w-3.5 h-3.5" />
+                                  </span>
+                                )}
+                              </div>
                             )}
                             <h4 title={task.title} className="text-xs font-bold text-text-primary hover:text-accent-blue transition-colors leading-snug line-clamp-2 break-words">
                               {idx + 1}. {task.title}
@@ -2972,14 +3098,6 @@ function GroupedTaskFeed({
                             </p>
                           )}
                           <div className="flex flex-wrap gap-2 mt-1.5">
-                            {taskLinksMap[String(task.id)] && (
-                              <span className="inline-flex items-center gap-1 text-[9.5px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-full">
-                                <span className="font-mono">
-                                  {getDeptDisplayCode(taskLinksMap[String(task.id)].department)}
-                                  {taskLinksMap[String(task.id)].task_code ? ` · ${taskLinksMap[String(task.id)].task_code}` : ''}
-                                </span>
-                              </span>
-                            )}
                             <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full">
                               {Math.round(task.status === 'completed' || task.status === 'done' ? 100 : (task.progress ?? 0))}%
                             </span>
@@ -3004,24 +3122,47 @@ function GroupedTaskFeed({
                           </div>
                         </div>
 
-                        {/* 1.5 Department & Objective Code */}
+                        {/* 1.4 Code (Project / Objective hierarchical code) */}
+                        <div className="w-20 min-[1366px]:w-24 flex-shrink-0">
+                          {(() => {
+                            const link = taskLinksMap[String(task.id)];
+                            if (!link) return <span className="text-[10px] text-text-muted">—</span>;
+                            const dCode = getDeptDisplayCode(link.department);
+                            const displayCode = link.project_code || (link.task_code ? `${dCode}-${link.task_code}` : `${dCode}-${link.objective_code || ''}`);
+                            return (
+                              <span
+                                className="inline-flex items-center font-mono text-[9.5px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400"
+                                title={`Objective ${link.objective_code || ''}: ${link.title}`}
+                              >
+                                {displayCode}
+                              </span>
+                            );
+                          })()}
+                        </div>
+
+                        {/* 1.5 Department (Clickable to open full objective, descriptions & follow-ups) */}
                         <div className="w-24 min-[1366px]:w-28 flex-shrink-0">
                           {(() => {
                             const link = taskLinksMap[String(task.id)];
                             if (!link) return <span className="text-[10px] text-text-muted">—</span>;
                             const dCode = getDeptDisplayCode(link.department);
                             return (
-                              <div className="flex flex-col gap-0.5">
-                                <span
-                                  className="inline-flex items-center gap-1 w-fit font-mono text-[9.5px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400"
-                                  title={`${link.department.name} · Objective ${link.objective_code || ''}: ${link.title}`}
-                                >
-                                  {dCode}{link.task_code ? ` · ${link.task_code}` : ''}
+                              <button
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  onOpenObjective?.(link.objective_id);
+                                }}
+                                title={`Click to view ${link.department.name} → ${link.objective_code || ''} ${link.title} (with descriptions & follow-ups)`}
+                                className="flex flex-col gap-0.5 text-left group/dept cursor-pointer max-w-full"
+                              >
+                                <span className="inline-flex items-center gap-1 w-fit font-mono text-[9.5px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/10 group-hover/dept:bg-indigo-600 group-hover/dept:text-white text-indigo-600 dark:text-indigo-400 transition-colors">
+                                  {dCode}
                                 </span>
-                                <span className="text-[9px] text-text-secondary truncate max-w-[105px]" title={link.title}>
+                                <span className="text-[9px] text-text-secondary group-hover/dept:text-accent-blue truncate max-w-[105px]">
                                   {link.objective_code ? `${link.objective_code} ` : ''}{link.title}
                                 </span>
-                              </div>
+                              </button>
                             );
                           })()}
                         </div>
@@ -3031,14 +3172,14 @@ function GroupedTaskFeed({
                           {task.start_date ? task.start_date : '—'}
                         </div>
 
-                        {/* 3. End Date */}
-                        <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary">
+                        {/* 3. Target Date (fixed initial date) */}
+                        <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary" title="Initial Target Date (fixed)">
                           {task.deadline ? task.deadline : '—'}
                         </div>
 
-                        {/* 4. Completion Date */}
-                        <div className="w-[68px] min-[1366px]:w-[76px] 2xl:w-24 flex-shrink-0 text-[10px] font-bold text-text-secondary">
-                          {task.actual_completion_date ? task.actual_completion_date : '—'}
+                        {/* 4. Actual Completion Date (editable + hidden-by-default history) */}
+                        <div className="w-[124px] min-[1366px]:w-[132px] flex-shrink-0">
+                          <CompletionDateCell task={task} onSaved={onRefresh} />
                         </div>
 
                         {/* 4. Overdue Days */}
@@ -3366,11 +3507,14 @@ function GroupedTaskFeed({
                           <div className="text-[9px] font-bold uppercase tracking-wider text-text-muted select-none">Subtasks</div>
                           
                           {/* Subtasks Headers Row (hidden on mobile) */}
-                          <div className="hidden lg:flex items-center p-2 bg-background-secondary/30 rounded-lg border border-border-subtle/20 text-[9px] font-bold text-text-muted uppercase tracking-wider select-none gap-2 2xl:gap-4 min-w-[860px] 2xl:min-w-[990px]">
-                            <div className="flex-1 min-w-[120px] pr-4 pl-[30px]">Subtask Title</div>
+                          <div className="hidden lg:flex items-center p-2 bg-background-secondary/30 rounded-lg border border-border-subtle/20 text-[9px] font-bold text-text-muted uppercase tracking-wider select-none gap-2 2xl:gap-4 min-w-[1060px] 2xl:min-w-[1220px]">
+                            <div className="flex-1 min-w-[180px] pr-3 pl-2">Subtask Title</div>
+                            <div className="w-20 flex-shrink-0">Code</div>
+                            <div className="w-24 flex-shrink-0">Department</div>
                             <div className="w-32 flex-shrink-0">Description</div>
                             <div className="w-20 flex-shrink-0">Start Date</div>
-                            <div className="w-20 flex-shrink-0">End Date</div>
+                            <div className="w-20 flex-shrink-0">Target Date</div>
+                            <div className="w-32 flex-shrink-0">Actual Completion</div>
                             <div className="w-20 flex-shrink-0">Overdue Days</div>
                             <div className="w-20 flex-shrink-0">Assignee</div>
                             <div className="w-24 flex-shrink-0">Transferred Info</div>
@@ -3388,6 +3532,8 @@ function GroupedTaskFeed({
                               depth={1}
                               onAddSubtask={onAddSubtask}
                               onFollowUpTask={onFollowUpTask}
+                              onOpenObjective={onOpenObjective}
+                              onRefresh={onRefresh}
                               taskLinksMap={taskLinksMap}
                               onMoveTaskToParent={onMoveTaskToParent}
                             />
@@ -3415,22 +3561,27 @@ function TaskTableView({
   tasks,
   taskLinksMap = {},
   onSelectTask,
+  onRefresh,
+  onOpenObjective,
 }: {
   tasks: WCTask[];
   taskLinksMap?: Record<string, TaskLinkInfo>;
   onSelectTask: (t: any) => void;
+  onRefresh?: () => void;
+  onOpenObjective?: (objectiveId: number) => void;
 }) {
   return (
     <div className="bg-background-secondary border border-border-subtle rounded-xl overflow-x-auto scrollbar-thin text-left shadow-sm">
-      <Table className="min-w-[1200px]">
+      <Table className="min-w-[1320px]">
         <TableHeader>
           <TableRow>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Title</TableHead>
+            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Code</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Department</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Assignee</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Project</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Priority</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Deadline</TableHead>
+            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Target Date</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Actual Completion</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Status</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted text-center">Follow-up</TableHead>
@@ -3439,22 +3590,41 @@ function TaskTableView({
         <TableBody>
           {tasks.map(task => {
             const link = taskLinksMap[String(task.id)];
+            const dCode = link ? getDeptDisplayCode(link.department) : '';
+            const pCode = link ? (link.project_code || (link.task_code ? `${dCode}-${link.task_code}` : `${dCode}-${link.objective_code || ''}`)) : '';
             return (
             <TableRow key={task.id} onClick={() => onSelectTask(task)} className="cursor-pointer hover:bg-surface-hover transition-colors">
-              <TableCell className="font-bold text-xs">
+              <TableCell className="font-bold text-xs min-w-[200px]">
                 <div>{task.title}</div>
                 {task.description && <div className="text-[10.5px] font-normal text-text-secondary line-clamp-1 mt-0.5">{task.description}</div>}
               </TableCell>
               <TableCell>
+                {pCode ? (
+                  <span className="font-mono text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
+                    {pCode}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-text-muted">—</span>
+                )}
+              </TableCell>
+              <TableCell>
                 {link ? (
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-mono text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 w-fit">
-                      {getDeptDisplayCode(link.department)}{link.task_code ? ` · ${link.task_code}` : ''}
+                  <button
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      onOpenObjective?.(link.objective_id);
+                    }}
+                    title="Click to inspect Department, Objectives, Descriptions & Follow-ups"
+                    className="flex flex-col gap-0.5 text-left cursor-pointer group/tbl"
+                  >
+                    <span className="font-mono text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/10 group-hover/tbl:bg-indigo-600 group-hover/tbl:text-white text-indigo-600 dark:text-indigo-400 w-fit transition-colors">
+                      {dCode}
                     </span>
-                    <span className="text-[10px] text-text-secondary truncate max-w-[140px]" title={link.title}>
+                    <span className="text-[10px] text-text-secondary group-hover/tbl:text-accent-blue truncate max-w-[140px]" title={link.title}>
                       {link.objective_code ? `${link.objective_code} ` : ''}{link.title}
                     </span>
-                  </div>
+                  </button>
                 ) : (
                   <span className="text-[11px] text-text-muted">—</span>
                 )}
@@ -3480,7 +3650,9 @@ function TaskTableView({
                 </span>
               </TableCell>
               <TableCell className="text-[11px] text-text-secondary font-medium">{task.deadline || '—'}</TableCell>
-              <TableCell className="text-[11px] text-text-secondary font-medium">{task.actual_completion_date || '—'}</TableCell>
+              <TableCell>
+                <CompletionDateCell task={task} onSaved={onRefresh} />
+              </TableCell>
               <TableCell>
                 <div className="flex items-center gap-1.5">
                   <div className={cn("w-1.5 h-1.5 rounded-full", getStatusDot(task.status))} />
@@ -3503,7 +3675,7 @@ function TaskTableView({
           })}
           {tasks.length === 0 && (
             <TableRow>
-              <TableCell colSpan={9} className="text-center py-12 text-[11px] text-text-muted">No tasks found</TableCell>
+              <TableCell colSpan={10} className="text-center py-12 text-[11px] text-text-muted">No tasks found</TableCell>
             </TableRow>
           )}
         </TableBody>
@@ -4107,8 +4279,12 @@ function TaskDetailDialog({
                 ) : <span className="text-[11px] text-text-muted font-semibold">Unassigned</span>}
               </div>
               <div>
-                <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block mb-1">Deadline</span>
-                <span className="text-[11px] font-semibold">{task.deadline || 'No deadline'}</span>
+                <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block mb-1">Target Date (Fixed)</span>
+                <span className="text-[11px] font-semibold">{task.deadline || 'No target date'}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block mb-1">Actual Completion Date</span>
+                <CompletionDateCell task={task} onSaved={() => onRefreshTask(task.id)} />
               </div>
               <div>
                 <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block mb-1">Reviewer</span>
@@ -5080,8 +5256,17 @@ function CreateEditTaskDialog({
               <Input type="date" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} className="text-[11px]" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-text-secondary uppercase">Deadline</label>
-              <Input type="date" value={form.deadline} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} className="text-[11px]" />
+              <label className="text-[10px] font-bold text-text-secondary uppercase">
+                Target Date {isEdit && Boolean(task?.deadline) ? '(Fixed)' : ''}
+              </label>
+              <Input
+                type="date"
+                value={form.deadline}
+                disabled={isEdit && Boolean(task?.deadline)}
+                title={isEdit && Boolean(task?.deadline) ? 'Initial target date cannot be modified' : 'Set initial target date'}
+                onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))}
+                className="text-[11px] disabled:opacity-60 disabled:cursor-not-allowed"
+              />
             </div>
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold text-text-secondary uppercase">Est. Hours</label>

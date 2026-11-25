@@ -79,6 +79,14 @@ export interface WCTask {
   }[];
   parent_title?: string | null;
   comments_count?: number;
+  completion_date_history?: {
+    id: number;
+    old_value: string | null;
+    new_value: string | null;
+    description: string | null;
+    changed_by?: string | null;
+    changed_at?: string | null;
+  }[];
   created_at: string | null;
   transfer_date?: string | null;
   transfer_to_name?: string | null;

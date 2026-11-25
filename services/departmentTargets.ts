@@ -116,8 +116,12 @@ export interface TaskLinkInfo {
   objective_id: number;
   objective_code?: string;
   task_code?: string;
+  project_code?: string;
   is_subtask_inherited?: boolean;
   title: string;
+  description?: string | null;
+  deadline?: string | null;
+  progress?: number;
   level: 'objective' | 'sub_objective';
   project_id?: number | null;
   project_name?: string | null;
