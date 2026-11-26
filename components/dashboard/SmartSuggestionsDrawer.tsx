@@ -1,5 +1,6 @@
 'use client';
 
+import { useMoveDeadline } from '@/components/timeline/useMoveDeadline';
 import React, { useState } from 'react';
 import { 
   AlertTriangle, 
@@ -104,21 +105,24 @@ export function SmartSuggestionsDrawer({
   };
 
   // Quick 1-Click Action: Move to Tomorrow
+  const { moveDeadline, deadlineDialog } = useMoveDeadline();
   const handleTomorrow = async (taskId: number) => {
+    const t = tasks.find(x => x.id === taskId);
+    const tomorrow = isoDay(new Date(Date.now() + 86400000));
     try {
-      const tomorrow = isoDay(new Date(Date.now() + 86400000));
-      await workcenterService.updateTask(taskId, { 
-        deadline: tomorrow,
-        scheduled_date: tomorrow 
+      // the deadline needs a reason if one is already set; the planned day can move freely
+      await moveDeadline({ id: taskId, title: t?.title, deadline: t?.deadline }, tomorrow, async () => {
+        await workcenterService.updateTask(taskId, { scheduled_date: tomorrow }).catch(() => {});
+        onRefresh();
       });
-      onRefresh();
-    } catch (err) {
-      console.error('Failed to move task to tomorrow:', err);
+    } catch (err: any) {
+      alert(err?.message || 'Could not move the task to tomorrow.');
     }
   };
 
   return (
     <div className="flex flex-col gap-4 normal-case">
+      {deadlineDialog}
       {/* 1. OVERDUE SECTION (High Priority Attention) */}
       <div className={cn(
         'rounded-2xl border p-4 transition-all shadow-xs',

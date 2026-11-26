@@ -47,6 +47,7 @@ import { MyDayView } from '@/components/dashboard/MyDayView';
 import { SmartSuggestionsDrawer } from '@/components/dashboard/SmartSuggestionsDrawer';
 import { CeoTeamPulse } from '@/components/dashboard/CeoTeamPulse';
 import { PlanMyDayModal } from '@/components/dashboard/PlanMyDayModal';
+import { PrioritiesCard } from '@/components/priorities/PrioritiesCard';
 
 export default function DashboardPage() {
   const { userProfile, issues } = useStore();
@@ -377,6 +378,9 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
+
+      {/* 1b. PRIORITIES: open P1/P2 objectives (hidden when there is nothing for you) */}
+      <PrioritiesCard isCeo={isDirector} />
 
       {/* 2. CORE WORKSPACE: 2-Column Canvas OR CEO Team Pulse */}
       {viewMode === 'pulse' && isDirector ? (

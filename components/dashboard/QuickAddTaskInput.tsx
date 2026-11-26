@@ -30,6 +30,14 @@ import { projectsService } from '@/services/projects';
 import { usersService } from '@/services/users';
 import { Project, Task, Meeting } from '@/types';
 import { today, isoDay } from './Widgets';
+import { useRouter, usePathname } from 'next/navigation';
+import { useStore } from '@/lib/store';
+import { canSetPriority } from '@/components/timeline/PriorityChip';
+import { ResolvedCode } from '@/services/timeline';
+import { parseCodePrefix, parseCommand, hintsFor, completeRest, ParsedCommand } from '@/components/quickbar/parseCommand';
+import { useCodeResolve } from '@/components/quickbar/useCodeResolve';
+import { runCommand, announceChange } from '@/components/quickbar/runCommand';
+import { CodePreview, CodeNotFound, QuickToast } from '@/components/quickbar/CodePreview';
 
 export interface TeammateUser {
   id: number;
@@ -171,6 +179,55 @@ export function QuickAddTaskInput({
   const effectiveProjects = useMemo(() => projects.length > 0 ? projects : fetchedProjects, [projects, fetchedProjects]);
   const effectiveTasks = useMemo(() => allTasks.length > 0 ? allTasks : fetchedTasks, [allTasks, fetchedTasks]);
   const effectiveTeammates = useMemo(() => teammates.length > 0 ? teammates : fetchedTeammates, [teammates, fetchedTeammates]);
+
+  // ---- Update mode: text that STARTS with a universal code (PROD-1.2.3 done, prod 1.2 +15d why ...)
+  const router = useRouter();
+  const pathname = usePathname();
+  const { userProfile: me } = useStore();
+  const canPrio = canSetPriority(me);
+  const knownDeptCodes = useMemo(() => {
+    const set = new Set<string>();
+    boardDepts.forEach(d => {
+      if (d.short_code) set.add(d.short_code.toUpperCase());
+      const initials = d.name.split(/\s+/).map(w => w[0] || '').join('').toUpperCase();
+      if (initials) set.add(initials);
+    });
+    return set;
+  }, [boardDepts]);
+  // The ## explorer (picking a dept/objective from the list) keeps its own flow: no update mode while it is in use.
+  const explorerInUse = !!(selectedDeptId || selectedObjectiveId || nextAutoCode);
+  const codePrefix = useMemo(() => (explorerInUse ? null : parseCodePrefix(text, knownDeptCodes)), [text, knownDeptCodes, explorerInUse]);
+  const codeState = useCodeResolve(codePrefix?.code ?? null, 200);
+  const resolvedItem = codePrefix ? codeState.resolved : null;
+  const updateMode = !!resolvedItem;
+  const [updBusy, setUpdBusy] = useState(false);
+  const [updError, setUpdError] = useState('');
+  const [needReason, setNeedReason] = useState(false);
+  const [reasonText, setReasonText] = useState('');
+  const [toast, setToast] = useState<{ message: string; undo?: () => Promise<void> } | null>(null);
+
+  const cmdOpts = (r: ResolvedCode) => ({
+    kind: r.kind,
+    teammates: effectiveTeammates.map(u => ({ id: Number(u.id), name: u.name })),
+    currentDeadline: r.deadline,
+    canPrioritise: canPrio,
+  });
+  const computeCmd = (r: ResolvedCode, rest: string): ParsedCommand => {
+    const c = parseCommand(rest, cmdOpts(r));
+    if (r.kind === 'department' && c.type !== 'open') {
+      return { type: 'unknown', text: rest, label: '', error: 'A department can only be opened. Type an objective or task code to change it.' };
+    }
+    return c;
+  };
+  const currentCmd = useMemo(
+    () => (resolvedItem && codePrefix ? computeCmd(resolvedItem, codePrefix.rest) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [resolvedItem, codePrefix?.rest, effectiveTeammates, canPrio],
+  );
+  const hintList = useMemo(() => (resolvedItem ? hintsFor(resolvedItem.kind, canPrio) : []), [resolvedItem, canPrio]);
+
+  // any edit to the text drops stale errors / the reason box
+  useEffect(() => { setUpdError(''); setNeedReason(false); }, [text]);
 
   // If prefilled assignee is provided (e.g. from CEO Team Pulse "+ Assign Task")
   useEffect(() => {
@@ -473,6 +530,22 @@ export function QuickAddTaskInput({
     const words = textBeforeCursor.split(/\s+/);
     const currentWord = words[words.length - 1] || '';
 
+    // Update mode (text starts with a code like PROD-1.2): the ##/#/~ pickers stay out of the way.
+    // Only "ask @Name" still gets the teammate list.
+    if (!explorerInUse && parseCodePrefix(val, knownDeptCodes)) {
+      const at = currentWord.lastIndexOf('@');
+      if (at !== -1 && /(^|\s)(ask|handover)\s/i.test(textBeforeCursor)) {
+        setActiveTrigger('assignee');
+        setTriggerQuery(currentWord.slice(at + 1));
+        setHighlightedIndex(0);
+        setShowDatePicker(false);
+        setShowTimePicker(false);
+      } else {
+        setActiveTrigger(null);
+      }
+      return;
+    }
+
     const doubleHashIdx = currentWord.lastIndexOf('##');
     const singleHashIdx = currentWord.lastIndexOf('#');
     const hashIdx = doubleHashIdx !== -1 ? -1 : singleHashIdx;
@@ -525,7 +598,7 @@ export function QuickAddTaskInput({
     const cursorPos = e.target.selectionStart || val.length;
     checkTriggerAtCursor(val, cursorPos);
 
-    if (val.includes('!') && !isIssue) {
+    if (val.includes('!') && !isIssue && !(!explorerInUse && parseCodePrefix(val, knownDeptCodes))) {
       setIsIssue(true);
     }
   };
@@ -566,10 +639,105 @@ export function QuickAddTaskInput({
       }
     }
 
+    if (codePrefix && updateMode) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        clearUpdateMode();
+        return;
+      }
+      if (e.key === 'Tab' && resolvedItem) {
+        const next = completeRest(codePrefix.rest, cmdOpts(resolvedItem));
+        if (next) {
+          e.preventDefault();
+          setText(`${codePrefix.typed} ${next}`);
+        }
+        return;
+      }
+    } else if (codePrefix && !explorerInUse && e.key === 'Tab' && codeState.loading) {
+      // Tab pressed before the code finished resolving: wait for it, then complete.
+      e.preventDefault();
+      const prefix = codePrefix;
+      codeState.ensure().then(r => {
+        if (!r) return;
+        const next = completeRest(prefix.rest, cmdOpts(r));
+        if (next) setText(`${prefix.typed} ${next}`);
+      });
+      return;
+    }
+
     if (e.key === 'Enter' && !activeTrigger) {
       e.preventDefault();
-      handleSubmit();
+      handleEnter();
     }
+  };
+
+  const clearUpdateMode = () => {
+    setText('');
+    setActiveTrigger(null);
+    setUpdError('');
+    setNeedReason(false);
+    setReasonText('');
+    setSelectedAssigneeId(null);
+  };
+
+  const openItem = (r: ResolvedCode) => {
+    if (r.kind === 'task' && r.task_id && pathname?.startsWith('/workcenter')) {
+      // Already in the Task Center: open the task panel without reloading the page.
+      window.dispatchEvent(new CustomEvent('cos:open-task', { detail: { id: r.task_id } }));
+      try {
+        window.history.pushState({}, '', r.link);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      } catch { /* ignore */ }
+    } else {
+      router.push(r.link);
+    }
+    clearUpdateMode();
+  };
+
+  const submitUpdate = async (r: ResolvedCode, cmd: ParsedCommand, reasonOverride?: string) => {
+    if (cmd.type === 'open') { openItem(r); return; }
+    if (cmd.type === 'unknown') { setUpdError(cmd.error || 'Try one of the commands below.'); return; }
+    if (cmd.error) { setUpdError(cmd.error); return; }
+    if (cmd.incomplete) return;
+    if (cmd.type === 'move') {
+      const reason = (reasonOverride ?? cmd.reason ?? '').trim();
+      if (reason.length < 3) { setNeedReason(true); setReasonText(reason); return; }
+      reasonOverride = reason;
+    }
+    setUpdBusy(true);
+    setUpdError('');
+    try {
+      const res = await runCommand(r, cmd, { reason: reasonOverride });
+      clearUpdateMode();
+      announceChange();
+      setToast({
+        message: res.message,
+        undo: res.undo
+          ? async () => {
+              try {
+                await res.undo!();
+                announceChange();
+                setToast({ message: 'Undone' });
+              } catch (err: any) {
+                setToast({ message: `Could not undo: ${err?.message || 'try again'}` });
+              }
+            }
+          : undefined,
+      });
+    } catch (err: any) {
+      setUpdError(err?.message || 'That did not work. Please try again.');
+    } finally {
+      setUpdBusy(false);
+    }
+  };
+
+  // Enter in the bar: a known code runs the command; anything else adds a task as before.
+  const handleEnter = async () => {
+    if (!codePrefix || explorerInUse) { handleSubmit(); return; }
+    let r = codeState.resolved;
+    if (!r) r = await codeState.ensure(); // Enter pressed before the 200 ms debounce finished
+    if (!r) { handleSubmit(); return; }
+    await submitUpdate(r, computeCmd(r, codePrefix.rest));
   };
 
   const applyAutoCodeToText = (baseText: string, newCode: string, prevCode: string) => {
@@ -767,7 +935,7 @@ export function QuickAddTaskInput({
   };
 
   const selectAssignee = (user: TeammateUser) => {
-    setSelectedAssigneeId(user.id);
+    if (!updateMode) setSelectedAssigneeId(user.id);
     
     const cursorPos = inputRef.current?.selectionStart ?? text.length;
     const textBefore = text.slice(0, cursorPos);
@@ -1064,6 +1232,30 @@ export function QuickAddTaskInput({
       )}
       style={{ backgroundColor: 'var(--bg-secondary)', opacity: 1 }}
     >
+      {/* Update mode: what the typed code is and what Enter will do */}
+      {updateMode && resolvedItem && currentCmd && !activeTrigger && !conflictPrompt && (
+        <CodePreview
+          resolved={resolvedItem}
+          cmd={currentCmd}
+          hints={hintList}
+          busy={updBusy}
+          error={updError}
+          needReason={needReason}
+          reason={reasonText}
+          onReason={setReasonText}
+          onSubmitReason={() => submitUpdate(resolvedItem, currentCmd, reasonText)}
+          onCancelReason={() => { setNeedReason(false); inputRef.current?.focus(); }}
+          newDate={currentCmd.type === 'move' ? currentCmd.date : null}
+          dropUp={dropUp}
+        />
+      )}
+      {!updateMode && codePrefix && codeState.notFound && !activeTrigger && (
+        <CodeNotFound code={codePrefix.code} dropUp={dropUp} />
+      )}
+      {toast && !updateMode && !activeTrigger && (
+        <QuickToast message={toast.message} onUndo={toast.undo} onClose={() => setToast(null)} dropUp={dropUp} />
+      )}
+
       {/* Auto-assign Notification Toast */}
       {autoAssignNotice && (
         <div className="mb-2.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-semibold flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
@@ -1094,7 +1286,7 @@ export function QuickAddTaskInput({
             }
           }}
           onKeyDown={handleKeyDown}
-          placeholder={isDocked ? "Quick add task... (## dept, # project, ~ subtask, @ person)" : "What would you like to achieve today? Use ##dept, #project, ~subtask, @assignee, !issue..."}
+          placeholder={isDocked ? "Add a task, or type a code like PROD-1.2 done" : "What would you like to achieve today? Use ##dept, #project, ~subtask, @assignee, !issue..."}
           className="min-w-0 flex-1 bg-transparent border-0 outline-none text-[13px] sm:text-[14.5px] placeholder:text-text-secondary/60 text-text-primary"
           disabled={isSubmitting}
         />
@@ -1116,12 +1308,12 @@ export function QuickAddTaskInput({
 
           <button
             type="button"
-            onClick={() => handleSubmit()}
-            disabled={!text.trim() || isSubmitting}
+            onClick={() => handleEnter()}
+            disabled={!text.trim() || isSubmitting || updBusy}
             className="flex items-center gap-1 px-3 sm:px-3.5 py-1.5 bg-accent-blue hover:bg-accent-blue-hover disabled:opacity-40 disabled:cursor-not-allowed text-white text-[12px] sm:text-[12.5px] font-semibold rounded-xl shadow-sm transition-all cursor-pointer shrink-0"
           >
-            <Plus size={13} className="shrink-0" />
-            <span>Add</span>
+            {updateMode ? <CornerDownRight size={13} className="shrink-0" /> : <Plus size={13} className="shrink-0" />}
+            <span>{updateMode ? (currentCmd?.type === 'open' ? 'Open' : 'Update') : 'Add'}</span>
           </button>
         </div>
       </div>

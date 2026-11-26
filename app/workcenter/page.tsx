@@ -6,6 +6,19 @@ import { departmentTargetsService, BoardDepartment, ObjectiveNode, TaskLinkInfo 
 import { ObjectivesBoard } from '@/components/targets/ObjectivesBoard';
 import { ObjectiveTasks } from '@/components/targets/ObjectiveTasks';
 import { ObjectivePanel } from '@/components/SidePanel';
+import { CodeChip } from '@/components/timeline/CodeChip';
+import { ExtendDeadlineDialog, ExtendResult } from '@/components/timeline/ExtendDeadlineDialog';
+import { TimelineList } from '@/components/timeline/TimelineList';
+import { UpdateComposer } from '@/components/timeline/DeadlineBadge';
+import { CODE_RE, normalizeCode, timelineService, fmtDay } from '@/services/timeline';
+import { BulkBar } from '@/components/workcenter/BulkBar';
+import { UndoToast, ToastData } from '@/components/workcenter/UndoToast';
+import { StatusPill } from '@/components/workcenter/StatusPill';
+import { RowDeadline, PanelDeadline } from '@/components/workcenter/RowDeadline';
+import { TaskCalendarView } from '@/components/workcenter/TaskCalendarView';
+import { useTaskSelection, TaskSelection } from '@/components/workcenter/useTaskSelection';
+import { DND_ONE, startTaskDrag, endTaskDrag, isTaskDrag, readDraggedIds, draggingIds, revealTaskElement } from '@/components/workcenter/dnd';
+import { flattenTasks, patchTasks, pathTo, normStatus } from '@/components/workcenter/treeUtils';
 
 import { formatISTDateTime, formatISTDate, formatISTTime, accurateTimeAgo, formatTimestampWithAgo } from '@/utils/date';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -145,15 +158,24 @@ function todayStr(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+// The department prefix is whatever the API says (the department's short code). No special cases here.
 function getDeptDisplayCode(dept?: { name?: string | null; short_code?: string | null } | null): string {
   if (!dept) return '';
-  const sc = (dept.short_code || '').trim().toUpperCase();
-  const low = (dept.name || '').trim().toLowerCase();
-  if (low.includes('product') || low.includes('beltrack')) return 'PROD';
-  if (sc === 'PRD') return 'PROD';
+  const sc = (dept.short_code || '').trim().replace(/^#+/, '').toUpperCase();
   if (sc) return sc;
-  return (dept.name || '').slice(0, 4).toUpperCase();
+  const words = (dept.name || '').split(/[^A-Za-z0-9]+/).filter(w => w && !['and', 'of', 'the', 'for', 'in'].includes(w.toLowerCase()));
+  if (words.length >= 2) return words.slice(0, 4).map(w => w[0].toUpperCase()).join('');
+  return (words[0] || '').slice(0, 4).toUpperCase();
 }
+
+/** The full code of a task (e.g. PROD-1.2.3) or undefined when it is not linked to an objective. */
+function linkCode(link?: TaskLinkInfo | null): string | undefined {
+  if (!link) return undefined;
+  return link.full_code || link.project_code || undefined;
+}
+
+const statusLabelOf = (s: string) => (s === 'completed' ? 'Done' : s === 'blocked' ? 'On Hold' : s === 'in_progress' ? 'In Progress' : s);
+
 
 /* ─── Main Execution Hub Component ────────────────────────────────────────── */
 
@@ -175,6 +197,22 @@ export default function TaskCenterPage() {
     refreshTaskFeatures();
   }, []);
   const openFromLinkRef = useRef<((t: { id: number }) => void) | null>(null);
+  // Deep links (/workcenter?task=ID, or the 'cos:open-task' event from the quick bar): open the panel,
+  // scroll the row or card into view and flash it.
+  const [reveal, setReveal] = useState<{ id: number; n: number } | null>(null);
+  const revealSeq = useRef(0);
+  const revealTask = useCallback((id: number) => { revealSeq.current += 1; setReveal({ id, n: revealSeq.current }); }, []);
+  useEffect(() => {
+    const onOpenTask = (e: Event) => {
+      const id = Number((e as CustomEvent).detail?.id);
+      if (!id) return;
+      setActiveTab('workspace');
+      openFromLinkRef.current?.({ id });
+      revealTask(id);
+    };
+    window.addEventListener('cos:open-task', onOpenTask);
+    return () => window.removeEventListener('cos:open-task', onOpenTask);
+  }, [revealTask]);
   useEffect(() => {
     const handleUrlCheck = () => {
       const params = new URLSearchParams(window.location.search);
@@ -183,17 +221,21 @@ export default function TaskCenterPage() {
       if (tab === 'updates') {
         setDetailDefaultTab('updates');
       }
+      if (tab === 'objectives' || tab === 'dashboard') {
+        setActiveTab(tab);
+      }
       if (id) {
         setTimeout(() => {
           if (tab === 'updates') setDetailDefaultTab('updates');
           openFromLinkRef.current?.({ id });
+          revealTask(id);
         }, 50);
       }
     };
     handleUrlCheck();
     window.addEventListener('popstate', handleUrlCheck);
     return () => window.removeEventListener('popstate', handleUrlCheck);
-  }, []);
+  }, [revealTask]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [allUsers, setAllUsers] = useState<UserType[]>([]);
 
@@ -221,6 +263,18 @@ export default function TaskCenterPage() {
   const [viewMode, setViewMode] = useState<'kanban' | 'timeline' | 'calendar' | 'gantt' | 'table' | 'workload' | 'analytics'>('kanban');
   const [activeTab, setActiveTab] = useState<'workspace' | 'objectives' | 'dashboard'>('workspace');
   const [defaultNewTaskStatus, setDefaultNewTaskStatus] = useState<string>('todo');
+
+  // "PROD-1.1.2" or "prod 1.1" in the search box finds that task by its code (the server can't, so we skip its title search).
+  const knownDeptCodes = useMemo(() => new Set(boardDepts.map(d => getDeptDisplayCode(d))), [boardDepts]);
+  const codeQuery = useMemo(() => {
+    const m = CODE_RE.exec(searchQuery.trim());
+    return m && m[2] && knownDeptCodes.has(m[1].toUpperCase()) ? normalizeCode(searchQuery) : '';
+  }, [searchQuery, knownDeptCodes]);
+  const serverSearch = useMemo(() => {
+    const q = searchQuery.trim();
+    if (!q || q.startsWith('##') || codeQuery) return '';
+    return searchQuery;
+  }, [searchQuery, codeQuery]);
 
   const filteredTasks = useMemo(() => {
     const byTab = (() => {
@@ -262,9 +316,17 @@ export default function TaskCenterPage() {
     })();
 
     const activeFilterDept = deptFilterId;
-    const hashQuery = searchQuery.trim().startsWith('##') ? searchQuery.trim().slice(2).toLowerCase() : '';
+    const hashQuery = !codeQuery && searchQuery.trim().startsWith('##') ? searchQuery.trim().slice(2).toLowerCase() : '';
     const activeProj = projectFilter.trim();
-    if (!activeFilterDept && !hashQuery && !activeProj) return byTab;
+    if (!activeFilterDept && !hashQuery && !activeProj && !codeQuery) return byTab;
+
+    const codeMatches = (code?: string) => {
+      if (!code) return false;
+      const c = normalizeCode(code);
+      return c === codeQuery || c.startsWith(codeQuery + '.');
+    };
+    const matchesCodeTree = (item: any): boolean =>
+      codeMatches(linkCode(taskLinksMap[String(item.id)])) || (Array.isArray(item.subtasks) && item.subtasks.some((st: any) => matchesCodeTree(st)));
 
     const matchesProjectTree = (item: any): boolean => {
       if (!item) return false;
@@ -281,6 +343,7 @@ export default function TaskCenterPage() {
       const link = taskLinksMap[String(t.id)];
       if (activeProj && !matchesProjectTree(t)) return false;
       if (activeFilterDept && link?.department?.id !== activeFilterDept) return false;
+      if (codeQuery && !matchesCodeTree(t)) return false;
       if (hashQuery) {
         if (!link) return false;
         const matchHash = (
@@ -291,9 +354,33 @@ export default function TaskCenterPage() {
       }
       return true;
     });
-  }, [tasks, taskFilterTab, userProfile, deptFilterId, projectFilter, searchQuery, taskLinksMap]);
+  }, [tasks, taskFilterTab, userProfile, deptFilterId, projectFilter, searchQuery, codeQuery, taskLinksMap]);
 
 
+
+  // Multi-select (Grouped + List views) and the little messages with Undo
+  const visibleOrder = useMemo(() => {
+    const done = (t: WCTask) => t.status === 'completed' || t.status === 'done';
+    if (viewMode === 'kanban') {
+      // same order the Grouped view draws: In Progress, Done, On Hold
+      return [
+        ...filteredTasks.filter(t => !done(t) && t.status !== 'blocked'),
+        ...filteredTasks.filter(done),
+        ...filteredTasks.filter(t => t.status === 'blocked'),
+      ].map(t => t.id);
+    }
+    return filteredTasks.map(t => t.id);
+  }, [filteredTasks, viewMode]);
+  const selection = useTaskSelection(visibleOrder, activeTab === 'workspace' && (viewMode === 'kanban' || viewMode === 'table'));
+  const [toast, setToast] = useState<ToastData | null>(null);
+  const toastSeq = useRef(0);
+  const showToast = useCallback((message: string, opts: { undo?: ToastData['undo']; tone?: 'ok' | 'error' } = {}) => {
+    toastSeq.current += 1;
+    setToast({ id: toastSeq.current, message, ...opts });
+  }, []);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  // "Move deadline" dialog: from the bulk bar, a calendar drop, the edit form, or the task panel
+  const [moveDialog, setMoveDialog] = useState<{ ids: number[]; current?: string | null; presetDate?: string | null; title?: string; reopenId?: number } | null>(null);
 
   // UI state
   const [loading, setLoading] = useState(true);
@@ -340,11 +427,10 @@ export default function TaskCenterPage() {
     try {
       setLoading(true);
       setError(null);
-      const isDeptCommand = searchQuery.trim().startsWith('##');
       const [tasksRes, summaryData, insightsData, quartersData, projectsData, usersData, boardData] = await Promise.all([
         workcenterService.getTasks({
           quarter_id: selectedQuarterId ?? undefined,
-          search: !isDeptCommand && searchQuery ? searchQuery : undefined,
+          search: serverSearch || undefined,
           status: statusFilter || undefined,
           priority: priorityFilter || undefined,
           page_size: 200
@@ -402,12 +488,21 @@ export default function TaskCenterPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedQuarterId, searchQuery, statusFilter, priorityFilter]);
+  }, [selectedQuarterId, serverSearch, statusFilter, priorityFilter]);
   loadDataRef.current = loadData;
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Scroll to and flash the task a deep link asked for, once the list has loaded.
+  const revealDone = useRef(0);
+  useEffect(() => {
+    if (!reveal || loading || revealDone.current === reveal.n) return;
+    if (activeTab !== 'workspace') { setActiveTab('workspace'); return; }
+    revealDone.current = reveal.n;
+    revealTaskElement(reveal.id);
+  }, [reveal, loading, activeTab]);
 
   useEffect(() => {
     const handleGlobalTaskCreated = () => {
@@ -466,13 +561,23 @@ export default function TaskCenterPage() {
   const handleEditTask = async (payload: any) => {
     if (!editingTask) return;
     const { cos_objective_id = '', cos_objective_prev = '', cos_feature_id = '', cos_feature_prev = '', ...rest } = payload;
-    await workcenterService.updateTask(editingTask.id, {
+    const task = editingTask;
+    // The first deadline is set here; moving an existing one needs a reason, so it goes through the Move deadline dialog.
+    const existing = (task.deadline || '').slice(0, 10);
+    const wanted = (rest.deadline || '').slice(0, 10);
+    const deadlineMoved = !!existing && !!wanted && wanted !== existing;
+    if (existing) delete rest.deadline;
+    await workcenterService.updateTask(task.id, {
       ...rest,
       parent_id: rest.parent_id ? Number(rest.parent_id) : 0,
     });
-    await syncTaskObjective(editingTask.id, cos_objective_id, cos_objective_prev).catch(console.error);
-    await syncTaskFeature(editingTask.id, cos_feature_id, cos_feature_prev).catch(console.error);
+    await syncTaskObjective(task.id, cos_objective_id, cos_objective_prev).catch(console.error);
+    await syncTaskFeature(task.id, cos_feature_id, cos_feature_prev).catch(console.error);
     await loadData();
+    if (deadlineMoved) {
+      const code = linkCode(taskLinksMap[String(task.id)]);
+      setMoveDialog({ ids: [task.id], current: existing, presetDate: wanted, title: `${code ? code + ' ' : ''}${task.title}` });
+    }
   };
 
   const handleMoveTaskToParent = async (taskId: number, parentId: number | null) => {
@@ -533,6 +638,7 @@ export default function TaskCenterPage() {
     setSelectedTask(null);
   };
 
+  const statusUndoRef = useRef<{ id: number; prev: string } | null>(null);
   const [blockingTaskInfo, setBlockingTaskInfo] = useState<{ id: number; status: string } | null>(null);
   const [completeTaskOpen, setCompleteTaskOpen] = useState(false);
   const [completingTaskId, setCompletingTaskId] = useState<number | null>(null);
@@ -549,6 +655,8 @@ export default function TaskCenterPage() {
     if (selectedTask && selectedTask.id === taskId) {
       await handleSelectTask({ id: taskId });
     }
+    const u = statusUndoRef.current;
+    if (u && u.id === taskId) showToast('Put on hold', { undo: () => undoStatuses({ [taskId]: u.prev }) });
   };
 
   const handleStatusChange = async (id: number, status: string) => {
@@ -584,6 +692,184 @@ export default function TaskCenterPage() {
   };
 
   openFromLinkRef.current = handleSelectTask;
+
+  // ─── Change things where you are: status, deadline, assignee (instant, with Undo) ──────────────
+
+  const refreshOpenTask = async (ids: number[]) => {
+    if (selectedTask && ids.includes(selectedTask.id)) {
+      try { setSelectedTask(await workcenterService.getTask(selectedTask.id)); } catch { /* keep what we have */ }
+    }
+  };
+
+  const undoStatuses = async (prevById: Record<number, string>) => {
+    const groups = new Map<string, number[]>();
+    Object.entries(prevById).forEach(([id, st]) => {
+      const k = normStatus(st);
+      groups.set(k, [...(groups.get(k) || []), Number(id)]);
+    });
+    for (const [st, ids] of Array.from(groups.entries())) {
+      setTasks(p => patchTasks(p, new Set(ids), () => ({ status: st })));
+      if (ids.length === 1) await workcenterService.updateStatus(ids[0], st);
+      else await workcenterService.bulkUpdateStatus(ids, st);
+    }
+    await loadData();
+    await refreshOpenTask(Object.keys(prevById).map(Number));
+  };
+
+  /** One or many tasks to a new status. Instant on screen; rolls back if the server says no. */
+  const quickStatus = async (ids: number[], status: string) => {
+    const target = normStatus(status);
+    const byId = new Map<number, any>(flattenTasks(tasks).map(t => [t.id, t]));
+    const changing = Array.from(new Set(ids)).filter(id => byId.has(id) && normStatus(byId.get(id).status) !== target);
+    if (!changing.length) return;
+    if (changing.length === 1 && (target === 'blocked' || target === 'completed')) {
+      // these two ask a question first (why on hold / when it finished)
+      statusUndoRef.current = { id: changing[0], prev: byId.get(changing[0]).status };
+      await handleStatusChange(changing[0], target);
+      return;
+    }
+    const prevById: Record<number, string> = {};
+    changing.forEach(id => { prevById[id] = byId.get(id).status; });
+    setTasks(p => patchTasks(p, new Set(changing), () => ({ status: target })));
+    try {
+      if (changing.length === 1) await workcenterService.updateStatus(changing[0], target);
+      else await workcenterService.bulkUpdateStatus(changing, target);
+    } catch (e: any) {
+      setTasks(p => patchTasks(p, new Set(changing), (t: any) => ({ status: prevById[t.id] })));
+      showToast(e?.message || 'Could not change the status.', { tone: 'error' });
+      return;
+    }
+    loadData();
+    refreshOpenTask(changing);
+    showToast(
+      changing.length === 1 ? `Moved to ${statusLabelOf(target)}` : `${changing.length} tasks moved to ${statusLabelOf(target)}`,
+      { undo: () => undoStatuses(prevById) },
+    );
+  };
+
+  /** A deadline was moved through the dialog (one task, a bulk move or a calendar drop). */
+  const onDeadlineMoved = (r: ExtendResult) => {
+    loadData();
+    refreshOpenTask(r.ids);
+    const n = r.ids.length;
+    const msg = n === 1
+      ? (r.new_date ? `Deadline moved to ${fmtDay(r.new_date)}` : 'Deadline moved')
+      : `${n} deadlines moved${r.shift_days ? ` by ${r.shift_days} day${r.shift_days > 1 ? 's' : ''}` : r.new_date ? ` to ${fmtDay(r.new_date)}` : ''}`;
+    const byOld: Record<string, number[]> = {};
+    Object.entries(r.previous || {}).forEach(([id, d]) => { if (d) (byOld[d.slice(0, 10)] ||= []).push(Number(id)); });
+    const dates = Object.keys(byOld);
+    showToast(msg, dates.length ? {
+      undo: async () => {
+        for (const d of dates) await timelineService.extendTasks(byOld[d], 'Undo', { new_date: d });
+        await loadData();
+        await refreshOpenTask(r.ids);
+      },
+    } : {});
+  };
+
+  /** A task (or the selection) was dropped on a calendar day. */
+  const dropOnDay = async (ids: number[], day: string) => {
+    const byId = new Map<number, any>(flattenTasks(tasks).map(t => [t.id, t]));
+    const list = ids.map(id => byId.get(id)).filter(Boolean);
+    const withDate = list.filter(t => t.deadline && t.deadline.slice(0, 10) !== day);
+    const noDate = list.filter(t => !t.deadline);
+    if (noDate.length) {
+      // first deadline: no reason needed
+      setTasks(p => patchTasks(p, new Set(noDate.map(t => t.id)), () => ({ deadline: day, original_deadline: day })));
+      const errs = (await Promise.all(noDate.map(t => workcenterService.updateTask(t.id, { deadline: day }).then(() => '').catch((e: any) => e?.message || 'Failed')))).filter(Boolean);
+      if (errs.length) showToast(errs[0], { tone: 'error' });
+      else showToast(noDate.length === 1 ? `Deadline set to ${fmtDay(day)}` : `${noDate.length} deadlines set to ${fmtDay(day)}`);
+      loadData();
+    }
+    if (withDate.length) {
+      const only = withDate.length === 1 ? withDate[0] : null;
+      const code = only ? linkCode(taskLinksMap[String(only.id)]) : undefined;
+      setMoveDialog({
+        ids: withDate.map(t => t.id),
+        current: only?.deadline,
+        presetDate: day,
+        title: only ? `${code ? code + ' ' : ''}${only.title}` : `${withDate.length} tasks`,
+      });
+    }
+  };
+
+  // Bulk actions from the floating bar
+  const selIds = () => Array.from(selection.selected);
+
+  const bulkMoveDeadline = () => {
+    const ids = selIds();
+    const flat = new Map<number, any>(flattenTasks(tasks).map(t => [t.id, t]));
+    const only = ids.length === 1 ? flat.get(ids[0]) : null;
+    const code = only ? linkCode(taskLinksMap[String(only.id)]) : undefined;
+    setMoveDialog({ ids, current: only?.deadline, title: only ? `${code ? code + ' ' : ''}${only.title}` : `${ids.length} tasks` });
+  };
+
+  const bulkReassign = async (userId: number) => {
+    const ids = selIds();
+    const flat = new Map<number, any>(flattenTasks(tasks).map(t => [t.id, t]));
+    const prev: Record<number, number | null> = {};
+    ids.forEach(id => { prev[id] = flat.get(id)?.assigned_to_id ?? null; });
+    const person = allUsers.find(u => Number(u.id) === userId);
+    setTasks(p => patchTasks(p, new Set(ids), () => ({ assigned_to_id: userId || null, assigned_to_name: person?.name || null, assigned_to_avatar: person?.avatar || null })));
+    setBulkBusy(true);
+    const failed = await workcenterService.reassignTasks(ids, userId);
+    setBulkBusy(false);
+    loadData();
+    if (failed.length) {
+      showToast(`${failed.length} of ${ids.length} could not be reassigned: ${failed[0].error}`, { tone: 'error' });
+      return;
+    }
+    refreshOpenTask(ids);
+    showToast(`${ids.length} task${ids.length > 1 ? 's' : ''} given to ${person?.name || 'no one'}`, {
+      undo: async () => {
+        await Promise.all(ids.map(id => workcenterService.updateTask(id, { assigned_to_id: prev[id] ?? 0 }).catch(() => null)));
+        await loadData();
+      },
+    });
+  };
+
+  const bulkNest = async (parentId: number) => {
+    const ids = selIds();
+    setBulkBusy(true);
+    try {
+      await workcenterService.bulkUpdateParent(ids, parentId);
+      await loadData();
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('task:created'));
+      selection.clear();
+      showToast(`${ids.length} task${ids.length > 1 ? 's' : ''} are now subtasks`);
+    } catch (e: any) {
+      showToast(e?.message || 'Could not make them subtasks.', { tone: 'error' });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const bulkLink = async (objectiveId: number) => {
+    const ids = selIds();
+    const obj = linkable.objectives.find(o => o.id === objectiveId);
+    setBulkBusy(true);
+    const errs: string[] = [];
+    for (const id of ids) {   // one at a time: each task takes the next number under the objective
+      try { await departmentTargetsService.linkTask(objectiveId, id); } catch (e: any) { errs.push(e?.message || 'Failed'); }
+    }
+    setBulkBusy(false);
+    await loadData();
+    const label = obj ? (obj.full_code || obj.code || obj.title) : 'the objective';
+    if (errs.length) showToast(`${ids.length - errs.length} linked, ${errs.length} failed: ${errs[0]}`, { tone: 'error' });
+    else showToast(`${ids.length} task${ids.length > 1 ? 's' : ''} linked to ${label}`);
+  };
+
+  const bulkParentOptions = useMemo(() => {
+    if (!selection.count) return [];
+    return tasks.filter(t => !selection.selected.has(t.id)).map(t => {
+      const c = linkCode(taskLinksMap[String(t.id)]);
+      return { id: t.id, label: `${c ? c + '  ' : ''}${t.title}`, sub: t.assigned_to_name || undefined };
+    });
+  }, [selection.count, selection.selected, tasks, taskLinksMap]);
+  const bulkObjectiveOptions = useMemo(() => linkable.objectives.map(o => ({
+    id: o.id, label: `${o.full_code || o.code || ''} ${o.title}`.trim(), sub: o.department.name,
+  })), [linkable.objectives]);
+  const bulkPeopleOptions = useMemo(() => allUsers.map(u => ({ id: Number(u.id), label: u.name })), [allUsers]);
 
   const handleTransfer = async (taskId: number, payload: any) => {
     await workcenterService.transferTask(taskId, payload);
@@ -979,11 +1265,11 @@ export default function TaskCenterPage() {
           </div>
 
           {/* Filter Toolbar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-background-secondary p-3 rounded-xl border border-border-subtle">
-            <div className="flex items-center gap-2 flex-1 max-w-md">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-3 bg-background-secondary p-3 rounded-xl border border-border-subtle">
+            <div className="flex items-center gap-2 flex-1 min-w-[460px] max-w-xl">
               <input
                 type="text"
-                placeholder="Search tasks... or type ##PROD for department"
+                placeholder="Search tasks, a code like PROD-1.2, or ##PROD for a department"
                 value={searchQuery}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -1001,7 +1287,7 @@ export default function TaskCenterPage() {
                     }
                   }
                 }}
-                className="bg-background-primary border border-border-subtle text-xs rounded-lg px-3 py-2 text-text-primary outline-none focus:border-accent-blue transition-colors w-full font-medium"
+                className="bg-background-primary border border-border-subtle text-xs rounded-lg px-3 py-2 text-text-primary outline-none focus:border-accent-blue transition-colors w-full min-w-[200px] flex-1 font-medium"
               />
               <button
                 type="button"
@@ -1095,6 +1381,15 @@ export default function TaskCenterPage() {
                   )}
                 >
                   List
+                </button>
+                <button
+                  onClick={() => setViewMode('calendar')}
+                  className={cn(
+                    "px-3 py-1.5 text-[10px] font-bold rounded-md transition-colors",
+                    viewMode === 'calendar' ? "bg-accent-blue text-white shadow-sm" : "text-text-secondary hover:text-text-primary"
+                  )}
+                >
+                  Calendar
                 </button>
               </div>
             </div>
@@ -1686,11 +1981,7 @@ export default function TaskCenterPage() {
                                         <div key={st.id} className="py-2 flex flex-wrap items-start justify-between gap-2">
                                           <div className="min-w-0 flex-1 space-y-1">
                                             <div className="flex items-center gap-2 flex-wrap">
-                                              {stLink && (
-                                                <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
-                                                  {getDeptDisplayCode(stLink.department)}{stLink.task_code ? ` · ${stLink.task_code}` : ''}
-                                                </span>
-                                              )}
+                                              <CodeChip code={linkCode(stLink)} />
                                               <button
                                                 type="button"
                                                 onClick={() => handleSelectTask(st)}
@@ -1715,8 +2006,9 @@ export default function TaskCenterPage() {
                                               <p className="text-[11px] text-text-secondary">{st.description}</p>
                                             )}
                                           </div>
-                                          <div className="text-[10.5px] text-text-secondary shrink-0">
-                                            {st.assigned_to_name || 'Unassigned'} {st.deadline ? `· ${st.deadline}` : ''}
+                                          <div className="text-[10.5px] text-text-secondary shrink-0 flex items-center gap-1.5">
+                                            <span>{st.assigned_to_name || 'Unassigned'}</span>
+                                            <RowDeadline task={st} label={linkCode(stLink)} onChanged={loadData} />
                                           </div>
                                         </div>
                                       );
@@ -1784,14 +2076,15 @@ export default function TaskCenterPage() {
                 <GroupedTaskFeed 
                   tasks={filteredTasks} 
                   taskLinksMap={taskLinksMap}
-                  allTasksForParenting={tasks}
+                  selection={selection}
+                  reveal={reveal}
+                  onDropStatus={quickStatus}
                   onMoveTaskToParent={handleMoveTaskToParent}
-                  onBulkMoveParent={handleBulkMoveParent}
                   onSelectTask={(taskItem) => {
                     setDetailDefaultTab('details');
                     handleSelectTask(taskItem);
                   }} 
-                  onStatusChange={handleStatusChange} 
+                  onStatusChange={(id, status) => quickStatus([id], status)} 
                   onAddTaskInStatus={handleAddTaskInStatus} 
                   onRefresh={loadData} 
                   users={allUsers}
@@ -1814,11 +2107,22 @@ export default function TaskCenterPage() {
                   }}
                   onOpenObjective={(objId) => setDeptObjectivePanelId(objId)}
                 />
+              ) : viewMode === 'calendar' ? (
+                <TaskCalendarView
+                  tasks={filteredTasks}
+                  codeOf={id => linkCode(taskLinksMap[String(id)])}
+                  onSelectTask={(t) => { setDetailDefaultTab('details'); handleSelectTask(t); }}
+                  onDropOnDay={dropOnDay}
+                  selection={selection}
+                  revealId={reveal?.id}
+                />
               ) : (
                 <TaskTableView
                   tasks={filteredTasks}
                   taskLinksMap={taskLinksMap}
+                  selection={selection}
                   onSelectTask={handleSelectTask}
+                  onStatusChange={(id, status) => quickStatus([id], status)}
                   onRefresh={loadData}
                   onOpenObjective={(objId) => setDeptObjectivePanelId(objId)}
                 />
@@ -2169,6 +2473,38 @@ export default function TaskCenterPage() {
         <Sparkles className="w-5 h-5 text-white" />
       </div>
 
+      {/* Bulk bar for the selected tasks, the Undo message and the Move deadline dialog */}
+      {selection.count > 0 && (
+        <BulkBar
+          count={selection.count}
+          busy={bulkBusy}
+          onClear={selection.clear}
+          onStatus={s => quickStatus(selIds(), s)}
+          onMoveDeadline={bulkMoveDeadline}
+          onReassign={bulkReassign}
+          onMakeSubtask={bulkNest}
+          onLinkObjective={bulkLink}
+          people={bulkPeopleOptions}
+          parents={bulkParentOptions}
+          objectives={bulkObjectiveOptions}
+        />
+      )}
+      <UndoToast toast={toast} onDismiss={() => setToast(null)} raised={selection.count > 0} />
+      <ExtendDeadlineDialog
+        open={!!moveDialog}
+        onClose={() => {
+          const reopen = moveDialog?.reopenId;
+          setMoveDialog(null);
+          if (reopen) { setDetailDefaultTab('history'); handleSelectTask({ id: reopen }); }
+        }}
+        entity="task"
+        ids={moveDialog?.ids || []}
+        current={moveDialog?.current}
+        title={moveDialog?.title}
+        presetDate={moveDialog?.presetDate}
+        onDone={onDeadlineMoved}
+      />
+
       {/* ─── Dialogs ──────────────────────────────────────────────────────── */}
 
       {/* Create / Edit Task Dialog (Wizard Form) */}
@@ -2209,9 +2545,16 @@ export default function TaskCenterPage() {
         onClose={() => { setDetailOpen(false); setSelectedTask(null); }}
         onEdit={t => { setEditingTask(t); setShowCreateEdit(true); }}
         onDelete={handleDeleteTask}
-        onTransitionStatus={handleStatusChange}
+        onTransitionStatus={(id, status) => quickStatus([id], status)}
         onTransfer={t => { setTransferTask(t); setTransferOpen(true); }}
-        onStatusChange={handleStatusChange}
+        onStatusChange={(id, status) => quickStatus([id], status)}
+        link={selectedTask ? taskLinksMap[String(selectedTask.id)] : undefined}
+        onMoveDeadline={t => {
+          const code = linkCode(taskLinksMap[String(t.id)]);
+          setDetailOpen(false);
+          setSelectedTask(null);
+          setMoveDialog({ ids: [t.id], current: t.deadline, title: `${code ? code + ' ' : ''}${t.title}`, reopenId: t.id });
+        }}
         allUsers={allUsers}
         onRefreshTask={id => { handleSelectTask({ id }); loadData(); }}
         onSelectTask={handleSelectTask}
@@ -2248,12 +2591,15 @@ export default function TaskCenterPage() {
             extended_time: isNaN(extTime) ? undefined : extTime,
             actual_completion_date: completionDate
           });
+          const doneId = completingTaskId;
           setCompleteTaskOpen(false);
           setCompletingTaskId(null);
           await loadData();
-          if (selectedTask && selectedTask.id === completingTaskId) {
-            await handleSelectTask({ id: completingTaskId });
+          if (selectedTask && selectedTask.id === doneId) {
+            await handleSelectTask({ id: doneId });
           }
+          const u = statusUndoRef.current;
+          if (u && u.id === doneId) showToast('Marked done', { undo: () => undoStatuses({ [doneId]: u.prev }) });
         }}
       />
 
@@ -2423,7 +2769,7 @@ function CompletionDateCell({
     <div className="relative flex items-center gap-1" onClick={e => e.stopPropagation()}>
       <input
         type="date"
-        aria-label="Actual Completion Date"
+        aria-label="Finished on"
         value={task.actual_completion_date || ''}
         disabled={saving}
         onChange={async e => {
@@ -2445,7 +2791,7 @@ function CompletionDateCell({
             e.stopPropagation();
             setShowHistory(v => !v);
           }}
-          title={`View actual completion date change history (${historyList.length})`}
+          title={`Earlier finish dates (${historyList.length})`}
           className={cn(
             "p-1 rounded border text-[9px] font-bold cursor-pointer transition-colors shrink-0 inline-flex items-center gap-0.5",
             showHistory
@@ -2464,7 +2810,7 @@ function CompletionDateCell({
         >
           <div className="flex items-center justify-between border-b border-border-subtle pb-1">
             <span className="text-[10px] font-extrabold uppercase tracking-wider text-text-primary flex items-center gap-1">
-              <History className="w-3 h-3 text-accent-blue" /> Completion Date History
+              <History className="w-3 h-3 text-accent-blue" /> Finish date history
             </span>
             <button
               type="button"
@@ -2517,13 +2863,13 @@ function RecursiveWorkcenterSubtaskList({
         return (
           <div key={st.id} className="w-full">
             <div
+              data-task-id={st.id}
               draggable={!!onMoveTaskToParent}
               onDragStart={e => {
                 e.stopPropagation();
-                e.dataTransfer.setData('application/x-nurofin-task-id', String(st.id));
-                e.dataTransfer.setData('text/plain', String(st.id));
-                e.dataTransfer.effectAllowed = 'move';
+                startTaskDrag(e, st.id);
               }}
+              onDragEnd={() => endTaskDrag()}
               onDragOver={e => {
                 if (onMoveTaskToParent && e.dataTransfer.types.includes('application/x-nurofin-task-id')) {
                   e.preventDefault();
@@ -2552,7 +2898,7 @@ function RecursiveWorkcenterSubtaskList({
               style={{ paddingLeft: `${Math.min(24, Math.max(8, (depth - 1) * 10 + 8))}px` }}
             >
               {/* Desktop columns layout */}
-              <div className="hidden lg:flex items-center w-full gap-2 2xl:gap-4 min-w-[1060px] 2xl:min-w-[1220px]">
+              <div className="hidden lg:flex items-center w-full gap-2 2xl:gap-4 min-w-[1148px] 2xl:min-w-[1308px]">
                 {/* 1. Title */}
                 <div className="flex-1 min-w-[180px] flex items-center gap-2 pr-3 pl-2">
                   {onMoveTaskToParent && (
@@ -2565,14 +2911,8 @@ function RecursiveWorkcenterSubtaskList({
                 </div>
 
                 {/* 1.2 Code */}
-                <div className="w-20 flex-shrink-0 text-[10px]">
-                  {linkInfo ? (
-                    <span className="font-mono text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 inline-block">
-                      {linkInfo.project_code || linkInfo.task_code || linkInfo.objective_code}
-                    </span>
-                  ) : (
-                    <span className="text-text-muted">—</span>
-                  )}
+                <div className="w-[104px] flex-shrink-0 text-[10px]">
+                  {linkCode(linkInfo) ? <CodeChip code={linkCode(linkInfo)} /> : <span className="text-text-muted">—</span>}
                 </div>
 
                 {/* 1.3 Department */}
@@ -2604,12 +2944,12 @@ function RecursiveWorkcenterSubtaskList({
                   {st.start_date ? st.start_date : '—'}
                 </div>
 
-                {/* 3. Target Date (fixed) */}
-                <div className="w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary" title="Initial Target Date (fixed)">
-                  {st.deadline ? st.deadline : '—'}
+                {/* 3. Deadline (first date, moves and why are on the badge) */}
+                <div className="w-[132px] flex-shrink-0">
+                  <RowDeadline task={st} label={linkCode(linkInfo)} onChanged={onRefresh} />
                 </div>
 
-                {/* 3.5 Actual Completion Date (editable + hidden history) */}
+                {/* 3.5 Finished on: the day the work was actually done (editable + history) */}
                 <div className="w-32 flex-shrink-0">
                   <CompletionDateCell task={st} onSaved={onRefresh} />
                 </div>
@@ -2662,16 +3002,8 @@ function RecursiveWorkcenterSubtaskList({
                 </div>
 
                 {/* 7. Status */}
-                <div className="w-24 flex-shrink-0" onClick={e => e.stopPropagation()}>
-                  <select
-                    value={st.status === 'done' ? 'completed' : st.status}
-                    onChange={e => onStatusChange(st.id, e.target.value)}
-                    className="bg-background-primary border border-border-subtle text-[9px] rounded p-0.5 text-text-secondary outline-none cursor-pointer font-bold w-full"
-                  >
-                    {STATUS_OPTIONS.map(o => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
-                    ))}
-                  </select>
+                <div className="w-[108px] flex-shrink-0" onClick={e => e.stopPropagation()}>
+                  <StatusPill status={st.status} onChange={s => onStatusChange(st.id, s)} />
                 </div>
 
                 {/* 8. Actions */}
@@ -2738,22 +3070,9 @@ function RecursiveWorkcenterSubtaskList({
                 {st.description && <div className="text-[10px] text-text-muted/80 italic pl-5">{st.description}</div>}
 
                 <div className="flex flex-wrap items-center gap-2.5 text-[10px] text-text-muted pl-5">
+                  <CodeChip code={linkCode(linkInfo)} size="xs" />
                   {st.start_date && <span>Start: {st.start_date}</span>}
-                  {st.deadline && <span>End: {st.deadline}</span>}
-                  {st.deadline && !isCompleted && (
-                    (() => {
-                      const todayDate = new Date();
-                      todayDate.setHours(0, 0, 0, 0);
-                      const [yr, mo, dy] = st.deadline.split('-').map(Number);
-                      const dlDate = new Date(yr, mo - 1, dy);
-                      dlDate.setHours(0, 0, 0, 0);
-                      if (todayDate > dlDate) {
-                        const diffDays = Math.round(Math.abs(todayDate.getTime() - dlDate.getTime()) / (1000 * 60 * 60 * 24));
-                        return <span className="text-accent-red font-bold">{diffDays}d overdue</span>;
-                      }
-                      return null;
-                    })()
-                  )}
+                  <RowDeadline task={st} label={linkCode(linkInfo)} onChanged={onRefresh} />
                   {st.assigned_to_name && <span className="font-bold text-text-secondary">Assigned: {st.assigned_to_name}</span>}
                 </div>
 
@@ -2852,11 +3171,15 @@ function GroupedTaskFeed({
   onFollowUpTask,
   onOpenObjective,
   taskLinksMap = {},
-  allTasksForParenting = [],
+  selection,
+  reveal,
+  onDropStatus,
   onMoveTaskToParent,
-  onBulkMoveParent,
 }: {
   tasks: WCTask[];
+  selection: TaskSelection;
+  reveal?: { id: number; n: number } | null;
+  onDropStatus?: (ids: number[], status: string) => void;
   onSelectTask: (t: any) => void;
   onStatusChange: (id: number, status: string) => void;
   onAddTaskInStatus?: (status: string) => void;
@@ -2869,9 +3192,7 @@ function GroupedTaskFeed({
   onFollowUpTask?: (task: any) => void;
   onOpenObjective?: (objectiveId: number) => void;
   taskLinksMap?: Record<string, TaskLinkInfo>;
-  allTasksForParenting?: WCTask[];
   onMoveTaskToParent?: (taskId: number, parentId: number | null) => Promise<void>;
-  onBulkMoveParent?: (taskIds: number[], parentId: number | null) => Promise<void>;
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     in_progress: true,
@@ -2884,18 +3205,32 @@ function GroupedTaskFeed({
   };
 
   const [expandedTasks, setExpandedTasks] = useState<Record<number, boolean>>({});
-  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(new Set());
-  const [bulkTargetParentId, setBulkTargetParentId] = useState<string>('');
-  const [bulkMoving, setBulkMoving] = useState(false);
   const [dragOverTaskId, setDragOverTaskId] = useState<number | null>(null);
+  const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const anySelected = selection.count > 0;
 
-  const toggleSelectTask = (id: number, e: React.MouseEvent | React.ChangeEvent) => {
-    e.stopPropagation();
-    setSelectedTaskIds(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  // Deep link to a task: open whatever hides it (its group, its parent's subtask list) so it can be flashed.
+  useEffect(() => {
+    if (!reveal) return;
+    const path = pathTo(tasks, reveal.id);
+    if (!path) return;
+    const root: any = tasks.find(t => t.id === (path[0] ?? reveal.id));
+    if (root) {
+      const key = root.status === 'completed' || root.status === 'done' ? 'completed' : root.status === 'blocked' ? 'blocked' : 'in_progress';
+      setExpandedGroups(prev => (prev[key] ? prev : { ...prev, [key]: true }));
+    }
+    if (path.length) setExpandedTasks(prev => ({ ...prev, ...Object.fromEntries(path.map(id => [id, true])) }));
+  }, [reveal?.n]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Click on a row: Cmd/Ctrl or Shift-click picks it; a plain click opens it.
+  const rowClick = (e: React.MouseEvent, task: any) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      e.preventDefault();
+      selection.toggle(task.id, e.shiftKey);
+      return;
+    }
+    onSelectTask(task);
   };
 
   const toggleExpandTask = (taskId: number, e: React.MouseEvent) => {
@@ -2908,58 +3243,8 @@ function GroupedTaskFeed({
   const [newSubtaskDescription, setNewSubtaskDescription] = useState('');
   const [newSubtaskAssigneeId, setNewSubtaskAssigneeId] = useState('');
 
-  const parentSelectCandidates = useMemo(() => {
-    const source = allTasksForParenting.length ? allTasksForParenting : tasks;
-    return source.filter(t => !selectedTaskIds.has(t.id));
-  }, [allTasksForParenting, tasks, selectedTaskIds]);
-
   return (
     <div className="space-y-4">
-      {selectedTaskIds.size > 0 && onBulkMoveParent && (
-        <div className="sticky top-2 z-30 bg-background-secondary border border-purple-500/40 rounded-xl p-3 shadow-lg flex flex-wrap items-center justify-between gap-3 animate-in fade-in duration-150">
-          <div className="flex items-center gap-2 text-xs font-bold text-text-primary">
-            <CornerDownRight className="w-4 h-4 text-purple-500" />
-            <span>{selectedTaskIds.size} {selectedTaskIds.size === 1 ? 'task' : 'tasks'} selected — Make subtask under:</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={bulkTargetParentId}
-              onChange={e => setBulkTargetParentId(e.target.value)}
-              className="bg-background-primary border border-border-subtle rounded-lg px-2.5 py-1.5 text-xs text-text-primary outline-none max-w-xs"
-            >
-              <option value="">Choose parent task...</option>
-              {parentSelectCandidates.map(pt => (
-                <option key={pt.id} value={pt.id}>
-                  {taskLinksMap[String(pt.id)]?.task_code ? `[${taskLinksMap[String(pt.id)].task_code}] ` : ''}{pt.title}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              disabled={!bulkTargetParentId || bulkMoving}
-              onClick={async () => {
-                if (!bulkTargetParentId) return;
-                setBulkMoving(true);
-                await onBulkMoveParent([...selectedTaskIds], Number(bulkTargetParentId));
-                setSelectedTaskIds(new Set());
-                setBulkTargetParentId('');
-                setBulkMoving(false);
-              }}
-              className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold disabled:opacity-50 cursor-pointer flex items-center gap-1"
-            >
-              {bulkMoving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-              Move as Subtasks
-            </button>
-            <button
-              type="button"
-              onClick={() => { setSelectedTaskIds(new Set()); setBulkTargetParentId(''); }}
-              className="px-2.5 py-1.5 text-xs font-semibold text-text-secondary hover:text-text-primary cursor-pointer"
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-      )}
       {STATUS_COLS.map(col => {
         const colTasks = col.key === 'in_progress'
           ? tasks.filter(t => t.status !== 'completed' && t.status !== 'done' && t.status !== 'blocked')
@@ -2969,11 +3254,29 @@ function GroupedTaskFeed({
         const isGroupExpanded = expandedGroups[col.key];
 
         return (
-          <div key={col.key} className="bg-background-secondary border border-border-subtle rounded-xl transition-all shadow-sm">
+          <div
+            key={col.key}
+            onDragOver={e => { if (onDropStatus && isTaskDrag(e)) { e.preventDefault(); setDragOverGroup(col.key); } }}
+            onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverGroup(prev => (prev === col.key ? null : prev)); }}
+            onDrop={e => {
+              if (!onDropStatus || !isTaskDrag(e)) return;
+              e.preventDefault();
+              const ids = readDraggedIds(e);
+              endTaskDrag(); setDragActive(false); setDragOverGroup(null);
+              if (ids.length) onDropStatus(ids, col.key);
+            }}
+            className={cn(
+              "bg-background-secondary border rounded-xl transition-all shadow-sm",
+              dragOverGroup === col.key ? "border-accent-blue ring-2 ring-accent-blue/40" : dragActive ? "border-dashed border-accent-blue/50" : "border-border-subtle"
+            )}
+          >
             {/* Status Header Bar */}
             <div 
               onClick={() => toggleGroup(col.key)}
-              className="p-3 bg-surface-card/10 flex items-center justify-between cursor-pointer select-none hover:bg-surface-card/20 transition-colors"
+              className={cn(
+                "p-3 flex items-center justify-between cursor-pointer select-none transition-colors",
+                dragOverGroup === col.key ? "bg-accent-blue/10" : "bg-surface-card/10 hover:bg-surface-card/20"
+              )}
             >
               <div className="flex items-center gap-2.5">
                 <ChevronDown className={cn("w-4 h-4 text-text-muted transition-transform duration-200", isGroupExpanded ? "rotate-0" : "-rotate-90")} />
@@ -2983,7 +3286,11 @@ function GroupedTaskFeed({
                   {colTasks.length} {colTasks.length === 1 ? 'task' : 'tasks'}
                 </span>
               </div>
-
+              {dragActive && (
+                <span className={cn("text-[11px] font-semibold normal-case", dragOverGroup === col.key ? "text-accent-blue" : "text-text-secondary")}>
+                  {draggingIds().length > 1 ? `Drop to move ${draggingIds().length} tasks to ${col.label}` : `Drop here to move to ${col.label}`}
+                </span>
+              )}
             </div>
 
             {/* Tasks List */}
@@ -2991,13 +3298,13 @@ function GroupedTaskFeed({
               <div className="divide-y divide-border-subtle/50 bg-background-primary overflow-x-auto scrollbar-thin">
                 {/* Column Headers Row */}
                 {colTasks.length > 0 && (
-                  <div className="hidden lg:flex items-center p-3.5 bg-background-secondary/40 border-b border-border-subtle text-[9px] 2xl:text-[10px] font-extrabold text-text-muted uppercase tracking-normal 2xl:tracking-wider select-none box-content gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[1140px] min-[1366px]:min-w-[1260px] 2xl:min-w-[1480px]">
+                  <div className="hidden lg:flex items-center p-3.5 bg-background-secondary/40 border-b border-border-subtle text-[9px] 2xl:text-[10px] font-extrabold text-text-muted uppercase tracking-normal 2xl:tracking-wider select-none box-content gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[1248px] min-[1366px]:min-w-[1352px] 2xl:min-w-[1564px]">
                     <div className="flex-1 min-w-[200px] min-[1366px]:min-w-[230px] pr-2 min-[1366px]:pr-4">Task & Project</div>
-                    <div className="w-20 min-[1366px]:w-24 flex-shrink-0">Code</div>
+                    <div className="w-[104px] min-[1366px]:w-28 flex-shrink-0">Code</div>
                     <div className="w-24 min-[1366px]:w-28 flex-shrink-0">Department</div>
                     <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Start Date</div>
-                    <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Target Date</div>
-                    <div className="w-[124px] min-[1366px]:w-[132px] flex-shrink-0">Actual Completion</div>
+                    <div className="w-[132px] flex-shrink-0">Deadline</div>
+                    <div className="w-[124px] min-[1366px]:w-[132px] flex-shrink-0" title="The day the work was actually finished">Finished on</div>
                     <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Overdue Days</div>
                     <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0">Assignee</div>
                     <div className="w-[68px] min-[1366px]:w-[76px] 2xl:w-24 flex-shrink-0">Transferred Info</div>
@@ -3006,11 +3313,11 @@ function GroupedTaskFeed({
                     <div className="w-16 2xl:w-24 flex-shrink-0">View Subtask</div>
                     <div className="w-16 2xl:w-24 flex-shrink-0">Add Subtask</div>
                     <div className="w-20 2xl:w-24 flex-shrink-0 text-center font-bold text-accent-blue">Follow-up</div>
-                    <div className="w-24 flex-shrink-0">Status</div>
+                    <div className="w-[108px] flex-shrink-0">Status</div>
                     <div className="w-16 flex-shrink-0 text-right pr-2">Actions</div>
                   </div>
                 )}
-                {colTasks.map((task, idx) => {
+                {colTasks.map(task => {
                   const today = new Date().toISOString().split('T')[0];
                   const isOverdue = task.deadline && task.deadline < today && task.status !== 'completed';
                   const hasSubtasks = task.subtasks && task.subtasks.length > 0;
@@ -3021,32 +3328,39 @@ function GroupedTaskFeed({
                   return (
                     <div 
                       key={task.id} 
+                      data-task-id={task.id}
                       draggable={!!onMoveTaskToParent}
                       onDragStart={e => {
-                        e.dataTransfer.setData('application/x-nurofin-task-id', String(task.id));
-                        e.dataTransfer.setData('text/plain', String(task.id));
-                        e.dataTransfer.effectAllowed = 'move';
+                        startTaskDrag(e, task.id, selection.selected);
+                        setTimeout(() => setDragActive(true), 0);
                       }}
+                      onDragEnd={() => { endTaskDrag(); setDragActive(false); setDragOverGroup(null); setDragOverTaskId(null); }}
                       onDragOver={e => {
-                        if (onMoveTaskToParent && e.dataTransfer.types.includes('application/x-nurofin-task-id')) {
+                        if (onMoveTaskToParent && e.dataTransfer.types.includes(DND_ONE)) {
                           e.preventDefault();
+                          e.stopPropagation();   // over a row means "make it a subtask", not "change status"
+                          setDragOverGroup(null);
                           setDragOverTaskId(task.id);
                         }
                       }}
                       onDragLeave={() => setDragOverTaskId(prev => (prev === task.id ? null : prev))}
                       onDrop={e => {
                         e.preventDefault();
+                        e.stopPropagation();
                         setDragOverTaskId(null);
-                        const draggedId = Number(e.dataTransfer.getData('application/x-nurofin-task-id') || e.dataTransfer.getData('text/plain'));
+                        setDragActive(false);
+                        const draggedId = Number(e.dataTransfer.getData(DND_ONE) || e.dataTransfer.getData('text/plain'));
+                        endTaskDrag();
                         if (onMoveTaskToParent && draggedId && draggedId !== task.id) {
                           onMoveTaskToParent(draggedId, task.id);
                         }
                       }}
-                      onClick={() => onSelectTask(task)}
+                      onMouseDown={e => { if (e.shiftKey) e.preventDefault(); }}
+                      onClick={e => rowClick(e, task)}
                       className={cn(
                         "p-3.5 hover:bg-surface-hover/30 transition-all cursor-pointer text-left space-y-3 relative group",
                         dragOverTaskId === task.id && "bg-purple-500/10 ring-2 ring-purple-500/50 rounded-lg",
-                        selectedTaskIds.has(task.id) && "bg-accent-blue/5"
+                        selection.has(task.id) && "bg-accent-blue/5"
                       )}
                     >
                       {dragOverTaskId === task.id && (
@@ -3056,40 +3370,38 @@ function GroupedTaskFeed({
                       )}
                       {/* Main Task Metadata Row */}
                       {/* Desktop Aligned Row */}
-                      <div className="hidden lg:flex items-center w-full gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[1140px] min-[1366px]:min-w-[1260px] 2xl:min-w-[1480px]">
+                      <div className="hidden lg:flex items-center w-full gap-1 min-[1366px]:gap-1.5 2xl:gap-4 min-w-[1248px] min-[1366px]:min-w-[1352px] 2xl:min-w-[1564px]">
                         {/* 1. Title & Project (drag/select hidden until hovered or selected so full task name stays clear) */}
                         <div className="flex-1 min-w-[200px] min-[1366px]:min-w-[230px] pr-2 min-[1366px]:pr-4 relative">
                           <div className="flex items-start gap-1.5">
-                            {(onBulkMoveParent || onMoveTaskToParent) && (
+                            {onMoveTaskToParent && (
                               <div
                                 onClick={e => e.stopPropagation()}
                                 className={cn(
-                                  "items-center gap-1 mt-0.5 shrink-0",
-                                  selectedTaskIds.has(task.id) ? "flex" : "hidden group-hover:flex"
+                                  // Always takes its space (so the row never jumps); fades in on hover.
+                                  "flex items-center gap-1 mt-0.5 shrink-0 transition-opacity",
+                                  anySelected ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
                                 )}
                               >
-                                {onBulkMoveParent && (
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedTaskIds.has(task.id)}
-                                    onClick={e => e.stopPropagation()}
-                                    onChange={e => toggleSelectTask(task.id, e)}
-                                    title="Select task to nest under another task"
-                                    className="accent-purple-600 shrink-0 cursor-pointer"
-                                  />
-                                )}
-                                {onMoveTaskToParent && (
-                                  <span
-                                    className="text-text-muted hover:text-text-primary cursor-grab shrink-0"
-                                    title="Drag onto another task to make it a subtask"
-                                  >
-                                    <GripVertical className="w-3.5 h-3.5" />
-                                  </span>
-                                )}
+                                <input
+                                  type="checkbox"
+                                  checked={selection.has(task.id)}
+                                  onClick={e => { e.stopPropagation(); selection.toggle(task.id, e.shiftKey); }}
+                                  onChange={() => {}}
+                                  aria-label={`Select ${task.title}`}
+                                  title="Select (Shift-click to select a range)"
+                                  className="accent-blue-600 shrink-0 cursor-pointer w-3.5 h-3.5"
+                                />
+                                <span
+                                  className="text-text-muted hover:text-text-primary cursor-grab shrink-0"
+                                  title="Drag onto another task to make it a subtask, or onto a status to change it"
+                                >
+                                  <GripVertical className="w-3.5 h-3.5" />
+                                </span>
                               </div>
                             )}
                             <h4 title={task.title} className="text-xs font-bold text-text-primary hover:text-accent-blue transition-colors leading-snug line-clamp-2 break-words">
-                              {idx + 1}. {task.title}
+                              {task.title}
                             </h4>
                           </div>
                           {task.description && (
@@ -3123,20 +3435,10 @@ function GroupedTaskFeed({
                         </div>
 
                         {/* 1.4 Code (Project / Objective hierarchical code) */}
-                        <div className="w-20 min-[1366px]:w-24 flex-shrink-0">
+                        <div className="w-[104px] min-[1366px]:w-28 flex-shrink-0">
                           {(() => {
-                            const link = taskLinksMap[String(task.id)];
-                            if (!link) return <span className="text-[10px] text-text-muted">—</span>;
-                            const dCode = getDeptDisplayCode(link.department);
-                            const displayCode = link.project_code || (link.task_code ? `${dCode}-${link.task_code}` : `${dCode}-${link.objective_code || ''}`);
-                            return (
-                              <span
-                                className="inline-flex items-center font-mono text-[9.5px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400"
-                                title={`Objective ${link.objective_code || ''}: ${link.title}`}
-                              >
-                                {displayCode}
-                              </span>
-                            );
+                            const code = linkCode(taskLinksMap[String(task.id)]);
+                            return code ? <CodeChip code={code} /> : <span className="text-[10px] text-text-muted">—</span>;
                           })()}
                         </div>
 
@@ -3173,11 +3475,11 @@ function GroupedTaskFeed({
                         </div>
 
                         {/* 3. Target Date (fixed initial date) */}
-                        <div className="w-16 min-[1366px]:w-[72px] 2xl:w-20 flex-shrink-0 text-[10px] font-bold text-text-secondary" title="Initial Target Date (fixed)">
-                          {task.deadline ? task.deadline : '—'}
+                        <div className="w-[132px] flex-shrink-0">
+                          <RowDeadline task={task} label={linkCode(taskLinksMap[String(task.id)])} onChanged={onRefresh} />
                         </div>
 
-                        {/* 4. Actual Completion Date (editable + hidden-by-default history) */}
+                        {/* 4. Finished on: the day the work was actually done (editable + history) */}
                         <div className="w-[124px] min-[1366px]:w-[132px] flex-shrink-0">
                           <CompletionDateCell task={task} onSaved={onRefresh} />
                         </div>
@@ -3305,16 +3607,8 @@ function GroupedTaskFeed({
                         </div>
 
                         {/* 11. Status Select */}
-                        <div className="w-24 flex-shrink-0" onClick={e => e.stopPropagation()}>
-                          <select
-                            value={task.status}
-                            onChange={e => onStatusChange(task.id, e.target.value)}
-                            className="bg-background-secondary border border-border-subtle text-[10px] rounded p-1 text-text-secondary outline-none cursor-pointer font-bold w-full"
-                          >
-                            {STATUS_OPTIONS.map(o => (
-                              <option key={o.value} value={o.value}>{o.label}</option>
-                            ))}
-                          </select>
+                        <div className="w-[108px] flex-shrink-0" onClick={e => e.stopPropagation()}>
+                          <StatusPill status={task.status} onChange={s => onStatusChange(task.id, s)} />
                         </div>
 
                         {/* 12. Action Buttons */}
@@ -3354,9 +3648,10 @@ function GroupedTaskFeed({
                         {/* Title Block */}
                         <div className="min-w-0">
                           <h4 className="text-xs font-bold text-text-primary hover:text-accent-blue transition-colors leading-normal break-words">
-                            {idx + 1}. {task.title}
+                            {task.title}
                           </h4>
-                          <div className="flex flex-wrap gap-2 mt-1.5">
+                          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                            <CodeChip code={linkCode(taskLinksMap[String(task.id)])} />
                             <TaskFeatureChips taskId={task.id} />
                             {task.parent_title && (
                               <span className="inline-flex items-center gap-1 text-[9px] font-bold text-accent-purple bg-accent-purple/5 border border-accent-purple/10 px-2 py-0.5 rounded-full">
@@ -3381,12 +3676,7 @@ function GroupedTaskFeed({
                           </span>
 
                           {/* Deadline */}
-                          {task.deadline && (
-                            <span className={cn("text-[10px] font-bold flex items-center gap-1 select-none", isOverdue ? "text-accent-red" : "text-text-muted")}>
-                              <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
-                              {isOverdue ? 'Overdue' : task.deadline}
-                            </span>
-                          )}
+                          <RowDeadline task={task} label={linkCode(taskLinksMap[String(task.id)])} onChanged={onRefresh} />
 
                           {/* Assignee Avatar */}
                           {task.assigned_to_name ? (
@@ -3507,18 +3797,18 @@ function GroupedTaskFeed({
                           <div className="text-[9px] font-bold uppercase tracking-wider text-text-muted select-none">Subtasks</div>
                           
                           {/* Subtasks Headers Row (hidden on mobile) */}
-                          <div className="hidden lg:flex items-center p-2 bg-background-secondary/30 rounded-lg border border-border-subtle/20 text-[9px] font-bold text-text-muted uppercase tracking-wider select-none gap-2 2xl:gap-4 min-w-[1060px] 2xl:min-w-[1220px]">
+                          <div className="hidden lg:flex items-center p-2 bg-background-secondary/30 rounded-lg border border-border-subtle/20 text-[9px] font-bold text-text-muted uppercase tracking-wider select-none gap-2 2xl:gap-4 min-w-[1148px] 2xl:min-w-[1308px]">
                             <div className="flex-1 min-w-[180px] pr-3 pl-2">Subtask Title</div>
-                            <div className="w-20 flex-shrink-0">Code</div>
+                            <div className="w-[104px] flex-shrink-0">Code</div>
                             <div className="w-24 flex-shrink-0">Department</div>
                             <div className="w-32 flex-shrink-0">Description</div>
                             <div className="w-20 flex-shrink-0">Start Date</div>
-                            <div className="w-20 flex-shrink-0">Target Date</div>
-                            <div className="w-32 flex-shrink-0">Actual Completion</div>
+                            <div className="w-[132px] flex-shrink-0">Deadline</div>
+                            <div className="w-32 flex-shrink-0" title="The day the work was actually finished">Finished on</div>
                             <div className="w-20 flex-shrink-0">Overdue Days</div>
                             <div className="w-20 flex-shrink-0">Assignee</div>
                             <div className="w-24 flex-shrink-0">Transferred Info</div>
-                            <div className="w-24 flex-shrink-0">Status</div>
+                            <div className="w-[108px] flex-shrink-0">Status</div>
                             <div className="w-36 flex-shrink-0 text-right pr-2">Actions / Follow-up</div>
                           </div>
 
@@ -3560,52 +3850,83 @@ function GroupedTaskFeed({
 function TaskTableView({
   tasks,
   taskLinksMap = {},
+  selection,
   onSelectTask,
+  onStatusChange,
   onRefresh,
   onOpenObjective,
 }: {
   tasks: WCTask[];
   taskLinksMap?: Record<string, TaskLinkInfo>;
+  selection: TaskSelection;
   onSelectTask: (t: any) => void;
+  onStatusChange: (id: number, status: string) => void;
   onRefresh?: () => void;
   onOpenObjective?: (objectiveId: number) => void;
 }) {
+  const anySelected = selection.count > 0;
+  const allSelected = tasks.length > 0 && tasks.every(t => selection.has(t.id));
+  const th = "text-[10px] font-bold uppercase tracking-wider text-text-muted";
   return (
     <div className="bg-background-secondary border border-border-subtle rounded-xl overflow-x-auto scrollbar-thin text-left shadow-sm">
-      <Table className="min-w-[1320px]">
+      <Table className="min-w-[1440px]">
         <TableHeader>
           <TableRow>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Title</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Code</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Department</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Assignee</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Project</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Priority</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Target Date</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Actual Completion</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Status</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-text-muted text-center">Follow-up</TableHead>
+            <TableHead className="w-9 pr-0">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={() => (allSelected ? selection.clear() : selection.setAll(tasks.map(t => t.id)))}
+                aria-label="Select all tasks"
+                title="Select all (Cmd/Ctrl+A)"
+                className="accent-blue-600 cursor-pointer w-3.5 h-3.5"
+              />
+            </TableHead>
+            <TableHead className={th}>Title</TableHead>
+            <TableHead className={th}>Code</TableHead>
+            <TableHead className={th}>Department</TableHead>
+            <TableHead className={th}>Assignee</TableHead>
+            <TableHead className={th}>Project</TableHead>
+            <TableHead className={th}>Priority</TableHead>
+            <TableHead className={th}>Deadline</TableHead>
+            <TableHead className={th} title="The day the work was actually finished">Finished on</TableHead>
+            <TableHead className={th}>Status</TableHead>
+            <TableHead className={cn(th, "text-center")}>Follow-up</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {tasks.map(task => {
             const link = taskLinksMap[String(task.id)];
             const dCode = link ? getDeptDisplayCode(link.department) : '';
-            const pCode = link ? (link.project_code || (link.task_code ? `${dCode}-${link.task_code}` : `${dCode}-${link.objective_code || ''}`)) : '';
+            const code = linkCode(link);
             return (
-            <TableRow key={task.id} onClick={() => onSelectTask(task)} className="cursor-pointer hover:bg-surface-hover transition-colors">
+            <TableRow
+              key={task.id}
+              data-task-id={task.id}
+              onMouseDown={e => { if (e.shiftKey) e.preventDefault(); }}
+              onClick={e => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey) { e.preventDefault(); selection.toggle(task.id, e.shiftKey); return; }
+                onSelectTask(task);
+              }}
+              className={cn("group cursor-pointer hover:bg-surface-hover transition-colors", selection.has(task.id) && "bg-accent-blue/5")}
+            >
+              <TableCell className="w-9 pr-0" onClick={e => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={selection.has(task.id)}
+                  onClick={e => { e.stopPropagation(); selection.toggle(task.id, e.shiftKey); }}
+                  onChange={() => {}}
+                  aria-label={`Select ${task.title}`}
+                  title="Select (Shift-click to select a range)"
+                  className={cn("accent-blue-600 cursor-pointer w-3.5 h-3.5 transition-opacity", anySelected ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100")}
+                />
+              </TableCell>
               <TableCell className="font-bold text-xs min-w-[200px]">
                 <div>{task.title}</div>
                 {task.description && <div className="text-[10.5px] font-normal text-text-secondary line-clamp-1 mt-0.5">{task.description}</div>}
               </TableCell>
               <TableCell>
-                {pCode ? (
-                  <span className="font-mono text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
-                    {pCode}
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-text-muted">—</span>
-                )}
+                {code ? <CodeChip code={code} /> : <span className="text-[11px] text-text-muted">—</span>}
               </TableCell>
               <TableCell>
                 {link ? (
@@ -3649,14 +3970,16 @@ function TaskTableView({
                   {task.priority}
                 </span>
               </TableCell>
-              <TableCell className="text-[11px] text-text-secondary font-medium">{task.deadline || '—'}</TableCell>
+              <TableCell onClick={e => e.stopPropagation()}>
+                <RowDeadline task={task} label={code} onChanged={onRefresh} />
+              </TableCell>
               <TableCell>
                 <CompletionDateCell task={task} onSaved={onRefresh} />
               </TableCell>
-              <TableCell>
+              <TableCell onClick={e => e.stopPropagation()}>
                 <div className="flex items-center gap-1.5">
-                  <div className={cn("w-1.5 h-1.5 rounded-full", getStatusDot(task.status))} />
-                  <span className="text-[11px] font-bold">{getStatusLabel(task.status)} ({Math.round(task.status === 'completed' || task.status === 'done' ? 100 : (task.progress ?? 0))}%)</span>
+                  <StatusPill status={task.status} onChange={st => onStatusChange(task.id, st)} />
+                  <span className="text-[10.5px] font-bold text-text-secondary">{Math.round(task.status === 'completed' || task.status === 'done' ? 100 : (task.progress ?? 0))}%</span>
                 </div>
               </TableCell>
               <TableCell onClick={e => e.stopPropagation()} className="text-center">
@@ -3675,7 +3998,7 @@ function TaskTableView({
           })}
           {tasks.length === 0 && (
             <TableRow>
-              <TableCell colSpan={10} className="text-center py-12 text-[11px] text-text-muted">No tasks found</TableCell>
+              <TableCell colSpan={11} className="text-center py-12 text-[11px] text-text-muted">No tasks found</TableCell>
             </TableRow>
           )}
         </TableBody>
@@ -3769,7 +4092,11 @@ function TaskDetailDialog({
   allTasks = [],
   onBulkMoveParent,
   onMoveTaskToParent,
+  link,
+  onMoveDeadline,
 }: {
+  link?: TaskLinkInfo | null;
+  onMoveDeadline?: (t: WCTask) => void;
   task: WCTask | null;
   open: boolean;
   onClose: () => void;
@@ -3789,6 +4116,8 @@ function TaskDetailDialog({
 }) {
   const [history, setHistory] = useState<WCHistoryEntry[]>([]);
   const [transfers, setTransfers] = useState<WCTransfer[]>([]);
+  const [timelineKey, setTimelineKey] = useState(0);
+  const taskCode = linkCode(link);
   const [activeTab, setActiveTab] = useState<'details' | 'updates' | 'history' | 'transfers'>(defaultTab || 'details');
   const lastTaskIdRef = useRef<number | null>(null);
   const { userProfile } = useStore();
@@ -4057,6 +4386,7 @@ function TaskDetailDialog({
                 {task.title}
               </DialogTitle>
               <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <CodeChip code={taskCode} />
                 <TaskObjectiveBadge taskId={task.id} />
                 <TaskFeatureChips taskId={task.id} size="md" />
               </div>
@@ -4102,6 +4432,7 @@ function TaskDetailDialog({
                   {task.project_name}
                 </span>
               )}
+              <PanelDeadline task={task} onOpenTimeline={() => setActiveTab('history')} onMove={() => onMoveDeadline?.(task)} />
             </DialogDescription>
             <button
               type="button"
@@ -4153,7 +4484,7 @@ function TaskDetailDialog({
                   )}
                 </>
               )}
-              {tab === 'history' && 'History'}
+              {tab === 'history' && 'Timeline'}
               {tab === 'transfers' && 'Transfers'}
             </button>
           ))}
@@ -4279,12 +4610,13 @@ function TaskDetailDialog({
                 ) : <span className="text-[11px] text-text-muted font-semibold">Unassigned</span>}
               </div>
               <div>
-                <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block mb-1">Target Date (Fixed)</span>
-                <span className="text-[11px] font-semibold">{task.deadline || 'No target date'}</span>
+                <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block mb-1">Deadline</span>
+                <PanelDeadline task={task} onOpenTimeline={() => setActiveTab('history')} onMove={() => onMoveDeadline?.(task)} />
               </div>
               <div>
-                <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block mb-1">Actual Completion Date</span>
+                <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block mb-1">Finished on</span>
                 <CompletionDateCell task={task} onSaved={() => onRefreshTask(task.id)} />
+                <span className="text-[10px] text-text-secondary normal-case block mt-1">The day the work was actually done. It does not move the deadline.</span>
               </div>
               <div>
                 <span className="text-[10px] text-text-secondary font-bold uppercase tracking-wider block mb-1">Reviewer</span>
@@ -4801,7 +5133,28 @@ function TaskDetailDialog({
         )}
 
         {activeTab === 'history' && (
-          <div className="space-y-2">
+          <div className="space-y-5 normal-case">
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-[11px] font-bold uppercase tracking-wider text-text-secondary">Deadline and updates</h4>
+                {task.deadline && onMoveDeadline && (
+                  <button
+                    type="button"
+                    onClick={() => onMoveDeadline(task)}
+                    className="inline-flex items-center gap-1 rounded-lg bg-accent-orange/10 text-accent-orange px-2.5 py-1 text-[11.5px] font-semibold hover:bg-accent-orange/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-orange"
+                  >
+                    <Calendar className="w-3 h-3" />Move deadline
+                  </button>
+                )}
+              </div>
+              <TimelineList entity="task" id={task.id} refreshKey={timelineKey} maxHeight={360} />
+              <div className="pt-3 border-t border-border-subtle">
+                <UpdateComposer entity="task" id={task.id} onPosted={() => setTimelineKey(k => k + 1)} />
+              </div>
+            </section>
+            <details className="group rounded-lg border border-border-subtle/60">
+              <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-text-secondary hover:text-text-primary">Full activity log</summary>
+              <div className="space-y-2 p-2">
             {loading ? (
               <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-accent-blue" /></div>
             ) : history.length === 0 ? (
@@ -4825,6 +5178,8 @@ function TaskDetailDialog({
                 </div>
               </div>
             ))}
+              </div>
+            </details>
           </div>
         )}
 
@@ -5209,11 +5564,12 @@ function CreateEditTaskDialog({
             className="w-full h-9 bg-background-secondary border border-border-subtle rounded-md px-2 text-[11px] text-text-primary outline-none normal-case" />
           {objectiveId && (() => {
             const chosenObj = objectives.find(o => String(o.id) === objectiveId);
-            if (!chosenObj?.next_task_code) return null;
+            const nextCode = chosenObj?.next_full_code || chosenObj?.next_task_code;
+            if (!chosenObj || !nextCode) return null;
             return (
-              <div className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
-                <span className="font-mono px-1.5 py-0.5 rounded bg-indigo-500/10">{chosenObj.next_task_code}</span>
-                <span>Will be numbered {chosenObj.next_task_code} under {chosenObj.department.short_code ? `##${chosenObj.department.short_code}` : chosenObj.department.name}</span>
+              <div className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 normal-case">
+                <span className="font-mono px-1.5 py-0.5 rounded bg-indigo-500/10">{nextCode}</span>
+                <span>Will be numbered {nextCode} under {chosenObj.department.short_code ? `##${chosenObj.department.short_code}` : chosenObj.department.name}</span>
               </div>
             );
           })()}
@@ -5256,17 +5612,17 @@ function CreateEditTaskDialog({
               <Input type="date" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} className="text-[11px]" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-text-secondary uppercase">
-                Target Date {isEdit && Boolean(task?.deadline) ? '(Fixed)' : ''}
-              </label>
+              <label className="text-[10px] font-bold text-text-secondary uppercase">Deadline</label>
               <Input
                 type="date"
                 value={form.deadline}
-                disabled={isEdit && Boolean(task?.deadline)}
-                title={isEdit && Boolean(task?.deadline) ? 'Initial target date cannot be modified' : 'Set initial target date'}
+                title={isEdit && Boolean(task?.deadline) ? 'Changing an existing deadline asks you why, and goes on the timeline' : 'Set the deadline'}
                 onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))}
-                className="text-[11px] disabled:opacity-60 disabled:cursor-not-allowed"
+                className="text-[11px]"
               />
+              {isEdit && Boolean(task?.deadline) && form.deadline && form.deadline !== task!.deadline!.slice(0, 10) && (
+                <p className="text-[10px] normal-case text-accent-orange font-medium">After you save, you will be asked why the date moved.</p>
+              )}
             </div>
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold text-text-secondary uppercase">Est. Hours</label>

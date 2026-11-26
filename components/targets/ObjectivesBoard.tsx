@@ -3,6 +3,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ChevronRight, Plus, Target, ExternalLink, Search, FolderKanban } from 'lucide-react';
+import { useStore } from '@/lib/store';
+import { CodeChip } from '@/components/timeline/CodeChip';
+import { PriorityPicker, canSetPriority } from '@/components/timeline/PriorityChip';
+import { DeadlineBadge } from '@/components/timeline/DeadlineBadge';
+import type { Priority } from '@/services/timeline';
 import { cn } from '@/utils/cn';
 import { departmentTargetsService as api, BoardDepartment, ObjectiveNode, ObjectivesBoard as Board, PersonBrief } from '@/services/departmentTargets';
 import { projectsService } from '@/services/projects';
@@ -10,17 +15,15 @@ import { Project } from '@/types';
 import { ObjectivePanel, TaskPanel } from '@/components/SidePanel';
 import { workcenterService, WCTask } from '@/services/workcenter';
 import { ObjectiveTasks } from '@/components/targets/ObjectiveTasks';
-import { Avatar, PaceBar, HealthChip, quarterPace } from '@/components/targets/ui';
+import { Avatar, PaceBar, HealthChip, quarterPace, deptPrefix, codeOf, p1Accent, sortByPriority, useOptimistic, StatusSelect, OBJECTIVE_STATUS_OPTIONS, scrollAndFlash } from '@/components/targets/ui';
+import { fetchNextCode } from '@/components/targets/TaskObjectiveLink';
 
 const fmt = (iso?: string | null) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
-const STATUS = { not_started: 'To do', in_progress: 'In progress', done: 'Done' } as const;
-const NEXT: Record<string, 'not_started' | 'in_progress' | 'done'> = { not_started: 'in_progress', in_progress: 'done', done: 'not_started' };
-const pillCls = (s: string, overdue: boolean) => overdue ? 'text-accent-red bg-accent-red/10'
-  : s === 'done' ? 'text-accent-green bg-accent-green/10' : s === 'in_progress' ? 'text-accent-blue bg-accent-blue/10' : 'text-text-secondary bg-[var(--bg-primary)]';
 
 /**
- * Task Center → "Objectives" tab. Department → objective (1, 2 …) → its tasks (1.1, 1.2 … the
- * sub-objectives), each with owner, due date and status, plus any Task Center tasks under them.
+ * Task Center → "Objectives" tab. Department → objective (PROD-1) → its targets (PROD-1.1, PROD-1.2 … the
+ * sub-objectives), each with owner, deadline and status, plus any Task Center tasks under them.
+ * The code on each row IS its number; codes are stored and never change when the list is re-sorted.
  * Reads the same data as the Departments page; nothing is copied into the task list.
  */
 // Fiscal quarters (Indian FY): Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar of the next year.
@@ -31,6 +34,7 @@ function quarterDates(fy: number, q: number) {
   return { start, end, startLabel: label(start), range: `${start.toLocaleDateString('en-GB', { month: 'short' })} – ${end.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}` };
 }
 const SHOW_DEPTS_KEY = 'nurofin-objectives-show-departments';
+const PRIORITY_FIRST_KEY = 'nurofin-objectives-priority-first';
 
 export function ObjectivesBoard({ selectedProjectId = '' }: { selectedProjectId?: string } = {}) {
   const [current, setCurrent] = useState<{ fy: number; q: number } | null>(null);
@@ -46,7 +50,18 @@ export function ObjectivesBoard({ selectedProjectId = '' }: { selectedProjectId?
   const [panel, setPanel] = useState<number | null>(null);
   const [showDepts, setShowDepts] = useState(true);
   const [taskPanel, setTaskPanel] = useState<WCTask | null>(null);
+  const { userProfile } = useStore();
+  const canPrio = canSetPriority(userProfile);
+  const [priorityFirst, setPriorityFirst] = useState(false);
+  const [focusId, setFocusId] = useState<number | null>(null);
   useEffect(() => { setProjectFilter(selectedProjectId); }, [selectedProjectId]);
+  useEffect(() => { try { setPriorityFirst(localStorage.getItem(PRIORITY_FIRST_KEY) === 'on'); } catch { /* storage blocked */ } }, []);
+  const togglePriorityFirst = () => { const v = !priorityFirst; setPriorityFirst(v); try { localStorage.setItem(PRIORITY_FIRST_KEY, v ? 'on' : 'off'); } catch { /* storage blocked */ } };
+  // ?objective=ID (from a code link): open and highlight that objective
+  useEffect(() => {
+    const n = Number(new URLSearchParams(window.location.search).get('objective'));
+    if (n) setFocusId(n);
+  }, []);
   useEffect(() => { projectsService.getProjects().then(setProjects).catch(() => {}); }, []);
   useEffect(() => { try { setShowDepts(localStorage.getItem(SHOW_DEPTS_KEY) !== 'off'); } catch { /* storage blocked */ } }, []);
   const toggleDepts = () => { const v = !showDepts; setShowDepts(v); try { localStorage.setItem(SHOW_DEPTS_KEY, v ? 'on' : 'off'); } catch { /* storage blocked */ } };
@@ -83,9 +98,24 @@ export function ObjectivesBoard({ selectedProjectId = '' }: { selectedProjectId?
       (!term || deptCodeMatch !== '' || n.title.toLowerCase().includes(term) || n.children.some(c => c.title.toLowerCase().includes(term)) || n.tasks.some(t => t.title.toLowerCase().includes(term) || (t.description || '').toLowerCase().includes(term)));
     return showing.departments
       .filter(d => (dept === 'all' || d.id === dept) && (!deptCodeMatch || (d.short_code || '').toLowerCase().includes(deptCodeMatch) || d.name.toLowerCase().includes(deptCodeMatch)))
-      .map(d => ({ ...d, numbers: Object.fromEntries(d.objectives_tree.map((o, i) => [o.id, i + 1])), objectives_tree: d.objectives_tree.filter(keep) }))
+      // `numbers` is only the fallback for a backend that does not send full_code yet
+      .map(d => {
+        const kept = d.objectives_tree.filter(keep);
+        const tree = priorityFirst ? sortByPriority(kept).map(o => ({ ...o, children: sortByPriority(o.children) })) : kept;
+        return { ...d, numbers: Object.fromEntries(d.objectives_tree.map((o, i) => [o.id, i + 1])), objectives_tree: tree };
+      })
       .filter(d => d.objectives_tree.length || (!mine && !term && !activeProjId) || deptCodeMatch !== '');
-  }, [showing, dept, mine, search, activeProjId]);
+  }, [showing, dept, mine, search, activeProjId, priorityFirst]);
+
+  // scroll to and flash the linked objective once the board has it on screen
+  const flashed = React.useRef<number | null>(null);
+  useEffect(() => {
+    if (!focusId || !depts.length || flashed.current === focusId) return;
+    const present = depts.some(d => d.objectives_tree.some(o => o.id === focusId || o.children.some(c => c.id === focusId)));
+    if (!present) return;
+    flashed.current = focusId;
+    return scrollAndFlash(`objective-${focusId}`);
+  }, [focusId, depts]);
 
   if (!quarter) {
     return failed
@@ -121,6 +151,8 @@ export function ObjectivesBoard({ selectedProjectId = '' }: { selectedProjectId?
       quarterInfo={showing.quarter}
       open={setPanel}
       onOpenTask={taskId => workcenterService.getTask(taskId).then(setTaskPanel).catch(() => {})}
+      canPrio={canPrio}
+      focusId={focusId}
       reload={load}
       defaultOpen={depts.length <= 3 || mine || !!search || !!activeProjId}
     />
@@ -153,6 +185,12 @@ export function ObjectivesBoard({ selectedProjectId = '' }: { selectedProjectId?
           </select>
         )}
         {showDepts && (
+          <button onClick={togglePriorityFirst} aria-pressed={priorityFirst} title="Show P1 first, then P2, P3. The codes do not change."
+            className={cn('px-3 py-2 text-[12px] font-semibold rounded-xl border', priorityFirst ? 'border-accent-red/50 bg-accent-red/10 text-accent-red' : 'border-border-subtle bg-background-secondary text-text-secondary')}>
+            Priority first
+          </button>
+        )}
+        {showDepts && (
           <button onClick={() => setMine(!mine)} className={cn('px-3 py-2 text-[12px] font-semibold rounded-xl border', mine ? 'border-accent-blue bg-accent-blue/10 text-accent-blue' : 'border-border-subtle bg-background-secondary text-text-secondary')}>
             Only mine
           </button>
@@ -166,7 +204,7 @@ export function ObjectivesBoard({ selectedProjectId = '' }: { selectedProjectId?
       {showDepts && (
         <>
           <div className="text-[12.5px] text-text-secondary">
-            Q{quarter.q} FY {quarter.fy}-{String(quarter.fy + 1).slice(-2)} · {qd.range}. Objectives come from each department page; the numbered tasks under them (1.1, 1.2 …) are the department’s plan for that objective.
+            Q{quarter.q} FY {quarter.fy}-{String(quarter.fy + 1).slice(-2)} · {qd.range}. Objectives come from each department page; every row has its own code (like PROD-1.2) that never changes. Type a code in the quick bar to jump to it.
           </div>
           {body}
         </>
@@ -258,10 +296,13 @@ function OtherTasks({ me, search, objectives, onOpen, onLinked }: { me?: number;
   }, [me]);
   useEffect(load, [load]);
 
-  const options = objectives.flatMap(d => d.objectives_tree.flatMap((o, i) => [
-    { id: o.id, label: `${o.code || i + 1}. ${o.title}`, dept: d.short_code ? `##${d.short_code} · ${d.name}` : d.name },
-    ...o.children.map((c, j) => ({ id: c.id, label: `${c.code || `${i + 1}.${j + 1}`} ${c.title}`, dept: d.short_code ? `##${d.short_code} · ${d.name}` : d.name })),
-  ]));
+  const options = objectives.flatMap(d => {
+    const pre = deptPrefix(d), dept = d.short_code ? `##${d.short_code} · ${d.name}` : d.name;
+    return d.objectives_tree.flatMap((o, i) => [
+      { id: o.id, label: `${codeOf(o, pre, String(i + 1))} ${o.title}`, dept },
+      ...o.children.map((c, j) => ({ id: c.id, label: `${codeOf(c, pre, `${i + 1}.${j + 1}`)} ${c.title}`, dept })),
+    ]);
+  });
   const byDept = options.reduce<Record<string, typeof options>>((m, o) => ((m[o.dept] = m[o.dept] || []).push(o), m), {});
 
   const link = async (taskId: number, objectiveId: string) => {
@@ -361,23 +402,16 @@ function PercentProgressControl({
   };
 
   return (
-    <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-      <select
-        aria-label="Update progress preset"
-        value={Math.round(value / 5) * 5}
-        onChange={e => apply(Number(e.target.value))}
-        className="text-[11px] font-semibold rounded-md border border-border-subtle bg-background-primary px-1.5 py-0.5 text-text-primary cursor-pointer"
-      >
-        {Array.from({ length: 21 }, (_, i) => i * 5).map(v => (
-          <option key={v} value={v}>{v === 100 ? '100% Done' : `${v}%`}</option>
-        ))}
-      </select>
+    // One field: reads like "40%", becomes editable on click. Enter or leaving the field saves.
+    <label className="inline-flex items-center shrink-0 rounded-md border border-transparent hover:border-border-subtle focus-within:border-accent-blue px-1 py-0.5 cursor-text"
+      title="Click to change progress" onClick={e => e.stopPropagation()}>
       <input
         type="number"
         min={0}
         max={100}
         value={draft}
         onChange={e => setDraft(e.target.value)}
+        onFocus={e => e.target.select()}
         onBlur={() => {
           const n = Number(draft);
           if (!Number.isNaN(n) && n !== Math.round(value)) apply(n);
@@ -385,15 +419,17 @@ function PercentProgressControl({
         onKeyDown={e => {
           if (e.key === 'Enter') {
             e.preventDefault();
-            const n = Number(draft);
-            if (!Number.isNaN(n)) apply(n);
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === 'Escape') {
+            setDraft(String(Math.round(value)));
+            (e.target as HTMLInputElement).blur();
           }
         }}
-        aria-label="Custom progress %"
-        className="w-11 text-[11px] text-right rounded-md border border-border-subtle bg-background-primary px-1 py-0.5 text-text-primary"
+        aria-label="Progress %"
+        className="w-8 text-[11.5px] font-bold text-right bg-transparent outline-none text-text-primary [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
-      <span className="text-[10.5px] text-text-secondary">%</span>
-    </div>
+      <span className="text-[11.5px] font-bold text-text-primary">%</span>
+    </label>
   );
 }
 
@@ -464,13 +500,16 @@ function ProjectBadgeEditor({
   );
 }
 
-function DeptSection({ d, me, onlyMine, activeProjId, projects, quarterInfo, open, onOpenTask, reload, defaultOpen }: { d: BoardDepartment & { numbers: Record<number, number> }; me: number; onlyMine: boolean; activeProjId: number | null; projects: Project[]; quarterInfo: Board['quarter']; open: (id: number) => void; onOpenTask: (taskId: number) => void; reload: () => void; defaultOpen: boolean }) {
+type BoardDept = BoardDepartment & { numbers: Record<number, number> };
+const hasObjective = (d: BoardDepartment, id: number | null) => !!id && d.objectives_tree.some(o => o.id === id || o.children.some(c => c.id === id));
+
+function DeptSection({ d, me, onlyMine, activeProjId, projects, quarterInfo, open, onOpenTask, canPrio, focusId, reload, defaultOpen }: { d: BoardDept; me: number; onlyMine: boolean; activeProjId: number | null; projects: Project[]; quarterInfo: Board['quarter']; open: (id: number) => void; onOpenTask: (taskId: number) => void; canPrio: boolean; focusId: number | null; reload: () => void; defaultOpen: boolean }) {
   const [expanded, setExpanded] = useState(defaultOpen);
   const [addingObj, setAddingObj] = useState(false);
-  useEffect(() => setExpanded(defaultOpen), [defaultOpen]);
+  const holdsFocus = hasObjective(d, focusId);
+  useEffect(() => setExpanded(defaultOpen || holdsFocus), [defaultOpen, holdsFocus]);
   const people = [d.hod, ...d.members].filter((p, i, a): p is PersonBrief => !!p && a.findIndex(x => x?.id === p.id) === i);
   const pace = quarterInfo.status === 'current' ? quarterPace(quarterInfo) : undefined;
-  const nextObjNum = d.objectives_tree.length + 1;
   return (
     <section className="bg-background-secondary border border-border-subtle rounded-2xl overflow-hidden">
       <button onClick={() => setExpanded(!expanded)} aria-expanded={expanded} className="w-full text-left flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-surface-hover">
@@ -492,15 +531,15 @@ function DeptSection({ d, me, onlyMine, activeProjId, projects, quarterInfo, ope
       </button>
       {expanded && (
         <div className="border-t border-border-subtle">
-          {d.objectives_tree.map((o, i) => <ObjectiveBlock key={o.id} o={o} n={d.numbers[o.id] ?? i + 1} d={d} me={me} onlyMine={onlyMine} activeProjId={activeProjId} projects={projects} people={people} open={open} onOpenTask={onOpenTask} reload={reload} quarterInfo={quarterInfo} />)}
+          {d.objectives_tree.map((o, i) => <ObjectiveBlock key={o.id} o={o} n={d.numbers[o.id] ?? i + 1} d={d} me={me} onlyMine={onlyMine} activeProjId={activeProjId} projects={projects} people={people} open={open} onOpenTask={onOpenTask} canPrio={canPrio} focusId={focusId} reload={reload} quarterInfo={quarterInfo} />)}
           {!d.objectives_tree.length && <div className="px-4 py-4 text-[13px] text-text-secondary">No objectives for {quarterInfo.short} yet.</div>}
           {d.can_plan && quarterInfo.status !== 'past' && (
             addingObj ? (
-              <AddRow nextNum={String(nextObjNum)} d={d} people={people} projects={projects} quarterInfo={quarterInfo} done={() => { setAddingObj(false); reload(); }} />
+              <AddRow d={d} people={people} projects={projects} quarterInfo={quarterInfo} done={() => { setAddingObj(false); reload(); }} />
             ) : (
               <div className="px-4 py-2.5 border-t border-border-subtle">
                 <button onClick={() => setAddingObj(true)} className="text-[12.5px] font-semibold text-accent-blue inline-flex items-center gap-1 cursor-pointer">
-                  <Plus size={13} /> Add objective {nextObjNum}
+                  <Plus size={13} /> Add objective
                 </button>
               </div>
             )
@@ -511,42 +550,50 @@ function DeptSection({ d, me, onlyMine, activeProjId, projects, quarterInfo, ope
   );
 }
 
-function ObjectiveBlock({ o, n, d, me, onlyMine, activeProjId, projects, people, open, onOpenTask, reload, quarterInfo }: { o: ObjectiveNode; n: number; d: BoardDepartment & { numbers: Record<number, number> }; me: number; onlyMine: boolean; activeProjId: number | null; projects: Project[]; people: PersonBrief[]; open: (id: number) => void; onOpenTask: (taskId: number) => void; reload: () => void; quarterInfo: Board['quarter'] }) {
+function ObjectiveBlock({ o, n, d, me, onlyMine, activeProjId, projects, people, open, onOpenTask, canPrio, focusId, reload, quarterInfo }: { o: ObjectiveNode; n: number; d: BoardDept; me: number; onlyMine: boolean; activeProjId: number | null; projects: Project[]; people: PersonBrief[]; open: (id: number) => void; onOpenTask: (taskId: number) => void; canPrio: boolean; focusId: number | null; reload: () => void; quarterInfo: Board['quarter'] }) {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
-  const objCode = o.code || String(n);
-  const nextSubCode = `${objCode}.${o.children.length + 1}`;
+  const [prio, setPrio] = useOptimistic<Priority | null>(o.priority ?? null);
+  const prefix = deptPrefix(d);
+  const objCode = codeOf(o, prefix, String(n));
   const canUpdateObjPct = !o.children.length && (o.can_update_progress ?? (d.can_plan || o.owner?.id === me || o.tasks.some(t => t.assignee?.id === me)));
+  const canStatus = d.can_plan || canUpdateObjPct;
   const canEditProj = d.can_plan || o.owner?.id === me;
+  const canMoveDate = d.can_plan || o.owner?.id === me;
   return (
-    <div className="border-t border-border-subtle first:border-t-0">
-      <div className="flex flex-wrap items-center gap-3 px-4 py-3 bg-[var(--bg-primary)]/40">
-        <span className="w-7 h-7 rounded-lg bg-accent-blue/10 text-accent-blue font-extrabold text-[14px] flex items-center justify-center shrink-0">{objCode}</span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <button onClick={() => open(o.id)} className="text-left flex items-center gap-1.5 text-[14px] font-bold text-text-primary hover:text-accent-blue">
+    <div id={`objective-${o.id}`} className="border-t border-border-subtle first:border-t-0 rounded-sm scroll-mt-24">
+      <div className={cn('flex flex-wrap items-center gap-3 px-4 py-3 bg-[var(--bg-primary)]/40', p1Accent(prio))}>
+        <CodeChip code={objCode} />
+        <div className="flex-1 min-w-[200px]">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <button onClick={() => open(o.id)} title={o.title} className="text-left flex items-center gap-1.5 text-[14px] font-bold text-text-primary hover:text-accent-blue min-w-0 max-w-full">
               <Target size={13} className="text-accent-blue shrink-0" /><span className="truncate">{o.title}</span>
             </button>
+            <PriorityPicker objectiveId={o.id} value={prio} canEdit={canPrio} onChanged={p => { setPrio(p); reload(); }} />
             <ProjectBadgeEditor item={o} canEdit={canEditProj} projects={projects} onSaved={reload} onError={setError} />
           </div>
-          <span className="block text-[12px] text-text-secondary">
-            {o.owner?.name || 'Unassigned'}
-            {o.deadline ? <> · <span className={cn(o.overdue && 'text-accent-red font-semibold')}>due {fmt(o.deadline)}</span></> : null}
-            {' · '}{o.children.length} {o.children.length === 1 ? 'target' : 'targets'}
+          <span className="flex flex-wrap items-center gap-x-1.5 text-[12px] text-text-secondary">
+            <span>{o.owner?.name || 'Unassigned'}</span>
+            <span>·</span>
+            <DeadlineBadge entity="objective" id={o.id} deadline={o.deadline} originalDeadline={o.original_deadline} changes={o.deadline_changes}
+              done={o.status === 'done'} canEdit={canMoveDate} title={`${objCode} ${o.title}`} onChanged={reload} className="-mx-1" />
+            <span>· {o.children.length} {o.children.length === 1 ? 'target' : 'targets'}</span>
             {error && <span className="ml-2 text-accent-red">{error}</span>}
           </span>
         </div>
         {o.health && <HealthChip h={o.health} />}
-        <span className="flex items-center gap-2 w-36"><PaceBar value={o.progress} h={o.health} className="flex-1" /><b className="text-[12px] w-9 text-right">{Math.round(o.progress)}%</b></span>
+        {canStatus && <StatusSelect value={o.status} options={OBJECTIVE_STATUS_OPTIONS} canEdit label={`Status of ${objCode}`}
+          onSave={async v => { await api.updateObjective(o.id, { status: v as ObjectiveNode['status'] }); reload(); }} onError={setError} />}
+        <span className="flex items-center gap-2 w-36"><PaceBar value={o.progress} h={o.health} className="flex-1" />{!canUpdateObjPct && <b className="text-[12px] w-9 text-right">{Math.round(o.progress)}%</b>}</span>
         {canUpdateObjPct && <PercentProgressControl objectiveId={o.id} value={o.progress} onSaved={reload} onError={setError} />}
       </div>
 
-      {/* numbers stay as on the department page even when "Only mine" or project filter hides unrelated rows */}
+      {/* codes are stored; they stay the same even when "Only mine", a project filter or Priority first changes the order */}
       {o.children.map((c, j) => {
         const matchesMine = !onlyMine || c.owner?.id === me || c.tasks.some(t => t.assignee?.id === me);
         const matchesProj = !activeProjId || c.project_id === activeProjId || c.tasks.some(t => t.project_id === activeProjId);
         return matchesMine && matchesProj
-          ? <TaskRow key={c.id} c={c} num={c.code || `${objCode}.${j + 1}`} d={d} me={me} defaultExpanded={!!activeProjId} projects={projects} people={people} open={open} onOpenTask={onOpenTask} reload={reload} />
+          ? <TaskRow key={c.id} c={c} code={codeOf(c, prefix, `${n}.${j + 1}`)} d={d} me={me} defaultExpanded={!!activeProjId} focusId={focusId} projects={projects} people={people} open={open} onOpenTask={onOpenTask} canPrio={canPrio} reload={reload} />
           : null;
       })}
 
@@ -562,68 +609,75 @@ function ObjectiveBlock({ o, n, d, me, onlyMine, activeProjId, projects, people,
           projectId={o.project_id}
           defaultExpanded={!!activeProjId}
           onOpenTask={onOpenTask}
+          canPlan={d.can_plan}
           compact
         />
       </div>
 
       {d.can_plan && quarterInfo.status !== 'past' && (
-        adding ? <AddRow objective={o} nextNum={nextSubCode} d={d} people={people} projects={projects} quarterInfo={quarterInfo} done={() => { setAdding(false); reload(); }} />
-          : <div className="pl-14 pr-4 py-2 border-t border-border-subtle"><button onClick={() => setAdding(true)} className="text-[12.5px] font-semibold text-accent-blue inline-flex items-center gap-1 cursor-pointer"><Plus size={13} /> Add target {nextSubCode}</button></div>
+        adding ? <AddRow objective={o} d={d} people={people} projects={projects} quarterInfo={quarterInfo} done={() => { setAdding(false); reload(); }} />
+          : <div className="pl-14 pr-4 py-2 border-t border-border-subtle"><button onClick={() => setAdding(true)} className="text-[12.5px] font-semibold text-accent-blue inline-flex items-center gap-1 cursor-pointer"><Plus size={13} /> Add target</button></div>
       )}
     </div>
   );
 }
 
-function TaskRow({ c, num, d, me, defaultExpanded, projects, people, open, onOpenTask, reload }: { c: ObjectiveNode; num: string; d: BoardDepartment; me: number; defaultExpanded?: boolean; projects: Project[]; people: PersonBrief[]; open: (id: number) => void; onOpenTask: (taskId: number) => void; reload: () => void }) {
+function TaskRow({ c, code, d, me, defaultExpanded, focusId, projects, people, open, onOpenTask, canPrio, reload }: { c: ObjectiveNode; code: string; d: BoardDept; me: number; defaultExpanded?: boolean; focusId: number | null; projects: Project[]; people: PersonBrief[]; open: (id: number) => void; onOpenTask: (taskId: number) => void; canPrio: boolean; reload: () => void }) {
   const [showTasks, setShowTasks] = useState(c.tasks.length > 0 || !!defaultExpanded);
   const [error, setError] = useState('');
+  const [prio, setPrio] = useOptimistic<Priority | null>(c.priority ?? null);
+  useEffect(() => { if (focusId === c.id) setShowTasks(true); }, [focusId, c.id]);
   const canUpdatePct = !c.children.length && (c.can_update_progress ?? (d.can_plan || c.owner?.id === me || c.tasks.some(t => t.assignee?.id === me)));
+  const canStatus = d.can_plan || canUpdatePct;
   const canEditProj = d.can_plan || c.owner?.id === me;
-  const cycle = async () => {
-    setError('');
-    try { await api.updateObjective(c.id, { status: NEXT[c.status] || 'in_progress' }); reload(); } catch (e: any) { setError(e.message); }
-  };
+  const canMoveDate = d.can_plan || c.owner?.id === me;
   return (
-    <div className="border-t border-border-subtle">
-      <div className="flex flex-wrap items-center gap-3 pl-6 pr-4 py-2.5 text-[13px] hover:bg-surface-hover">
-        <span className="font-mono text-[12px] font-bold text-accent-blue w-10 text-right shrink-0">{num}</span>
-        <div className="flex-1 min-w-[160px]">
-          <div className="flex items-center gap-2 flex-wrap">
-            <button onClick={() => open(c.id)} className="text-left">
-              <span className={cn('font-medium text-text-primary hover:text-accent-blue', c.status === 'done' && 'line-through text-text-secondary')}>{c.title}</span>
+    <div id={`objective-${c.id}`} className="border-t border-border-subtle scroll-mt-24 rounded-sm">
+      <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-6 pr-4 py-2.5 text-[13px] hover:bg-surface-hover', p1Accent(prio))}>
+        <CodeChip code={code} />
+        <div className="flex-1 min-w-[180px]">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <button onClick={() => open(c.id)} title={c.title} className="text-left min-w-0 max-w-full">
+              <span className={cn('font-medium text-text-primary hover:text-accent-blue line-clamp-2 break-words', c.status === 'done' && 'line-through text-text-secondary')}>{c.title}</span>
             </button>
+            <PriorityPicker objectiveId={c.id} value={prio} canEdit={canPrio} onChanged={p => { setPrio(p); reload(); }} />
             <ProjectBadgeEditor item={c} canEdit={canEditProj} projects={projects} onSaved={reload} onError={setError} />
           </div>
           {(c.tasks.length > 0 || error) && <span className="block text-[11.5px] text-text-secondary">{error ? <span className="text-accent-red">{error}</span> : `${c.tasks.filter(t => t.done).length}/${c.tasks.length} Task Center tasks done`}</span>}
         </div>
-        <span className="flex items-center gap-1.5 w-36 text-[12px] text-text-secondary truncate"><Avatar p={c.owner} size={20} />{c.owner?.name || 'Unassigned'}</span>
-        <span className={cn('w-16 text-[12px] text-right', c.overdue ? 'text-accent-red font-semibold' : 'text-text-secondary')}>{fmt(c.deadline)}</span>
-        <span className="text-[11.5px] font-bold w-9 text-right text-text-primary">{Math.round(c.progress)}%</span>
-        {canUpdatePct ? (
-          <PercentProgressControl objectiveId={c.id} value={c.progress} onSaved={reload} onError={setError} />
-        ) : (
-          <button type="button" onClick={d.can_plan ? cycle : undefined} className={cn('text-[11.5px] font-semibold rounded-full px-2.5 py-0.5 w-24 text-center', pillCls(c.status, c.overdue))}>
-            {c.overdue && c.status !== 'done' ? 'Overdue' : STATUS[c.status as keyof typeof STATUS] || 'To do'}
-          </button>
-        )}
+        <span className="flex items-center gap-1.5 w-36 min-w-0 text-[12px] text-text-secondary"><Avatar p={c.owner} size={20} /><span className="truncate" title={c.owner?.name || 'Unassigned'}>{c.owner?.name || 'Unassigned'}</span></span>
+        <DeadlineBadge entity="objective" id={c.id} deadline={c.deadline} originalDeadline={c.original_deadline} changes={c.deadline_changes}
+          done={c.status === 'done'} canEdit={canMoveDate} title={`${code} ${c.title}`} onChanged={reload} />
+        {!canUpdatePct && <span className="text-[11.5px] font-bold w-9 text-right text-text-primary">{Math.round(c.progress)}%</span>}
+        <StatusSelect value={c.status} options={OBJECTIVE_STATUS_OPTIONS} canEdit={canStatus} label={`Status of ${code}`}
+          onSave={async v => { await api.updateObjective(c.id, { status: v as ObjectiveNode['status'] }); reload(); }} onError={setError} />
+        {canUpdatePct && <PercentProgressControl objectiveId={c.id} value={c.progress} onSaved={reload} onError={setError} />}
         <button onClick={() => setShowTasks(!showTasks)} aria-expanded={showTasks} className="text-[12px] font-semibold text-accent-blue w-20 text-right cursor-pointer">{showTasks ? 'Hide' : c.tasks.length ? `${c.tasks.length} ${c.tasks.length === 1 ? 'task' : 'tasks'}` : '+ Task'}</button>
       </div>
       {showTasks && (
         <div className="pl-[80px] pr-4 pb-2">
-          <ObjectiveTasks objectiveId={c.id} tasks={c.tasks} people={people} onChanged={reload} parentCode={num} startIndex={1} projectId={c.project_id} defaultExpanded={!!defaultExpanded} onOpenTask={onOpenTask} />
+          <ObjectiveTasks objectiveId={c.id} tasks={c.tasks} people={people} onChanged={reload} parentCode={code} startIndex={1} projectId={c.project_id} defaultExpanded={!!defaultExpanded} onOpenTask={onOpenTask} canPlan={d.can_plan} />
         </div>
       )}
     </div>
   );
 }
 
-function AddRow({ objective, nextNum, d, people, projects, quarterInfo, done }: { objective?: ObjectiveNode; nextNum?: string; d: BoardDepartment; people: PersonBrief[]; projects: Project[]; quarterInfo: Board['quarter']; done: () => void }) {
+function AddRow({ objective, d, people, projects, quarterInfo, done }: { objective?: ObjectiveNode; d: BoardDepartment; people: PersonBrief[]; projects: Project[]; quarterInfo: Board['quarter']; done: () => void }) {
   const [title, setTitle] = useState('');
   const [owner, setOwner] = useState<number | ''>('');
   const [projectId, setProjectId] = useState<number | ''>(objective?.project_id ?? '');
   const [deadline, setDeadline] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // the code a new target will get comes from the API; a new top-level objective just gets the next free number
+  const [nextCode, setNextCode] = useState<string | null>(null);
+  useEffect(() => {
+    if (!objective) return;
+    let alive = true;
+    fetchNextCode(objective.id).then(c => alive && setNextCode(c));
+    return () => { alive = false; };
+  }, [objective]);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return setError(objective ? 'Name the target.' : 'Name the objective.');
@@ -646,15 +700,11 @@ function AddRow({ objective, nextNum, d, people, projects, quarterInfo, done }: 
   return (
     <form onSubmit={submit} className={cn('pr-4 py-2.5 border-t border-border-subtle flex flex-col gap-1.5', objective ? 'pl-14' : 'pl-4')}>
       <div className="grid grid-cols-1 md:grid-cols-[1fr_150px_150px_140px_auto] gap-1.5">
-        <div className="flex items-center gap-1.5">
-          {nextNum && (
-            <span className="font-mono text-[11.5px] font-bold px-2 py-1 rounded bg-accent-blue/10 text-accent-blue shrink-0">
-              {nextNum}
-            </span>
-          )}
+        <div className="flex items-center gap-1.5 min-w-0">
+          {nextCode && <CodeChip code={nextCode} title="The code this target will get" />}
           <input autoFocus value={title} onChange={e => setTitle(e.target.value)} maxLength={300}
-            placeholder={objective ? `Target ${nextNum || ''} for “${objective.title}”` : `Objective ${nextNum || ''} for ${d.name}`}
-            aria-label={objective ? 'Target' : 'Objective'} className={cn(field, 'flex-1')} />
+            placeholder={objective ? `New target for “${objective.title}”` : `New objective for ${d.name}`}
+            aria-label={objective ? 'Target' : 'Objective'} className={cn(field, 'flex-1 min-w-0')} />
         </div>
         <select value={owner} onChange={e => setOwner(e.target.value ? Number(e.target.value) : '')} aria-label="Owner" className={field}>
           <option value="">Unassigned</option>

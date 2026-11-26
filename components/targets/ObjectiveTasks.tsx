@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   CheckSquare, Plus, ExternalLink, Link2, X, Search, Loader2, Check,
@@ -11,16 +11,13 @@ import { cn } from '@/utils/cn';
 import { formatISTDateTime, accurateTimeAgo } from '@/utils/date';
 import { departmentTargetsService as api, LinkedTask, LinkedTaskFollowup, PersonBrief } from '@/services/departmentTargets';
 import { workcenterService, WCTask } from '@/services/workcenter';
+import { useStore } from '@/lib/store';
+import { CodeChip } from '@/components/timeline/CodeChip';
+import { DeadlineBadge } from '@/components/timeline/DeadlineBadge';
+import { StatusSelect, TASK_STATUS_OPTIONS } from '@/components/targets/ui';
+import { fetchNextCode } from '@/components/targets/TaskObjectiveLink';
 
-const fmt = (iso?: string | null) => iso ? new Date(iso.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
-const STATUS: Record<string, [string, string]> = {
-  completed: ['Done', 'text-accent-green bg-accent-green/10'],
-  done: ['Done', 'text-accent-green bg-accent-green/10'],
-  in_progress: ['In progress', 'text-accent-blue bg-accent-blue/10'],
-  review: ['In review', 'text-accent-orange bg-accent-orange/10'],
-  blocked: ['Blocked', 'text-accent-orange bg-accent-orange/10'],
-  todo: ['To do', 'text-text-secondary bg-[var(--bg-primary)]'],
-};
+const taskStatusValue = (s: string) => (s === 'done' ? 'completed' : s || 'todo');
 
 function stripLeadingCode(title: string, code?: string) {
   if (!title) return '';
@@ -42,10 +39,10 @@ function collectTaskIds(t: LinkedTask): Set<number> {
 
 /**
  * Task Center tasks under one objective or sub-objective:
- * - Hierarchical numbering (1.1.1, 1.1.2, and subtasks 1.1.1.1 ...)
+ * - Every row shows its full code (PROD-1.2.3, and subtasks PROD-1.2.3.1) as a chip
  * - Shows description, follow-ups (expandable + post/toggle inline), and nested subtasks
  * - Drag-and-drop OR select existing tasks to nest as subtasks under any task
- * - "+ New Task" (with default next code + description) and "Link Existing Task"
+ * - "+ New Task" (the next code comes from the API) and "Link Existing Task"
  */
 export function ObjectiveTasks({
   objectiveId,
@@ -59,6 +56,7 @@ export function ObjectiveTasks({
   projectId,
   defaultExpanded = false,
   onOpenTask,
+  canPlan,
 }: {
   objectiveId: number;
   tasks: LinkedTask[];
@@ -71,8 +69,11 @@ export function ObjectiveTasks({
   projectId?: number | null;
   defaultExpanded?: boolean;
   onOpenTask?: (taskId: number) => void;
+  /** HOD / Director of the department. Lets them move any task's deadline here; the server still checks. */
+  canPlan?: boolean;
 }) {
   const [adding, setAdding] = useState(false);
+  const [nextCode, setNextCode] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -91,7 +92,19 @@ export function ObjectiveTasks({
   const [unlinkingTaskId, setUnlinkingTaskId] = useState<number | null>(null);
   const [containerDragOver, setContainerDragOver] = useState(false);
 
-  const nextTaskCode = parentCode ? `${parentCode}.${startIndex + tasks.length}` : `${startIndex + tasks.length}`;
+  // the full code of the objective, so rows can fall back to PREFIX-1.2.3 if the API is older
+  const prefix = parentCode?.includes('-') ? parentCode.split('-')[0] : '';
+  const childCode = (t: LinkedTask, idx: number) =>
+    t.full_code || (t.code ? (prefix ? `${prefix}-${t.code}` : t.code) : parentCode ? `${parentCode}.${startIndex + idx}` : `${startIndex + idx}`);
+
+  // The next free code is only shown while the form is open, and it comes from the API (numbers are never reused).
+  useEffect(() => {
+    if (!adding) return;
+    let alive = true;
+    setNextCode(null);
+    fetchNextCode(objectiveId).then(c => alive && setNextCode(c));
+    return () => { alive = false; };
+  }, [adding, objectiveId]);
 
   const fetchAvailable = async () => {
     setLoadingAvailable(true);
@@ -249,7 +262,7 @@ export function ObjectiveTasks({
         <TaskRowNode
           key={t.id}
           task={t}
-          code={t.code || (parentCode ? `${parentCode}.${startIndex + idx}` : `${startIndex + idx}`)}
+          code={childCode(t, idx)}
           depth={0}
           objectiveId={objectiveId}
           people={people}
@@ -260,6 +273,7 @@ export function ObjectiveTasks({
           unlinkingTaskId={unlinkingTaskId}
           onOpenTask={onOpenTask}
           onError={setError}
+          canPlan={canPlan}
         />
       ))}
 
@@ -271,7 +285,7 @@ export function ObjectiveTasks({
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11.5px] font-bold text-text-primary flex items-center gap-1.5">
               <Link2 size={13} className="text-accent-blue" />
-              Connect Existing Tasks ({parentCode ? `becomes ${nextTaskCode}…` : 'to objective'})
+              Connect existing tasks to this objective
             </span>
             <button
               type="button"
@@ -383,17 +397,13 @@ export function ObjectiveTasks({
       {adding ? (
         <form onSubmit={add} className="flex flex-col gap-2 py-2 px-2 my-1 rounded-xl border border-border-subtle bg-background-secondary/70 animate-in fade-in duration-150">
           <div className="flex items-center gap-2">
-            {parentCode && (
-              <span className="font-mono text-[11.5px] font-bold px-2 py-1 rounded-md bg-accent-blue/15 text-accent-blue shrink-0" title="Auto-assigned task number">
-                {nextTaskCode}
-              </span>
-            )}
+            {nextCode && <CodeChip code={nextCode} title="The code this task will get" />}
             <input
               autoFocus
               value={title}
               onChange={e => setTitle(e.target.value)}
               maxLength={300}
-              placeholder={`Task ${nextTaskCode}, e.g. Call 30 NBFCs`}
+              placeholder="New task, e.g. Call 30 NBFCs"
               aria-label="Task title"
               className="flex-1 rounded-md border border-border-subtle bg-background-primary px-2.5 py-1.5 text-[12.5px] text-text-primary outline-none focus:border-accent-blue"
             />
@@ -417,10 +427,10 @@ export function ObjectiveTasks({
           </div>
           <div className="flex items-center gap-2">
             <button type="submit" disabled={busy} className="px-2.5 py-1 rounded-md bg-accent-blue text-white text-[12px] font-semibold disabled:opacity-60 cursor-pointer">
-              {busy ? 'Creating…' : `Create task ${nextTaskCode}`}
+              {busy ? 'Creating…' : 'Create task'}
             </button>
             <button type="button" onClick={() => { setAdding(false); setError(''); }} className="px-2 py-1 text-[12px] text-text-secondary cursor-pointer">Cancel</button>
-            <span className="text-[11px] text-text-secondary">Goes into the Task Center, linked as {nextTaskCode}.</span>
+            <span className="text-[11px] text-text-secondary">Goes into the Task Center{nextCode ? <>, linked as <b className="font-mono">{nextCode}</b></> : ' and is linked here'}.</span>
           </div>
         </form>
       ) : !linking ? (
@@ -430,14 +440,14 @@ export function ObjectiveTasks({
             onClick={() => { setAdding(true); setLinking(false); setError(''); }}
             className="text-[12px] font-semibold text-accent-blue inline-flex items-center gap-1 hover:underline cursor-pointer"
           >
-            <Plus size={12} /> New Task {parentCode ? nextTaskCode : ''}
+            <Plus size={12} /> New task
           </button>
           <button
             type="button"
             onClick={openLinker}
             className="text-[12px] font-semibold text-accent-blue inline-flex items-center gap-1 hover:underline cursor-pointer"
           >
-            <Link2 size={12} /> Link Existing Task
+            <Link2 size={12} /> Link existing task
           </button>
           {tasks.length > 0 && (
             <Link href="/workcenter" className="text-[11.5px] text-text-secondary inline-flex items-center gap-1 hover:text-text-primary">
@@ -465,6 +475,7 @@ function TaskRowNode({
   unlinkingTaskId,
   onOpenTask,
   onError,
+  canPlan,
 }: {
   task: LinkedTask;
   code: string;
@@ -478,7 +489,11 @@ function TaskRowNode({
   unlinkingTaskId: number | null;
   onOpenTask?: (taskId: number) => void;
   onError: (msg: string) => void;
+  canPlan?: boolean;
 }) {
+  const { userProfile } = useStore();
+  const meId = String(userProfile?.id ?? '');
+  const [rowError, setRowError] = useState('');
   const [expanded, setExpanded] = useState(!!defaultExpanded);
   const [addingSub, setAddingSub] = useState(false);
   const [attachingSub, setAttachingSub] = useState(false);
@@ -502,7 +517,10 @@ function TaskRowNode({
   // Drag-and-drop state
   const [dragOver, setDragOver] = useState(false);
 
-  const [label, cls] = STATUS[task.status] || STATUS.todo;
+  // the server checks who may move a deadline; this only decides whether to offer the button
+  const canMoveDeadline = canPlan === undefined || canPlan || String(task.assignee?.id ?? '') === meId || String(task.assigned_by?.id ?? '') === meId;
+  // only the task's own deadline counts: a subtask without one shows "No date", never its parent's
+  const ownDeadline = task.deadline || null;
   const followups = task.followups || [];
   const followupCount = task.followup_count ?? followups.length;
   const pendingCount = task.pending_followup_count ?? followups.filter(f => !f.is_followup_completed).length;
@@ -545,7 +563,7 @@ function TaskRowNode({
         quarter_id: task.quarter_id || undefined,
         priority: 'medium',
         assigned_to_id: subWho || undefined,
-        deadline: subDeadline || task.deadline || undefined,
+        deadline: subDeadline || undefined,
       });
       setSubTitle('');
       setSubDesc('');
@@ -644,6 +662,12 @@ function TaskRowNode({
     e.dataTransfer.effectAllowed = 'move';
   };
 
+  const changeStatus = async (next: string) => {
+    await workcenterService.updateStatus(task.id, next);
+    onChanged();
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('task:created'));
+  };
+
   const handleDropOnTask = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -693,7 +717,7 @@ function TaskRowNode({
           dragOver ? 'bg-purple-500/10 border-purple-500/40 ring-1 ring-purple-500/30' : 'hover:bg-surface-hover/50'
         )}
       >
-        <div className="flex items-start gap-2 text-[12.5px]">
+        <div className="flex flex-wrap items-start gap-x-2 gap-y-1 text-[12.5px]">
           <span className="text-text-muted/60 cursor-grab pt-0.5 shrink-0 opacity-0 group-hover/task:opacity-100 transition-opacity" title="Drag onto another task to make it a subtask">
             <GripVertical size={12} />
           </span>
@@ -717,17 +741,16 @@ function TaskRowNode({
             <CheckSquare size={13} className={cn(task.done ? 'text-accent-green' : 'text-text-secondary hover:text-accent-blue')} />
           </button>
 
-          <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-accent-blue/10 text-accent-blue shrink-0">
-            {code}
-          </span>
+          <CodeChip code={code} size="xs" className="mt-0.5" />
 
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex-1 basis-[180px] min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
               <button
                 type="button"
+                title={cleanTitle}
                 onClick={() => (onOpenTask ? onOpenTask(task.id) : setExpanded(!expanded))}
                 className={cn(
-                  'font-semibold text-left hover:text-accent-blue transition-colors cursor-pointer break-words',
+                  'font-semibold text-left hover:text-accent-blue transition-colors cursor-pointer break-words line-clamp-2 min-w-0 max-w-full',
                   task.done && 'line-through text-text-secondary'
                 )}
               >
@@ -781,15 +804,15 @@ function TaskRowNode({
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+          <div className="flex flex-wrap items-center justify-end gap-1.5 max-w-full pt-0.5">
             {!compact && task.assignee && (
-              <span className="text-[11px] text-text-secondary truncate max-w-[110px]">{task.assignee.name}</span>
+              <span title={task.assignee.name} className="text-[11px] text-text-secondary truncate max-w-[110px] min-w-0">{task.assignee.name}</span>
             )}
-            {task.deadline && (
-              <span className={cn('text-[11px] shrink-0', task.overdue ? 'text-accent-red font-semibold' : 'text-text-secondary')}>
-                {fmt(task.deadline)}
-              </span>
-            )}
+            <DeadlineBadge
+              entity="task" id={task.id} deadline={ownDeadline} originalDeadline={task.original_deadline}
+              changes={task.deadline_changes} done={task.done} canEdit={canMoveDeadline}
+              title={`${code} ${cleanTitle}`} onChanged={() => { onChanged(); }}
+            />
             <select
               aria-label="Task progress percentage"
               value={Math.round((task.done ? 100 : (task.progress ?? 0)) / 10) * 10}
@@ -802,15 +825,16 @@ function TaskRowNode({
                 <option key={v} value={v}>{v}%</option>
               ))}
             </select>
-            <span className={cn('text-[10.5px] font-semibold px-1.5 py-0.5 rounded-full shrink-0', task.overdue ? 'text-accent-red bg-accent-red/10' : cls)}>
-              {task.overdue ? 'Overdue' : label}
-            </span>
+            <StatusSelect
+              value={taskStatusValue(task.status)} options={TASK_STATUS_OPTIONS} canEdit label={`Status of ${code}`}
+              onSave={changeStatus} onError={setRowError}
+            />
 
             {/* Actions */}
             <button
               type="button"
               onClick={() => { setAddingSub(!addingSub); setAttachingSub(false); setExpanded(true); }}
-              title={`Add new subtask ${nextSubCode}`}
+              title="Add a subtask"
               className="opacity-70 group-hover/task:opacity-100 px-1.5 py-0.5 rounded text-[10.5px] font-semibold text-accent-blue hover:bg-accent-blue/10 cursor-pointer inline-flex items-center gap-0.5"
             >
               <Plus size={11} /> Sub
@@ -818,7 +842,7 @@ function TaskRowNode({
             <button
               type="button"
               onClick={openAttachPicker}
-              title={`Attach existing task under ${code}`}
+              title={`Attach an existing task under ${code}`}
               className="opacity-70 group-hover/task:opacity-100 px-1.5 py-0.5 rounded text-[10.5px] font-semibold text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 cursor-pointer inline-flex items-center gap-0.5"
             >
               <Link2 size={10} /> Nest
@@ -856,10 +880,12 @@ function TaskRowNode({
           </div>
         </div>
 
+        {rowError && <div className="mt-1 ml-8 text-[11.5px] text-accent-red font-medium">{rowError}</div>}
+
         {/* Drag hint */}
         {dragOver && (
           <div className="mt-1 ml-8 text-[11px] font-bold text-purple-600 dark:text-purple-400">
-            Drop to nest as subtask {nextSubCode} under &ldquo;{cleanTitle}&rdquo;
+            Drop to nest as a subtask under &ldquo;{cleanTitle}&rdquo;
           </div>
         )}
 
@@ -904,7 +930,7 @@ function TaskRowNode({
                 <input
                   value={followupText}
                   onChange={e => setFollowupText(e.target.value)}
-                  placeholder={`Post follow-up / update on ${code}...`}
+                  placeholder={`Post a follow-up on ${code}…`}
                   className="flex-1 rounded-md border border-border-subtle bg-background-primary px-2.5 py-1 text-[11.5px] text-text-primary outline-none focus:border-accent-blue"
                 />
                 <button
@@ -924,14 +950,12 @@ function TaskRowNode({
         {addingSub && (
           <form onSubmit={createSubtask} className="mt-2 ml-8 p-2.5 rounded-xl border border-border-subtle bg-background-secondary/80 space-y-1.5">
             <div className="flex items-center gap-2">
-              <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-600 dark:text-purple-400 shrink-0">
-                {nextSubCode}
-              </span>
+              <CodeChip code={nextSubCode} size="xs" title="The code this subtask will get" />
               <input
                 autoFocus
                 value={subTitle}
                 onChange={e => setSubTitle(e.target.value)}
-                placeholder={`New subtask ${nextSubCode} under ${code}...`}
+                placeholder={`New subtask under ${code}…`}
                 className="flex-1 rounded-md border border-border-subtle bg-background-primary px-2 py-1 text-[12px] text-text-primary outline-none focus:border-accent-blue"
               />
             </div>
@@ -963,7 +987,7 @@ function TaskRowNode({
                 disabled={subBusy || !subTitle.trim()}
                 className="px-2.5 py-1 rounded-md bg-purple-600 hover:bg-purple-700 text-white text-[11.5px] font-semibold disabled:opacity-50 cursor-pointer"
               >
-                {subBusy ? 'Adding…' : `Add subtask ${nextSubCode}`}
+                {subBusy ? 'Adding…' : 'Add subtask'}
               </button>
               <button type="button" onClick={() => setAddingSub(false)} className="px-2 py-1 text-[11.5px] text-text-secondary cursor-pointer">
                 Cancel
@@ -978,7 +1002,7 @@ function TaskRowNode({
             <div className="flex items-center justify-between">
               <span className="text-[11.5px] font-bold text-text-primary flex items-center gap-1.5">
                 <CornerDownRight size={12} className="text-purple-500" />
-                Select existing tasks to make subtasks under {code} ({nextSubCode}…)
+                Select existing tasks to make subtasks under {code}
               </span>
               <button type="button" onClick={() => setAttachingSub(false)} className="text-text-muted hover:text-text-primary cursor-pointer">
                 <X size={13} />
@@ -1051,7 +1075,7 @@ function TaskRowNode({
             <TaskRowNode
               key={st.id}
               task={st}
-              code={st.code || `${code}.${sIdx + 1}`}
+              code={st.full_code || `${code}.${sIdx + 1}`}
               depth={depth + 1}
               objectiveId={objectiveId}
               people={people}
@@ -1061,6 +1085,7 @@ function TaskRowNode({
               unlinkingTaskId={unlinkingTaskId}
               onOpenTask={onOpenTask}
               onError={onError}
+              canPlan={canPlan}
             />
           ))}
         </div>

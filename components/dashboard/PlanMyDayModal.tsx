@@ -1,5 +1,6 @@
 'use client';
 
+import { useMoveDeadline } from '@/components/timeline/useMoveDeadline';
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, 
@@ -76,39 +77,34 @@ export function PlanMyDayModal({
     }
   };
 
+  const { moveDeadline, deadlineDialog } = useMoveDeadline();
   const handleDoToday = async () => {
     if (!currentOverdue) return;
     try {
-      await workcenterService.updateTask(currentOverdue.id, { deadline: now });
-      onRefresh();
-    } catch (err) {
-      console.error(err);
+    await moveDeadline(currentOverdue, now, () => { onRefresh(); handleNextOverdue(); });
+    } catch (err: any) {
+      alert(err?.message || 'Could not move the deadline.');
     }
-    handleNextOverdue();
   };
 
   const handleTomorrow = async () => {
     if (!currentOverdue) return;
     try {
-      const tomorrow = isoDay(new Date(Date.now() + 86400000));
-      await workcenterService.updateTask(currentOverdue.id, { deadline: tomorrow });
-      onRefresh();
-    } catch (err) {
-      console.error(err);
+    const tomorrow = isoDay(new Date(Date.now() + 86400000));
+    await moveDeadline(currentOverdue, tomorrow, () => { onRefresh(); handleNextOverdue(); });
+    } catch (err: any) {
+      alert(err?.message || 'Could not move the deadline.');
     }
-    handleNextOverdue();
   };
 
   const handleNextWeek = async () => {
     if (!currentOverdue) return;
     try {
-      const nextWeek = isoDay(new Date(Date.now() + 7 * 86400000));
-      await workcenterService.updateTask(currentOverdue.id, { deadline: nextWeek });
-      onRefresh();
-    } catch (err) {
-      console.error(err);
+    const nextWeek = isoDay(new Date(Date.now() + 7 * 86400000));
+    await moveDeadline(currentOverdue, nextWeek, () => { onRefresh(); handleNextOverdue(); });
+    } catch (err: any) {
+      alert(err?.message || 'Could not move the deadline.');
     }
-    handleNextOverdue();
   };
 
   const handleDone = () => {
@@ -160,6 +156,7 @@ export function PlanMyDayModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs normal-case animate-in fade-in duration-150">
+      {deadlineDialog}
       <div 
         className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-background-secondary border border-border-subtle rounded-3xl shadow-2xl flex flex-col"
         onClick={e => e.stopPropagation()}

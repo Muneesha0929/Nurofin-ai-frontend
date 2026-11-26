@@ -1,5 +1,6 @@
 'use client';
 
+import { useMoveDeadline } from '@/components/timeline/useMoveDeadline';
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
@@ -200,14 +201,16 @@ export function MyDayView({
   };
 
   // Handle Quick Reschedule for a task
+  const { moveDeadline, deadlineDialog } = useMoveDeadline();
   const handleReschedule = async (taskId: number, newDeadline: string) => {
+    const t = tasks.find(x => x.id === taskId);
+    setActiveMenuTaskId(null);
+    setRescheduleTaskId(null);
     try {
-      await workcenterService.updateTask(taskId, { deadline: newDeadline });
-      setActiveMenuTaskId(null);
-      setRescheduleTaskId(null);
-      onRefresh();
-    } catch (err) {
-      console.error('Failed to reschedule task:', err);
+      // a task that already has a deadline asks for the reason first
+      await moveDeadline({ id: taskId, title: t?.title, deadline: t?.deadline }, newDeadline, onRefresh);
+    } catch (err: any) {
+      alert(err?.message || 'Could not move the deadline.');
     }
   };
 
@@ -377,6 +380,7 @@ export function MyDayView({
 
   return (
     <div className="flex flex-col gap-5 normal-case">
+      {deadlineDialog}
       {/* Header section with clean daily planning */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
         <div>

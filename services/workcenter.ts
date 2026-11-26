@@ -45,6 +45,12 @@ export interface WCTask {
   status: string;
   priority: string;
   deadline: string | null;
+  /** Full code of the linked objective task, e.g. PROD-1.2.3 (absent when not linked). */
+  full_code?: string | null;
+  /** The first deadline ever set. Never changes; `deadline` is the current one. */
+  original_deadline?: string | null;
+  /** How many times the deadline has been moved (each with a reason on the timeline). */
+  deadline_changes?: number;
   start_date: string | null;
   estimated_hours: number | null;
   progress: number;
@@ -73,9 +79,12 @@ export interface WCTask {
     assigned_to_name: string | null;
     priority?: string;
     deadline?: string | null;
+    original_deadline?: string | null;
+    deadline_changes?: number;
     start_date?: string | null;
     assigned_to_avatar?: string | null;
     description?: string | null;
+    subtasks?: any[];
   }[];
   parent_title?: string | null;
   comments_count?: number;
@@ -314,6 +323,15 @@ export const workcenterService = {
     qs.append('parent_id', parentId ? String(parentId) : '0');
     taskIds.forEach(id => qs.append('task_ids', String(id)));
     return api(`${BASE}/bulk/parent?${qs.toString()}`, { method: 'PUT' });
+  },
+
+  /** Give several tasks to one person (0 = unassign). One PUT each; resolves with the ids that failed. */
+  reassignTasks: async (taskIds: number[], userId: number) => {
+    const failed: { id: number; error: string }[] = [];
+    await Promise.all(taskIds.map(id =>
+      workcenterService.updateTask(id, { assigned_to_id: userId }).catch((e: any) => { failed.push({ id, error: e?.message || 'Failed' }); }),
+    ));
+    return failed;
   },
 
   getHistory: (taskId: number) =>

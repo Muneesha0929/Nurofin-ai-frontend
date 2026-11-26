@@ -1,6 +1,8 @@
 // Director-set quarter targets per department, and the objectives HODs set from them.
 // Backend: /api/v1/department-targets
 
+import type { Priority } from '@/services/timeline';
+
 export interface PersonBrief {
   id: number;
   name: string;
@@ -25,6 +27,8 @@ export interface ObjectiveNode {
   id: number;
   parent_id: number | null;
   code?: string;
+  /** With the department prefix, e.g. "PROD-1.2". Prefer this for display. */
+  full_code?: string;
   title: string;
   description?: string | null;
   owner: PersonBrief | null;
@@ -33,6 +37,9 @@ export interface ObjectiveNode {
   project_name?: string | null;
   project?: { id: number; name: string } | null;
   deadline: string | null;
+  original_deadline?: string | null;
+  deadline_changes?: number;
+  priority?: Priority | null;
   status: ObjectiveStatus;
   progress: number;
   progress_manual?: boolean;
@@ -64,6 +71,7 @@ export interface LinkedTask {
   id: number;
   parent_id?: number | null;
   code?: string;
+  full_code?: string;
   title: string;
   description?: string | null;
   status: string;
@@ -71,6 +79,8 @@ export interface LinkedTask {
   done: boolean;
   start_date?: string | null;
   deadline: string | null;
+  original_deadline?: string | null;
+  deadline_changes?: number;
   progress?: number;
   overdue: boolean;
   project_id?: number | null;
@@ -87,7 +97,10 @@ export interface LinkedTask {
 export interface LinkableObjective {
   id: number;
   code?: string;
+  full_code?: string;
+  priority?: Priority | null;
   next_task_code?: string;
+  next_full_code?: string;
   tasks_count?: number;
   title: string;
   level: 'objective' | 'sub_objective';
@@ -117,6 +130,11 @@ export interface TaskLinkInfo {
   objective_code?: string;
   task_code?: string;
   project_code?: string;
+  full_code?: string;
+  objective_full_code?: string;
+  next_full_code?: string;
+  original_deadline?: string | null;
+  deadline_changes?: number;
   is_subtask_inherited?: boolean;
   title: string;
   description?: string | null;
@@ -235,7 +253,7 @@ export interface ObjectiveDetail extends ObjectiveNode {
   department: { id: number; name: string; short_code?: string; hod: PersonBrief | null; members?: PersonBrief[] };
   quarter: QuarterInfo;
   director_message: string | null;
-  parent: { id: number; title: string; code?: string; project_id?: number | null } | null;
+  parent: { id: number; title: string; code?: string; full_code?: string; project_id?: number | null } | null;
   updates: ObjectiveUpdateEntry[];
   permissions: { can_plan: boolean; can_update_progress: boolean; can_edit_project?: boolean; can_post: boolean };
 }
@@ -309,7 +327,7 @@ export const departmentTargetsService = {
 
   createObjective: (data: { department_id: number; fiscal_year: number; quarter_number: number; parent_id?: number | null; title: string; description?: string; owner_id?: number | null; project_id?: number | null; deadline?: string | null }) =>
     call<{ id: number }>('/objectives', json('POST', data)),
-  updateObjective: (id: number, data: Partial<{ title: string; description: string; owner_id: number | null; project_id: number | null; deadline: string | null; status: ObjectiveStatus; progress: number }>) =>
+  updateObjective: (id: number, data: Partial<{ title: string; description: string; owner_id: number | null; project_id: number | null; deadline: string | null; status: ObjectiveStatus; progress: number; priority: Priority | null }>) =>
     call<{ id: number }>(`/objectives/${id}`, json('PUT', data)),
   deleteObjective: (id: number) => call<null>(`/objectives/${id}`, json('DELETE')),
   getObjective: (id: number) => call<ObjectiveDetail>(`/objectives/${id}`),

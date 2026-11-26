@@ -11,7 +11,13 @@ import { workcenterService, WCTask } from '@/services/workcenter';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 import { ProgressBar } from '@/components/QuarterGoalHero';
 import { ObjectiveTasks } from '@/components/targets/ObjectiveTasks';
-import { TaskObjectiveBadge } from '@/components/targets/TaskObjectiveLink';
+import { TaskObjectiveBadge, taskCodeOf } from '@/components/targets/TaskObjectiveLink';
+import { CodeChip } from '@/components/timeline/CodeChip';
+import { PriorityBadge, PriorityPicker, canSetPriority } from '@/components/timeline/PriorityChip';
+import { DeadlineBadge } from '@/components/timeline/DeadlineBadge';
+import { StatusSelect, OBJECTIVE_STATUS_OPTIONS, codeOf, deptPrefix, useOptimistic } from '@/components/targets/ui';
+import { useStore } from '@/lib/store';
+import type { Priority } from '@/services/timeline';
 
 export const fmtDay = (iso?: string | null) =>
   iso ? new Date(iso.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
@@ -36,7 +42,7 @@ export const StatusChip = ({ status, overdue }: { status: string; overdue?: bool
 };
 
 /** Slide-in panel shell. */
-function Shell({ eyebrow, title, onClose, children }: { eyebrow: string; title: string; onClose: () => void; children: React.ReactNode }) {
+function Shell({ eyebrow, title, code, onClose, children }: { eyebrow: string; title: string; code?: string; onClose: () => void; children: React.ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -49,7 +55,8 @@ function Shell({ eyebrow, title, onClose, children }: { eyebrow: string; title: 
         <div className="sticky top-0 bg-background-secondary border-b border-border-subtle px-5 py-4 flex items-start gap-3 z-10">
           <div className="flex-1 min-w-0">
             <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-text-secondary">{eyebrow}</div>
-            <div className="text-lg font-extrabold mt-0.5 text-text-primary">{title}</div>
+            {code && <div className="mt-1"><CodeChip code={code} /></div>}
+            <div className="text-lg font-extrabold mt-0.5 text-text-primary break-words">{title}</div>
           </div>
           <button onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-hover"><X size={16} /></button>
         </div>
@@ -71,6 +78,8 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
   const [error, setError] = useState('');
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  const { userProfile } = useStore();
+  const [prio, setPrio] = useOptimistic<Priority | null>(o?.priority ?? null);
 
   const load = useCallback(() => {
     api.getObjective(id).then(res => {
@@ -104,27 +113,42 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
   if (!o) return <Shell eyebrow="Objective" title={error || 'Loading…'} onClose={onClose}>{null}</Shell>;
   const level = o.level === 'objective' ? 'Objective' : 'Sub-objective';
   const deptTag = o.department.short_code ? `##${o.department.short_code} · ` : '';
+  const prefix = deptPrefix(o.department);
+  const fullCode = codeOf(o, prefix);
+  const canMoveDate = o.permissions.can_plan || o.permissions.can_update_progress;
+  const canStatus = o.permissions.can_plan || (!o.children.length && o.permissions.can_update_progress);
 
   return (
     <>
-    <Shell eyebrow={`${deptTag}${o.department.name} · ${o.quarter.short} · ${level}${o.code ? ` ${o.code}` : ''}`} title={o.code ? `${o.code} ${o.title}` : o.title} onClose={onClose}>
+    <Shell eyebrow={`${deptTag}${o.department.name} · ${o.quarter.short} · ${level}`} code={fullCode} title={o.title} onClose={onClose}>
       <div>
         <Label>Why this matters</Label>
         <div className="border border-border-subtle rounded-xl overflow-hidden text-[13px]">
           <div className="px-3 py-2.5 grid grid-cols-[100px_1fr] gap-2"><span className="text-text-secondary text-[11.5px] font-semibold">Director → {o.department.short_code || o.department.name.split(' ')[0]}</span><span className="line-clamp-3">{o.director_message || 'No target written yet.'}</span></div>
           {o.parent && (
             <button onClick={() => onOpen?.(o.parent!.id)} className="w-full text-left px-3 py-2.5 grid grid-cols-[100px_1fr] gap-2 border-t border-border-subtle hover:bg-surface-hover">
-              <span className="text-text-secondary text-[11.5px] font-semibold">Objective {o.parent.code || ''}</span><span className="font-medium">{o.parent.title}</span>
+              <span className="text-text-secondary text-[11.5px] font-semibold flex flex-col items-start gap-1">Objective <CodeChip code={o.parent.full_code || (o.parent.code ? `${prefix}-${o.parent.code}` : '')} size="xs" /></span><span className="font-medium">{o.parent.title}</span>
             </button>
           )}
-          <div className="px-3 py-2.5 grid grid-cols-[100px_1fr] gap-2 border-t border-border-subtle bg-accent-blue/10"><span className="text-text-secondary text-[11.5px] font-semibold">{level} {o.code || ''}</span><span className="font-semibold">{o.title}</span></div>
+          <div className="px-3 py-2.5 grid grid-cols-[100px_1fr] gap-2 border-t border-border-subtle bg-accent-blue/10"><span className="text-text-secondary text-[11.5px] font-semibold flex flex-col items-start gap-1">{level} <CodeChip code={fullCode} size="xs" /></span><span className="font-semibold">{o.title}</span></div>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[13px]">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-[13px]">
         <div><Label>Person</Label><span className="flex items-center gap-1.5"><Avatar p={o.owner} size={20} />{o.owner ? o.owner.name : 'Unassigned'}</span></div>
-        <div><Label>Deadline</Label><span className={cn(o.overdue && 'text-accent-red font-semibold')}>{fmtDay(o.deadline) || '—'}</span></div>
-        <div><Label>Status</Label><StatusChip status={o.status} overdue={o.overdue} /></div>
+        <div><Label>Deadline</Label>
+          <DeadlineBadge entity="objective" id={o.id} deadline={o.deadline} originalDeadline={o.original_deadline} changes={o.deadline_changes}
+            done={o.status === 'done'} canEdit={canMoveDate} title={`${fullCode} ${o.title}`} onChanged={() => { load(); onChanged?.(); }} className="-ml-1.5" />
+        </div>
+        <div><Label>Status</Label>
+          <StatusSelect value={o.status} options={OBJECTIVE_STATUS_OPTIONS} canEdit={canStatus} label="Status"
+            onSave={async v => { await api.updateObjective(id, { status: v as ObjectiveDetail['status'] }); load(); onChanged?.(); }} onError={setError} />
+        </div>
+        <div><Label>Priority</Label>
+          {canSetPriority(userProfile) || prio
+            ? <PriorityPicker objectiveId={o.id} value={prio} canEdit={canSetPriority(userProfile)} onChanged={p => { setPrio(p); load(); onChanged?.(); }} />
+            : <span className="text-text-secondary text-[12.5px]">None</span>}
+        </div>
         <div>
           <Label>Project</Label>
           {(o.permissions.can_edit_project ?? o.permissions.can_plan) ? (
@@ -203,9 +227,10 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
           <div className="border border-border-subtle rounded-xl overflow-hidden">
             {o.children.map((c, idx) => (
               <button key={c.id} onClick={() => onOpen?.(c.id)} className="w-full text-left flex items-center gap-2.5 px-3 py-2.5 border-t border-border-subtle first:border-t-0 hover:bg-surface-hover">
-                <span className="font-mono text-[11.5px] font-bold text-accent-blue w-8 shrink-0">{c.code || (o.code ? `${o.code}.${idx + 1}` : '')}</span>
+                <CodeChip code={codeOf(c, prefix, o.code ? `${o.code}.${idx + 1}` : undefined)} size="xs" />
                 <Avatar p={c.owner} size={22} />
-                <span className="flex-1 min-w-0"><span className="block text-[13px] font-medium truncate">{c.title}</span><span className="block text-[11.5px] text-text-secondary">{c.owner?.name || 'Unassigned'} · {fmtDay(c.deadline)} · {Math.round(c.progress)}%</span></span>
+                <span className="flex-1 min-w-0"><span className="block text-[13px] font-medium truncate" title={c.title}>{c.title}</span><span className="block text-[11.5px] text-text-secondary truncate">{c.owner?.name || 'Unassigned'} · {fmtDay(c.deadline) || 'No date'} · {Math.round(c.progress)}%</span></span>
+                <PriorityBadge p={c.priority} />
                 <StatusChip status={c.status} overdue={c.overdue} />
               </button>
             ))}
@@ -217,10 +242,11 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
         <Label>Tasks from the Task center{o.tasks.length ? ` · ${o.tasks.filter(t => t.done).length} of ${o.tasks.length} done` : ''}</Label>
         <ObjectiveTasks objectiveId={o.id} tasks={o.tasks}
           people={[o.department.hod, ...(o.department.members || [])].filter((p, i, a): p is PersonBrief => !!p && a.findIndex(x => x?.id === p.id) === i)}
-          parentCode={o.code}
+          parentCode={fullCode}
           startIndex={o.children.length ? o.children.length + 1 : 1}
           projectId={o.project_id}
           onOpenTask={openTask}
+          canPlan={o.permissions.can_plan}
           onChanged={() => { load(); onChanged?.(); }} />
       </div>
 
@@ -247,7 +273,7 @@ export function ObjectivePanel({ id, onClose, onChanged, onOpen }: { id: number;
       </div>
 
       {error && <div className="text-[12.5px] text-accent-red">{error}</div>}
-      <Link href={`/departments?id=${o.department.id}`} className="text-[12.5px] font-semibold text-accent-blue inline-flex items-center gap-1"><Target size={13} /> Open {o.department.name}</Link>
+      <Link href={`/departments?id=${o.department.id}&objective=${o.id}`} className="text-[12.5px] font-semibold text-accent-blue inline-flex items-center gap-1"><Target size={13} /> Open {fullCode} in {o.department.name}</Link>
     </Shell>
     {taskPanel && <TaskPanel task={taskPanel} canChange onClose={() => setTaskPanel(null)} onChanged={() => { load(); onChanged?.(); }} />}
     </>
@@ -269,6 +295,17 @@ export function TaskPanel({ task, canChange, onClose, onChanged }: { task: WCTas
   const [extended, setExtended] = useState('');
   const [error, setError] = useState('');
   const [isUpdatingTiming, setIsUpdatingTiming] = useState(false);
+  const [code, setCode] = useState('');
+  // the task's own code (PROD-1.2.3) when it is linked to an objective
+  const reloadTask = useCallback(() => {
+    workcenterService.getTask(task.id).then(res => setT(prev => ({ ...prev, ...res }))).catch(() => {});
+    onChanged?.();
+  }, [task.id, onChanged]);
+  useEffect(() => {
+    let alive = true;
+    api.taskLinks([task.id]).then(r => alive && setCode(taskCodeOf(r[String(task.id)]))).catch(() => alive && setCode(''));
+    return () => { alive = false; };
+  }, [task.id]);
 
   useEffect(() => { 
     workcenterService.getTask(task.id)
@@ -322,7 +359,7 @@ export function TaskPanel({ task, canChange, onClose, onChanged }: { task: WCTas
   };
 
   return (
-    <Shell eyebrow={`Task Center · ${t.project_name ? '#' + t.project_name : 'General Task'}`} title={cleanTitle} onClose={onClose}>
+    <Shell eyebrow={`Task Center · ${t.project_name ? '#' + t.project_name : 'General Task'}`} code={code} title={cleanTitle} onClose={onClose}>
       {/* Top Banner / Badges */}
       <div className="flex flex-wrap items-center gap-2">
         {isIssue && (
@@ -407,9 +444,11 @@ export function TaskPanel({ task, canChange, onClose, onChanged }: { task: WCTas
 
           <div className="p-3 rounded-xl bg-background-primary border border-border-subtle">
             <div className="text-[10.5px] font-bold uppercase text-text-secondary">Deadline</div>
-            <div className={cn("text-sm font-bold mt-1 flex items-center gap-1.5", overdue ? "text-accent-red font-extrabold" : "text-text-primary")}>
-              <Calendar size={14} />
-              <span>{fmtDay(t.deadline) || 'No deadline'}</span>
+            <div className="mt-1 text-sm font-bold">
+              <DeadlineBadge entity="task" id={t.id} deadline={t.deadline ? t.deadline.slice(0, 10) : null}
+                originalDeadline={(t as any).original_deadline} changes={(t as any).deadline_changes}
+                done={t.status === 'completed' || t.status === 'done'} canEdit={canChange}
+                title={`${code ? code + ' ' : ''}${cleanTitle}`} onChanged={reloadTask} className="-ml-1.5 !text-sm" />
             </div>
           </div>
         </div>
@@ -500,7 +539,8 @@ export function TaskPanel({ task, canChange, onClose, onChanged }: { task: WCTas
                   )}>
                     {s.status === 'completed' || s.status === 'done' ? '✓' : '•'}
                   </span>
-                  <span className={cn("font-medium truncate", (s.status === 'completed' || s.status === 'done') && "line-through text-text-secondary")}>
+                  {code && <CodeChip code={`${code}.${t.subtasks!.indexOf(s) + 1}`} size="xs" />}
+                  <span title={s.title} className={cn("font-medium truncate min-w-0", (s.status === 'completed' || s.status === 'done') && "line-through text-text-secondary")}>
                     {s.title}
                   </span>
                 </div>

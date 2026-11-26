@@ -6,6 +6,21 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Target } from 'lucide-react';
 import { departmentTargetsService as api, LinkableObjective, TaskLinkInfo } from '@/services/departmentTargets';
+import { CodeChip } from '@/components/timeline/CodeChip';
+import { deptPrefix } from '@/components/targets/ui';
+
+/** The code a new task or sub-objective will get under this objective, straight from the API (never guessed). */
+export async function fetchNextCode(objectiveId: number): Promise<string | null> {
+  try {
+    const r = await api.linkableObjectives();
+    const o = r.objectives.find(x => x.id === objectiveId);
+    return o?.next_full_code || o?.next_task_code || null;
+  } catch { return null; }
+}
+
+/** The code of one task (e.g. PROD-1.2.3) when it is linked to an objective. */
+export const taskCodeOf = (info?: TaskLinkInfo | null) =>
+  !info ? '' : info.full_code || info.project_code || (info.task_code ? `${deptPrefix(info.department)}-${info.task_code}` : '');
 
 /** Objectives the signed-in user may link tasks to (their departments; all for the Director). */
 export function useLinkableObjectives() {
@@ -46,12 +61,10 @@ export function ObjectiveSelect({ objectives, quarterShort, value, onChange, cla
         <option value="">Not linked</option>
         {Object.entries(byDept).map(([dept, group]) => (
           <optgroup key={dept} label={group.shortCode ? `##${group.shortCode} · ${dept}` : dept}>
-            {group.list.map(o => (
-              <option key={o.id} value={o.id}>
-                {o.code ? `${o.code} ` : (o.level === 'sub_objective' ? '↳ ' : '')}{o.title}
-                {o.next_task_code ? ` (next: ${o.next_task_code})` : ''}
-              </option>
-            ))}
+            {group.list.map(o => {
+              const code = o.full_code || (o.code ? `${deptPrefix(o.department)}-${o.code}` : '');
+              return <option key={o.id} value={o.id}>{code ? `${code} ` : (o.level === 'sub_objective' ? '↳ ' : '')}{o.title}</option>;
+            })}
           </optgroup>
         ))}
       </select>
@@ -68,12 +81,23 @@ export function TaskObjectiveBadge({ taskId }: { taskId: number }) {
     return () => { alive = false; };
   }, [taskId]);
   if (!info) return null;
+  const objCode = info.objective_full_code || (info.objective_code ? `${deptPrefix(info.department)}-${info.objective_code}` : '');
   return (
-    <Link href={`/departments?id=${info.department.id}`} className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent-blue/10 text-accent-blue px-2 py-1 text-[11px] font-semibold normal-case hover:bg-accent-blue/15">
-      <Target size={12} />
-      {info.department.short_code && <span className="font-mono font-bold">##{info.department.short_code}</span>}
-      {info.task_code && <span className="font-mono font-bold bg-accent-blue/15 px-1.5 py-0.2 rounded">{info.task_code}</span>}
-      <span>{info.quarter} · {info.department.name}: {info.objective_code ? `${info.objective_code} ` : ''}{info.title}</span>
+    <Link href={`/departments?id=${info.department.id}&objective=${info.objective_id}`} className="mt-1 inline-flex flex-wrap items-center gap-1.5 rounded-md bg-accent-blue/10 text-accent-blue px-2 py-1 text-[11px] font-semibold normal-case hover:bg-accent-blue/15 max-w-full">
+      <Target size={12} className="shrink-0" />
+      {objCode && <CodeChip code={objCode} size="xs" />}
+      <span className="min-w-0 truncate">{info.quarter} · {info.department.name}: {info.title}</span>
     </Link>
   );
+}
+
+/** The task's own code as a chip. Renders nothing when the task is not linked to an objective. */
+export function TaskCodeChip({ taskId, className }: { taskId: number; className?: string }) {
+  const [code, setCode] = useState('');
+  useEffect(() => {
+    let alive = true;
+    api.taskLinks([taskId]).then(r => alive && setCode(taskCodeOf(r[String(taskId)]))).catch(() => alive && setCode(''));
+    return () => { alive = false; };
+  }, [taskId]);
+  return code ? <CodeChip code={code} className={className} /> : null;
 }
