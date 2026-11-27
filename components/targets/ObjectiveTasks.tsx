@@ -5,10 +5,11 @@ import Link from 'next/link';
 import {
   CheckSquare, Plus, ExternalLink, Link2, X, Search, Loader2, Check,
   MessageSquare, ChevronDown, ChevronRight, CornerDownRight, GripVertical,
-  Send, CheckCircle2, Clock, ArrowUpRight, FileText,
+  Send, CheckCircle2, Clock, ArrowUpRight, FileText, Pencil,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
-import { formatISTDateTime, accurateTimeAgo } from '@/utils/date';
+import { formatISTDate, formatISTTime, formatISTDateTime } from '@/utils/date';
+import { useStore } from '@/lib/store';
 import { departmentTargetsService as api, LinkedTask, LinkedTaskFollowup, PersonBrief } from '@/services/departmentTargets';
 import { workcenterService, WCTask } from '@/services/workcenter';
 
@@ -480,6 +481,15 @@ function TaskRowNode({
   onError: (msg: string) => void;
 }) {
   const [expanded, setExpanded] = useState(!!defaultExpanded);
+  const { inspectMode } = useStore();
+  const [editingTask, setEditingTask] = useState(false);
+  const [editTitle, setEditTitle] = useState(stripLeadingCode(task.title, code));
+  const [editDesc, setEditDesc] = useState(task.description || '');
+  const [editWho, setEditWho] = useState<number | ''>(task.assignee?.id ?? '');
+  const [editDeadline, setEditDeadline] = useState(task.deadline ? task.deadline.slice(0, 10) : '');
+  const [editPriority, setEditPriority] = useState(task.priority || 'medium');
+  const [savingEdit, setSavingEdit] = useState(false);
+
   const [addingSub, setAddingSub] = useState(false);
   const [attachingSub, setAttachingSub] = useState(false);
   const [subTitle, setSubTitle] = useState('');
@@ -637,6 +647,28 @@ function TaskRowNode({
     }
   };
 
+  const saveEditTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editTitle.trim()) return;
+    setSavingEdit(true);
+    try {
+      await workcenterService.updateTask(task.id, {
+        title: editTitle.trim(),
+        description: editDesc.trim(),
+        assigned_to_id: editWho === '' ? 0 : Number(editWho),
+        deadline: editDeadline || '',
+        priority: editPriority,
+      });
+      setEditingTask(false);
+      onChanged();
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('task:created'));
+    } catch (e: any) {
+      onError(e.message || 'Could not update task.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const handleDragStart = (e: React.DragEvent) => {
     e.stopPropagation();
     e.dataTransfer.setData('application/x-nurofin-task-id', String(task.id));
@@ -725,7 +757,13 @@ function TaskRowNode({
             <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => (onOpenTask ? onOpenTask(task.id) : setExpanded(!expanded))}
+                onClick={() => {
+                  if (inspectMode === 'dropdown' || !onOpenTask) {
+                    setExpanded(!expanded);
+                  } else {
+                    onOpenTask(task.id);
+                  }
+                }}
                 className={cn(
                   'font-semibold text-left hover:text-accent-blue transition-colors cursor-pointer break-words',
                   task.done && 'line-through text-text-secondary'
@@ -809,6 +847,21 @@ function TaskRowNode({
             {/* Actions */}
             <button
               type="button"
+              onClick={() => {
+                setEditTitle(cleanTitle);
+                setEditDesc(task.description || '');
+                setEditWho(task.assignee?.id ?? '');
+                setEditDeadline(task.deadline ? task.deadline.slice(0, 10) : '');
+                setEditPriority(task.priority || 'medium');
+                setEditingTask(!editingTask);
+              }}
+              title={`Edit ${code}`}
+              className="opacity-70 group-hover/task:opacity-100 p-1 rounded text-text-secondary hover:text-accent-blue hover:bg-accent-blue/10 cursor-pointer"
+            >
+              <Pencil size={11} />
+            </button>
+            <button
+              type="button"
               onClick={() => { setAddingSub(!addingSub); setAttachingSub(false); setExpanded(true); }}
               title={`Add new subtask ${nextSubCode}`}
               className="opacity-70 group-hover/task:opacity-100 px-1.5 py-0.5 rounded text-[10.5px] font-semibold text-accent-blue hover:bg-accent-blue/10 cursor-pointer inline-flex items-center gap-0.5"
@@ -863,20 +916,99 @@ function TaskRowNode({
           </div>
         )}
 
-        {/* Expanded drawer: Description + Follow-ups + Inline Follow-up Form */}
-        {expanded && (
-          <div className="mt-2 ml-8 pl-3 border-l-2 border-border-subtle space-y-2.5 text-[12px]">
-            {/* Full Description */}
-            {task.description ? (
-              <div className="bg-background-primary/80 border border-border-subtle/70 rounded-lg p-2.5">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-text-secondary mb-1">Description</div>
-                <div className="text-[12px] text-text-primary whitespace-pre-wrap leading-relaxed">{task.description}</div>
-              </div>
-            ) : !hasDetails ? (
-              <div className="text-[11px] text-text-secondary italic">No description or follow-ups yet.</div>
-            ) : null}
+        {/* Inline Edit Task Form */}
+        {editingTask && (
+          <form onSubmit={saveEditTask} className="mt-2 ml-8 p-3 rounded-xl border border-accent-blue/40 bg-background-secondary space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-accent-blue">Edit Task {code}</span>
+              <button type="button" onClick={() => setEditingTask(false)} className="text-text-secondary hover:text-text-primary cursor-pointer"><X size={13} /></button>
+            </div>
+            <input
+              autoFocus
+              value={editTitle}
+              onChange={e => setEditTitle(e.target.value)}
+              placeholder="Task title..."
+              className="w-full rounded-lg border border-border-subtle bg-background-primary px-2.5 py-1.5 text-[12.5px] text-text-primary outline-none focus:border-accent-blue"
+            />
+            <textarea
+              value={editDesc}
+              onChange={e => setEditDesc(e.target.value)}
+              rows={2}
+              placeholder="Task description..."
+              className="w-full rounded-lg border border-border-subtle bg-background-primary px-2.5 py-1.5 text-[12px] text-text-primary outline-none focus:border-accent-blue"
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <select
+                value={editWho}
+                onChange={e => setEditWho(e.target.value ? Number(e.target.value) : '')}
+                className="rounded-lg border border-border-subtle bg-background-primary px-2 py-1.5 text-[11.5px] text-text-primary"
+              >
+                <option value="">Unassigned</option>
+                {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <input
+                type="date"
+                value={editDeadline}
+                onChange={e => setEditDeadline(e.target.value)}
+                className="rounded-lg border border-border-subtle bg-background-primary px-2 py-1.5 text-[11.5px] text-text-primary"
+              />
+              <select
+                value={editPriority}
+                onChange={e => setEditPriority(e.target.value)}
+                className="rounded-lg border border-border-subtle bg-background-primary px-2 py-1.5 text-[11.5px] text-text-primary"
+              >
+                <option value="critical">Critical (P1)</option>
+                <option value="high">High (P1/P2)</option>
+                <option value="medium">Medium (P2)</option>
+                <option value="low">Low (P3)</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="submit"
+                disabled={savingEdit || !editTitle.trim()}
+                className="px-3 py-1.5 rounded-lg bg-accent-blue hover:bg-accent-blue-hover text-white text-[11.5px] font-semibold disabled:opacity-50 cursor-pointer"
+              >
+                {savingEdit ? 'Saving…' : 'Save Changes'}
+              </button>
+              <button type="button" onClick={() => setEditingTask(false)} className="px-2.5 py-1 text-[11.5px] text-text-secondary cursor-pointer">
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
 
-            {/* Follow-ups list */}
+        {/* Expanded dropdown: clean fixed metadata + scrollable follow-ups */}
+        {expanded && (
+          <div className="mt-2 ml-8 rounded-xl border border-border-subtle bg-background-secondary/80 p-3 space-y-2.5 text-[12px]">
+            {/* Fixed Details Header */}
+            <div className="space-y-1.5 pb-2 border-b border-border-subtle/70">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-text-secondary">
+                <span>
+                  Assignee: <b className="text-text-primary">{task.assignee?.name || 'Unassigned'}</b>
+                  {task.deadline && <> · Date: <b className="text-text-primary">{fmt(task.deadline)}</b></>}
+                  {task.scheduled_start_time && task.scheduled_end_time && <> · Slot: <b className="text-accent-blue">{task.scheduled_start_time}–{task.scheduled_end_time}</b></>}
+                </span>
+                {onOpenTask && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenTask(task.id)}
+                    className="text-[11px] font-semibold text-accent-blue hover:underline inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    Open Drawer <ExternalLink size={10} />
+                  </button>
+                )}
+              </div>
+              {task.description ? (
+                <div className="text-[12px] text-text-primary whitespace-pre-wrap leading-relaxed bg-background-primary/70 rounded-lg px-2.5 py-2 border border-border-subtle/50">
+                  {task.description}
+                </div>
+              ) : !hasDetails ? (
+                <div className="text-[11px] text-text-secondary italic">No description or follow-ups yet.</div>
+              ) : null}
+            </div>
+
+            {/* Bounded Scrollable Follow-ups list */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-text-secondary flex items-center gap-1">
@@ -887,12 +1019,12 @@ function TaskRowNode({
                   href={`/workcenter?task=${task.id}&tab=updates`}
                   className="text-[10.5px] font-semibold text-accent-blue hover:underline inline-flex items-center gap-1"
                 >
-                  Open in Task Center <ExternalLink size={10} />
+                  Task Center <ExternalLink size={10} />
                 </Link>
               </div>
 
               {followups.length > 0 && (
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
                   {followups.map(f => (
                     <FollowupCard key={f.id} f={f} onToggle={toggleFollowupDone} />
                   ))}
@@ -1070,16 +1202,15 @@ function TaskRowNode({
 }
 
 function FollowupCard({ f, onToggle, isReply }: { f: LinkedTaskFollowup; onToggle: (f: LinkedTaskFollowup) => void; isReply?: boolean }) {
+  const datePart = formatISTDate(f.created_at);
+  const timePart = formatISTTime(f.created_at, { withTimezone: false });
   return (
     <div className={cn('rounded-lg border border-border-subtle/70 bg-background-primary p-2 space-y-1', isReply && 'ml-4 bg-background-secondary/50')}>
       <div className="flex items-center justify-between gap-2 text-[11px]">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="font-bold text-text-primary truncate">{f.user_name}</span>
-          {f.created_at && (
-            <span className="text-[10px] text-text-muted font-mono shrink-0" title={formatISTDateTime(f.created_at)}>
-              {accurateTimeAgo(f.created_at)}
-            </span>
-          )}
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0" title={formatISTDateTime(f.created_at)}>
+          {datePart && <span className="font-semibold text-text-primary">{datePart}</span>}
+          {timePart && <span className="text-text-secondary font-mono">· {timePart}</span>}
+          <span className="font-bold text-accent-blue truncate">· {f.user_name}</span>
         </div>
         <button
           type="button"

@@ -97,37 +97,56 @@ export function QuarterPills({ quarter }: { quarter: QuarterInfo }) {
 
 export function DeptCard({ d, quarter }: { d: OverviewDepartment; quarter: QuarterInfo }) {
   const h = deptHealth(d.health);
-  const order: Health[] = ['off', 'risk', 'on', 'done'];
+  const allMembers = [
+    ...(d.hod ? [d.hod] : []),
+    ...d.members.filter(m => !d.hod || m.id !== d.hod.id),
+  ];
   return (
-    <Link href={`/departments?id=${d.id}`}
-      className="bg-background-secondary border border-border-subtle rounded-2xl p-4 flex flex-col gap-3 hover:-translate-y-0.5 hover:border-border-active transition-all normal-case">
-      <div className="flex items-center gap-2.5">
-        <Avatar p={d.hod} size={30} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-[15px] font-extrabold text-text-primary leading-tight truncate">{d.name}</span>
-            {d.short_code && (
-              <span className="font-mono text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-accent-blue/10 text-accent-blue shrink-0">
-                ##{d.short_code}
-              </span>
-            )}
-          </div>
-          <div className="text-[12.5px] text-text-secondary truncate">{d.hod ? `${d.hod.name} · HOD` : 'No HOD yet'}</div>
+    <Link
+      href={`/departments?id=${d.id}`}
+      className="bg-background-secondary border border-border-subtle rounded-2xl p-4 flex flex-col gap-3 hover:-translate-y-0.5 hover:border-border-active transition-all normal-case"
+    >
+      {/* 1. Department Name & Progress Status */}
+      <div className="flex items-center justify-between gap-2.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[15px] font-extrabold text-text-primary leading-tight truncate">{d.name}</span>
+          {d.short_code && (
+            <span className="font-mono text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-accent-blue/10 text-accent-blue shrink-0">
+              ##{d.short_code}
+            </span>
+          )}
         </div>
-        <span className="text-[22px] font-extrabold text-text-primary">{d.progress === null ? '—' : `${Math.round(d.progress)}%`}</span>
+        <span className="text-[18px] font-extrabold text-text-primary shrink-0">
+          {d.progress === null ? '—' : `${Math.round(d.progress)}%`}
+        </span>
       </div>
-      {d.progress !== null && <PaceBar value={d.progress} h={h} pace={quarter.status === 'current' ? quarterPace(quarter) : undefined} />}
-      <div className="text-[13px] text-text-secondary line-clamp-2 border-l-2 border-border-subtle pl-2.5">
-        {d.message ? d.message.split('\n')[0] : `No ${quarter.short} target from the Director yet.`}
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {d.new_for_me && <span className="text-[11.5px] font-semibold rounded-full px-2.5 py-0.5 bg-accent-blue text-white">New target</span>}
-        {order.filter(k => d.health?.[k]).map(k => <HealthChip key={k} h={k}>{d.health[k]} {HEALTH_LABEL[k].toLowerCase()}</HealthChip>)}
-        {!d.objectives && <span className="text-[11.5px] font-semibold rounded-full px-2.5 py-0.5 bg-[var(--bg-primary)] text-text-secondary">No objectives yet</span>}
-      </div>
-      <div className="flex items-center justify-between text-[12px] text-text-secondary">
-        <span className="flex">{d.members.slice(0, 6).map((m, i) => <span key={m.id} className={cn(i && '-ml-1.5')}><Avatar p={m} size={22} ring /></span>)}</span>
-        <span>{d.members.length} {d.members.length === 1 ? 'member' : 'members'}</span>
+
+      <PaceBar
+        value={d.progress ?? 0}
+        h={d.progress === null ? null : h}
+        pace={quarter.status === 'current' ? quarterPace(quarter) : undefined}
+      />
+
+      {/* 2. Members List & Profiles */}
+      <div className="flex items-center justify-between gap-2 pt-1 text-[12px] text-text-secondary">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="flex shrink-0">
+            {allMembers.slice(0, 6).map((m, i) => (
+              <span key={m.id} className={cn(i > 0 && '-ml-1.5')}>
+                <Avatar p={m} size={24} ring />
+              </span>
+            ))}
+          </span>
+          <span className="truncate text-[11.5px] font-medium text-text-secondary">
+            {allMembers.length > 0
+              ? allMembers.slice(0, 3).map(m => m.name.split(' ')[0]).join(', ') +
+                (allMembers.length > 3 ? ` +${allMembers.length - 3}` : '')
+              : 'No members yet'}
+          </span>
+        </div>
+        <span className="shrink-0 text-[11px] font-semibold">
+          {allMembers.length} {allMembers.length === 1 ? 'member' : 'members'}
+        </span>
       </div>
     </Link>
   );

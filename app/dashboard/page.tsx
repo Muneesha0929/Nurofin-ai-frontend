@@ -15,10 +15,14 @@ import {
   CheckCircle2,
   CalendarDays,
   IndianRupee,
-  Layers
+  Layers,
+  PanelRight,
+  Flag,
+  MessageSquare,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
+import { formatISTDate, formatISTTime } from '@/utils/date';
 import { DailyCheckinModal } from '@/components/DailyCheckinModal';
 import { NewTargetBanners, QuarterHero } from '@/components/QuarterGoalHero';
 import { Greeting } from '@/components/dashboard/Greeting';
@@ -49,10 +53,12 @@ import { CeoTeamPulse } from '@/components/dashboard/CeoTeamPulse';
 import { PlanMyDayModal } from '@/components/dashboard/PlanMyDayModal';
 
 export default function DashboardPage() {
-  const { userProfile, issues } = useStore();
+  const { userProfile, issues, searchQuery, inspectMode, setInspectMode } = useStore();
   const isDirector = ['ceo', 'super_admin'].includes((userProfile?.role || '').toLowerCase()) || Number(userProfile?.id) === 1;
   const me = String(userProfile?.id || '');
   const myName = userProfile?.name || 'Executive';
+  const [expandedPriorityKey, setExpandedPriorityKey] = useState<string | null>(null);
+  const [expandedPriorityDetail, setExpandedPriorityDetail] = useState<any | null>(null);
 
   // State
   const [overview, setOverview] = useState<QuarterOverview | null>(null);
@@ -145,12 +151,16 @@ export default function DashboardPage() {
     window.addEventListener('task:created', handleRefresh);
     window.addEventListener('issue:updated', handleRefresh);
     window.addEventListener('issue:created', handleRefresh);
+    window.addEventListener('objective:updated', handleRefresh);
+    window.addEventListener('app:refresh', handleRefresh);
     return () => {
       window.removeEventListener('task:created', handleRefresh);
       window.removeEventListener('issue:updated', handleRefresh);
       window.removeEventListener('issue:created', handleRefresh);
+      window.removeEventListener('objective:updated', handleRefresh);
+      window.removeEventListener('app:refresh', handleRefresh);
     };
-  }, []);
+  }, [loadOverview, loadTasks, loadPlannerTasks, loadMeetings, loadObjectives]);
 
   // Open Complete Task modal with Extended Time options
   const handleTaskComplete = (taskId: number) => {
@@ -297,18 +307,149 @@ export default function DashboardPage() {
     const raw = t.deadline || t.scheduled_date || null;
     return raw ? raw.slice(0, 10) : null;
   };
-  const myOverdueTasks = allFlattenedTasks.filter(t => {
+
+  // Global Topbar Search Filter across Overview (department, assigned person, date, or title)
+  const qLower = (searchQuery || '').trim().toLowerCase();
+  const searchedTasks = useMemo(() => {
+    if (!qLower) return allFlattenedTasks;
+    return allFlattenedTasks.filter(t => {
+      const hay = [
+        t.title,
+        t.description,
+        t.project_name,
+        t.assigned_to_name,
+        t.assigned_by_name,
+        t.deadline,
+        t.scheduled_date,
+        t.parent_title,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(qLower);
+    });
+  }, [allFlattenedTasks, qLower]);
+
+  // Priorities (P1, P2, P3...) built from Department Objectives + High Priority Tasks
+  const prioritiesList = useMemo(() => {
+    const items: Array<{
+      key: string;
+      rank: number;
+      kind: 'objective' | 'task';
+      id: number;
+      title: string;
+      departmentName: string;
+      ownerName: string;
+      date: string | null;
+      status: string;
+      updatesCount: number;
+      task?: WCTask;
+      objectiveNode?: any;
+    }> = [];
+
+    if (overview?.departments) {
+      for (const dept of overview.departments) {
+        for (const obj of dept.objectives_tree || []) {
+          if (obj.status === 'done') continue;
+          const isOverdue = Boolean(obj.overdue);
+          items.push({
+            key: `obj-${obj.id}`,
+            rank: isOverdue ? 1 : 2,
+            kind: 'objective',
+            id: obj.id,
+            title: obj.code ? `${obj.code} ${obj.title}` : obj.title,
+            departmentName: dept.name,
+            ownerName: obj.owner?.name || dept.hod?.name || 'Unassigned',
+            date: obj.deadline || null,
+            status: obj.status,
+            updatesCount: obj.update_count ?? (obj.updates?.length || 0),
+            objectiveNode: obj,
+          });
+        }
+      }
+    }
+
+    for (const t of allFlattenedTasks) {
+      if (isTaskDone(t.status)) continue;
+      const pr = String(t.priority || '').toLowerCase();
+      if (!['critical', 'high', 'medium'].includes(pr)) continue;
+      if (!isDirector && String(t.assigned_to_id) !== me) continue;
+      items.push({
+        key: `task-${t.id}`,
+        rank: pr === 'critical' ? 1 : pr === 'high' ? 2 : 3,
+        kind: 'task',
+        id: t.id,
+        title: t.title,
+        departmentName: t.project_name || 'General',
+        ownerName: t.assigned_to_name || 'Unassigned',
+        date: getTaskDueDate(t),
+        status: t.status,
+        updatesCount: t.comments_count || 0,
+        task: t,
+      });
+    }
+
+    items.sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      return String(a.date || '9999').localeCompare(String(b.date || '9999'));
+    });
+
+    const filtered = !qLower
+      ? items
+      : items.filter(it =>
+          `${it.title} ${it.departmentName} ${it.ownerName} ${it.date || ''}`.toLowerCase().includes(qLower)
+        );
+
+    return filtered.slice(0, 8).map((it, idx) => ({ ...it, pLabel: `P${idx + 1}` }));
+  }, [overview, allFlattenedTasks, isDirector, me, qLower]);
+
+  // Daily once-per-day automatic "Plan Your Day Today" popup
+  useEffect(() => {
+    if (!me || typeof window === 'undefined') return;
+    if (allFlattenedTasks.length === 0) return;
+    const key = `nurofin-pmd-seen:${me}:${now}`;
+    if (localStorage.getItem(key)) return;
+    const hasMyOpenTasks = allFlattenedTasks.some(
+      t => String(t.assigned_to_id) === me && !isTaskDone(t.status)
+    );
+    if (hasMyOpenTasks) {
+      localStorage.setItem(key, '1');
+      setPlanMyDayOpen(true);
+    }
+  }, [me, now, allFlattenedTasks]);
+
+  const handleOpenPriority = async (item: (typeof prioritiesList)[number]) => {
+    if (inspectMode === 'drawer') {
+      if (item.kind === 'objective') setPanel({ kind: 'objective', id: item.id });
+      else if (item.task) setPanel({ kind: 'task', task: item.task });
+      return;
+    }
+    if (expandedPriorityKey === item.key) {
+      setExpandedPriorityKey(null);
+      setExpandedPriorityDetail(null);
+      return;
+    }
+    setExpandedPriorityKey(item.key);
+    setExpandedPriorityDetail(null);
+    if (item.kind === 'objective') {
+      departmentTargetsService.getObjective(item.id).then(setExpandedPriorityDetail).catch(() => {});
+    } else {
+      workcenterService.getComments(item.id).then(comments => setExpandedPriorityDetail({ comments })).catch(() => {});
+    }
+  };
+
+  const myOverdueTasks = searchedTasks.filter(t => {
     const isMine = String(t.assigned_to_id) === me;
     const dDate = getTaskDueDate(t);
     return isMine && Boolean(dDate && dDate < now) && !isTaskDone(t.status);
   });
   const overdueTasks = isDirector
-    ? allFlattenedTasks.filter(t => {
+    ? searchedTasks.filter(t => {
         const dDate = getTaskDueDate(t);
         return Boolean(dDate && dDate < now) && !isTaskDone(t.status);
       })
     : myOverdueTasks;
-  const todayTasks = allFlattenedTasks.filter(t => {
+  const todayTasks = searchedTasks.filter(t => {
     const isMine = String(t.assigned_to_id) === me;
     const dDate = getTaskDueDate(t);
     return isMine && dDate === now;
@@ -316,7 +457,7 @@ export default function DashboardPage() {
   const todayMeetings = meetings.filter(m => m.date === now && (isDirector || m.attendees?.includes(myName) || String(m.owner_id) === me));
 
   return (
-    <div className="max-w-7xl mx-auto w-full p-4 sm:p-6 flex flex-col gap-6 bg-background-primary text-text-primary normal-case">
+    <div className="w-full flex flex-col gap-5 bg-background-primary text-text-primary normal-case">
       {/* 1. TOP EXECUTIVE HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-border-subtle/60">
         <div>
@@ -378,46 +519,177 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 2. CORE WORKSPACE: 2-Column Canvas OR CEO Team Pulse */}
+      {/* 2. CORE WORKSPACE: Priorities (P1, P2, P3) + My Day OR CEO Team Pulse */}
       {viewMode === 'pulse' && isDirector ? (
         <CeoTeamPulse
           teammates={teammates}
-          tasks={allFlattenedTasks}
+          tasks={searchedTasks}
           meetings={meetings}
           onOpenTaskPanel={t => setPanel({ kind: 'task', task: t })}
           onAssignToTeammate={handleAssignToTeammate}
+          onRefresh={refreshAll}
         />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* LEFT: "My Day" Agenda & Smart Quick-Add */}
-          <div className="lg:col-span-8 space-y-6">
-            <MyDayView
-              tasks={allFlattenedTasks}
-              allTasks={allFlattenedTasks}
-              meetings={meetings}
-              currentUserId={me}
-              currentUserName={myName}
-              isDirector={isDirector}
-              projects={projects}
-              teammates={teammates}
-              onOpenTaskPanel={t => setPanel({ kind: 'task', task: t })}
-              onRefresh={refreshAll}
-              onOpenMeetingModal={() => setMeetingModalOpen(true)}
-              onCompleteTask={handleTaskComplete}
-              prefillAssignee={prefillAssignee}
-            />
-          </div>
+        <div className="space-y-5">
+          {/* PRIORITIES (P1, P2, P3...) with right-side Dates & Drawer/Dropdown Toggle */}
+          {prioritiesList.length > 0 && (
+            <div className="bg-background-secondary border border-border-subtle rounded-2xl p-4 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Flag size={14} className="text-accent-red" />
+                  <h2 className="text-xs font-extrabold uppercase tracking-wider text-text-primary">
+                    Priorities ({prioritiesList.length})
+                  </h2>
+                </div>
+                <div className="inline-flex items-center bg-background-primary border border-border-subtle rounded-lg p-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setInspectMode('drawer')}
+                    className={cn('px-2 py-0.5 rounded-md font-semibold inline-flex items-center gap-1 cursor-pointer', inspectMode === 'drawer' ? 'bg-accent-blue text-white' : 'text-text-secondary')}
+                  >
+                    <PanelRight size={11} /> Drawer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInspectMode('dropdown')}
+                    className={cn('px-2 py-0.5 rounded-md font-semibold inline-flex items-center gap-1 cursor-pointer', inspectMode === 'dropdown' ? 'bg-accent-blue text-white' : 'text-text-secondary')}
+                  >
+                    <ChevronDown size={11} /> Dropdown
+                  </button>
+                </div>
+              </div>
 
-          {/* RIGHT: Smart Suggestions & Overdue Drawer */}
-          <div className="lg:col-span-4 space-y-4">
-            <SmartSuggestionsDrawer
-              tasks={allFlattenedTasks}
-              currentUserId={me}
-              isDirector={isDirector}
-              onOpenTaskPanel={t => setPanel({ kind: 'task', task: t })}
-              onRefresh={refreshAll}
-              onCompleteTask={handleTaskComplete}
-            />
+              <div className="space-y-1.5">
+                {prioritiesList.map(item => {
+                  const isExpanded = inspectMode === 'dropdown' && expandedPriorityKey === item.key;
+                  const pCls = item.pLabel === 'P1'
+                    ? 'bg-accent-red/15 text-accent-red border-accent-red/30'
+                    : item.pLabel === 'P2'
+                      ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                      : 'bg-accent-blue/10 text-accent-blue border-accent-blue/25';
+                  return (
+                    <div key={item.key} className="rounded-xl border border-border-subtle bg-background-primary overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenPriority(item)}
+                        className="w-full px-3.5 py-2.5 flex items-center justify-between gap-3 hover:bg-surface-hover text-left cursor-pointer transition-colors"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <span className={cn('font-mono text-[11px] font-extrabold px-2 py-0.5 rounded-md border shrink-0', pCls)}>
+                            {item.pLabel}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[13px] font-bold text-text-primary truncate">{item.title}</div>
+                            <div className="text-[11px] text-text-secondary truncate">
+                              {item.departmentName} · {item.ownerName}
+                              {item.updatesCount > 0 && ` · ${item.updatesCount} updates`}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0 flex items-center gap-2">
+                          {item.date && (
+                            <span className={cn('text-[11.5px] font-semibold', item.date < now ? 'text-accent-red' : 'text-text-secondary')}>
+                              {formatISTDate(item.date)}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="px-4 py-3 border-t border-border-subtle bg-background-secondary/60 space-y-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-text-secondary uppercase text-[10.5px]">
+                              {item.kind === 'objective' ? 'Objectives & Updates' : 'Task Follow-ups'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => item.kind === 'objective' ? setPanel({ kind: 'objective', id: item.id }) : item.task && setPanel({ kind: 'task', task: item.task })}
+                              className="text-accent-blue font-semibold hover:underline cursor-pointer"
+                            >
+                              Open Full Drawer
+                            </button>
+                          </div>
+
+                          {item.kind === 'objective' && expandedPriorityDetail?.children?.length > 0 && (
+                            <div className="space-y-1">
+                              {expandedPriorityDetail.children.map((sub: any) => (
+                                <div key={sub.id} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-background-primary border border-border-subtle">
+                                  <span className="font-medium truncate">{sub.code} {sub.title}</span>
+                                  <span className="text-[11px] text-text-secondary shrink-0">{sub.deadline ? formatISTDate(sub.deadline) : '—'}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                            {item.kind === 'objective' ? (
+                              (expandedPriorityDetail?.updates || item.objectiveNode?.updates || []).length > 0 ? (
+                                (expandedPriorityDetail?.updates || item.objectiveNode?.updates || []).map((u: any) => (
+                                  <div key={u.id} className="p-2 rounded-lg bg-background-primary border border-border-subtle">
+                                    <div className="text-[10.5px] text-text-secondary">
+                                      <b className="text-text-primary">{formatISTDate(u.created_at)}</b> · <span className="font-mono">{formatISTTime(u.created_at, { withTimezone: false })}</span> · <b className="text-accent-blue">{u.user?.name || 'Teammate'}</b>
+                                    </div>
+                                    <div className="text-[12px] text-text-primary mt-0.5">{u.text}</div>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="text-text-secondary italic">No updates yet.</div>
+                              )
+                            ) : (
+                              (expandedPriorityDetail?.comments || []).length > 0 ? (
+                                (expandedPriorityDetail?.comments || []).map((c: any) => (
+                                  <div key={c.id} className="p-2 rounded-lg bg-background-primary border border-border-subtle">
+                                    <div className="text-[10.5px] text-text-secondary">
+                                      <b className="text-text-primary">{formatISTDate(c.created_at)}</b> · <span className="font-mono">{formatISTTime(c.created_at, { withTimezone: false })}</span> · <b className="text-accent-blue">{c.user_name || 'Teammate'}</b>
+                                    </div>
+                                    <div className="text-[12px] text-text-primary mt-0.5">{c.content}</div>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="text-text-secondary italic">No follow-ups yet.</div>
+                              )
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            {/* LEFT: "My Day" Agenda & Smart Quick-Add */}
+            <div className="lg:col-span-8 space-y-5">
+              <MyDayView
+                tasks={searchedTasks}
+                allTasks={allFlattenedTasks}
+                meetings={meetings}
+                currentUserId={me}
+                currentUserName={myName}
+                isDirector={isDirector}
+                projects={projects}
+                teammates={teammates}
+                onOpenTaskPanel={t => setPanel({ kind: 'task', task: t })}
+                onRefresh={refreshAll}
+                onOpenMeetingModal={() => setMeetingModalOpen(true)}
+                onCompleteTask={handleTaskComplete}
+                prefillAssignee={prefillAssignee}
+              />
+            </div>
+
+            {/* RIGHT: Smart Suggestions & Overdue Drawer */}
+            <div className="lg:col-span-4 space-y-4">
+              <SmartSuggestionsDrawer
+                tasks={searchedTasks}
+                currentUserId={me}
+                isDirector={isDirector}
+                onOpenTaskPanel={t => setPanel({ kind: 'task', task: t })}
+                onRefresh={refreshAll}
+                onCompleteTask={handleTaskComplete}
+              />
+            </div>
           </div>
         </div>
       )}
@@ -547,6 +819,7 @@ export default function DashboardPage() {
         isOpen={planMyDayOpen}
         onClose={() => setPlanMyDayOpen(false)}
         overdueTasks={myOverdueTasks}
+        allAssignedTasks={allFlattenedTasks}
         currentUserId={me}
         todayTasks={todayTasks}
         todayMeetings={todayMeetings}

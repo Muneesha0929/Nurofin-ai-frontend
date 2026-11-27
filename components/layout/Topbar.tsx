@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { Search, Bell, Menu, Sun, Moon } from 'lucide-react';
+import { Search, Bell, Menu, Sun, Moon, RefreshCw, X } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { cn } from '@/utils/cn';
 import NotificationShade from '@/components/notifications/NotificationShade';
@@ -18,11 +18,14 @@ export default function Topbar() {
     notifications, 
     aiStatus,
     theme,
-    setTheme
+    setTheme,
+    liveSyncConnected,
+    triggerInPlaceRefresh
   } = useStore();
 
   const [timeString, setTimeString] = useState('');
   const [shadeOpen, setShadeOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Digital Clock synchronize
   useEffect(() => {
@@ -92,18 +95,60 @@ export default function Topbar() {
           <Search className="absolute left-3 w-4 h-4 text-text-muted pointer-events-none" />
           <input
             type="text"
-            placeholder="Search tasks, meetings, compliance protocols..."
-            className="w-full h-9 bg-background-primary border border-border-subtle rounded-md pl-10 pr-4 text-xs text-text-primary placeholder-text-muted focus:border-accent-blue transition-colors font-sans"
+            placeholder="Search department, person, date, or task..."
+            className="w-full h-9 bg-background-primary border border-border-subtle rounded-md pl-10 pr-8 text-xs text-text-primary placeholder-text-muted focus:border-accent-blue transition-colors font-sans"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label="Clear search"
+              className="absolute right-2.5 text-text-muted hover:text-text-primary cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Right Area: System Status, Clock, Theme, Bell */}
-      <div className="flex items-center gap-1.5 sm:gap-4">
+      {/* Right Area: Live Sync, Refresh, Clock, Theme, Bell */}
+      <div className="flex items-center gap-1.5 sm:gap-3">
+        {/* Live Sync Indicator */}
+        <div
+          className="items-center gap-1.5 md:flex hidden bg-background-primary px-2.5 py-1.5 rounded-full border border-border-subtle text-[11px] font-medium"
+          title={liveSyncConnected ? 'Real-time live updates active' : 'Live sync reconnecting'}
+        >
+          <span
+            className={cn(
+              "w-2 h-2 rounded-full",
+              liveSyncConnected ? "bg-accent-green" : "bg-accent-orange animate-pulse"
+            )}
+          />
+          <span className="text-text-secondary font-sans">
+            {liveSyncConnected ? 'Live' : 'Sync'}
+          </span>
+        </div>
+
+        {/* In-Place Refresh Button (preserves current page, tab, and open drawer) */}
+        <button
+          type="button"
+          onClick={() => {
+            setRefreshing(true);
+            triggerInPlaceRefresh();
+            setTimeout(() => setRefreshing(false), 600);
+          }}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded-md border border-border-subtle bg-background-primary transition-colors cursor-pointer"
+          aria-label="Refresh current view"
+          title="Refresh data on this page without leaving"
+        >
+          <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin text-accent-blue")} />
+          <span className="hidden lg:inline">Refresh</span>
+        </button>
+
         {/* AI Assistant Ready dot */}
-        <div className="items-center gap-2 md:flex hidden bg-background-primary px-3 py-1.5 rounded-full border border-border-subtle text-2xs font-medium">
+        <div className="items-center gap-2 xl:flex hidden bg-background-primary px-3 py-1.5 rounded-full border border-border-subtle text-2xs font-medium">
           <span 
             className={cn(
               "w-2 h-2 rounded-full",

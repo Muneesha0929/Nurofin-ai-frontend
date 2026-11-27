@@ -25,6 +25,9 @@ interface AppState {
   aiStatus: 'idle' | 'analyzing' | 'thinking';
   selectedProvider: string;
   selectedModel: string;
+  inspectMode: 'drawer' | 'dropdown';
+  liveSyncConnected: boolean;
+  refreshTrigger: number;
   
   // App Entities
   userProfile: UserProfile;
@@ -47,6 +50,9 @@ interface AppState {
   setAiStatus: (status: 'idle' | 'analyzing' | 'thinking') => void;
   setSelectedProvider: (provider: string) => void;
   setSelectedModel: (model: string) => void;
+  setInspectMode: (mode: 'drawer' | 'dropdown') => void;
+  setLiveSyncConnected: (connected: boolean) => void;
+  triggerInPlaceRefresh: () => void;
   
   // User Profile Actions
   updateUserProfile: (profile: Partial<UserProfile>) => void;
@@ -96,6 +102,9 @@ export const useStore = create<AppState>((set) => ({
   aiStatus: 'idle',
   selectedProvider: 'openrouter',
   selectedModel: 'openai/gpt-oss-20b:free',
+  inspectMode: 'drawer',
+  liveSyncConnected: false,
+  refreshTrigger: 0,
 
   // Initial empty User Profile
   userProfile: {
@@ -165,6 +174,19 @@ export const useStore = create<AppState>((set) => ({
   setAiStatus: (status) => set({ aiStatus: status }),
   setSelectedProvider: (provider: string) => set({ selectedProvider: provider }),
   setSelectedModel: (model: string) => set({ selectedModel: model }),
+  setInspectMode: (inspectMode) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('nurofin-inspect-mode', inspectMode);
+    }
+    set({ inspectMode });
+  },
+  setLiveSyncConnected: (liveSyncConnected) => set({ liveSyncConnected }),
+  triggerInPlaceRefresh: () => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('app:refresh'));
+    }
+    set((state) => ({ refreshTrigger: state.refreshTrigger + 1 }));
+  },
 
   // User Actions
   updateUserProfile: (profile) => set((state) => ({

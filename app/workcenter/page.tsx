@@ -213,9 +213,11 @@ export default function TaskCenterPage() {
   const [savingDeptTarget, setSavingDeptTarget] = useState(false);
 
   // Filters State
+  const globalSearchQuery = useStore((s) => s.searchQuery);
   const [selectedQuarterId, setSelectedQuarterId] = useState<number | null>(null);
   const [projectFilter, setProjectFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const effectiveSearch = (searchQuery || globalSearchQuery || '').trim();
   const [statusFilter, setStatusFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
   const [viewMode, setViewMode] = useState<'kanban' | 'timeline' | 'calendar' | 'gantt' | 'table' | 'workload' | 'analytics'>('kanban');
@@ -262,9 +264,10 @@ export default function TaskCenterPage() {
     })();
 
     const activeFilterDept = deptFilterId;
-    const hashQuery = searchQuery.trim().startsWith('##') ? searchQuery.trim().slice(2).toLowerCase() : '';
+    const hashQuery = effectiveSearch.startsWith('##') ? effectiveSearch.slice(2).toLowerCase() : '';
+    const textQuery = !effectiveSearch.startsWith('##') ? effectiveSearch.toLowerCase() : '';
     const activeProj = projectFilter.trim();
-    if (!activeFilterDept && !hashQuery && !activeProj) return byTab;
+    if (!activeFilterDept && !hashQuery && !textQuery && !activeProj) return byTab;
 
     const matchesProjectTree = (item: any): boolean => {
       if (!item) return false;
@@ -289,9 +292,26 @@ export default function TaskCenterPage() {
         );
         if (!matchHash) return false;
       }
+      if (textQuery) {
+        const hay = [
+          t.title,
+          t.description,
+          t.assigned_to_name,
+          t.assigned_by_name,
+          t.project_name,
+          t.deadline,
+          t.scheduled_date,
+          link?.department?.name,
+          link?.department?.short_code,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(textQuery)) return false;
+      }
       return true;
     });
-  }, [tasks, taskFilterTab, userProfile, deptFilterId, projectFilter, searchQuery, taskLinksMap]);
+  }, [tasks, taskFilterTab, userProfile, deptFilterId, projectFilter, effectiveSearch, taskLinksMap]);
 
 
 
@@ -414,7 +434,11 @@ export default function TaskCenterPage() {
       loadData();
     };
     window.addEventListener('task:created', handleGlobalTaskCreated);
-    return () => window.removeEventListener('task:created', handleGlobalTaskCreated);
+    window.addEventListener('app:refresh', handleGlobalTaskCreated);
+    return () => {
+      window.removeEventListener('task:created', handleGlobalTaskCreated);
+      window.removeEventListener('app:refresh', handleGlobalTaskCreated);
+    };
   }, [loadData]);
 
   // Load performance detail when selected

@@ -45,7 +45,7 @@ import { Task } from '@/types';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 
 export default function PlannerPage() {
-  const { userProfile } = useStore();
+  const { userProfile, searchQuery: globalSearchQuery } = useStore();
   const currentUserId = parseInt(userProfile.id || '0');
   const isAdmin = ['super_admin', 'ceo'].includes(userProfile.role);
 
@@ -1021,10 +1021,11 @@ export default function PlannerPage() {
 
   const getSelectedUser = () => teammates.find(u => u.id === selectedUserId);
 
+  const effectivePlannerSearch = (searchQuery || globalSearchQuery || '').toLowerCase();
   const filteredTeammates = teammates.filter(u =>
-    u.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (u.department && u.department.toLowerCase().includes(searchQuery.toLowerCase()))
+    u.full_name.toLowerCase().includes(effectivePlannerSearch) ||
+    u.email.toLowerCase().includes(effectivePlannerSearch) ||
+    (u.department && u.department.toLowerCase().includes(effectivePlannerSearch))
   );
 
   const todayStr = formatDateStr(new Date());
@@ -1261,7 +1262,7 @@ export default function PlannerPage() {
 
   return (
     <>
-      <div className="flex flex-col lg:flex-row gap-6 max-w-7xl mx-auto font-sans text-text-primary">
+      <div className="flex flex-col lg:flex-row gap-5 w-full font-sans text-text-primary">
         {/* Mobile Teammate Selector Pill / Bar */}
         <div className="block lg:hidden bg-surface-card border border-border-subtle rounded-xl p-3 shadow-xs">
           <div className="flex items-center justify-between">
