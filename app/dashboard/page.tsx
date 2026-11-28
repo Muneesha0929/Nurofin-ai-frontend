@@ -59,6 +59,7 @@ export default function DashboardPage() {
   const myName = userProfile?.name || 'Executive';
   const [expandedPriorityKey, setExpandedPriorityKey] = useState<string | null>(null);
   const [expandedPriorityDetail, setExpandedPriorityDetail] = useState<any | null>(null);
+  const [priorityScope, setPriorityScope] = useState<'mine' | 'team'>('mine');
 
   // State
   const [overview, setOverview] = useState<QuarterOverview | null>(null);
@@ -232,14 +233,67 @@ export default function DashboardPage() {
     tasks.forEach(root => traverseWCTask(root));
 
     // Also incorporate plannerTasks to guarantee 100% coverage across flat & hierarchical tasks
+    // Keep standalone issues separate from Task.id map so Issue IDs never collide with Task IDs
+    const existingIssueTitles = new Set<string>();
+    const existingIssueIds = new Set<number>();
+    map.forEach(t => {
+      const src = (t as any).source;
+      if (typeof src === 'string' && src.startsWith('issue:')) {
+        const iid = parseInt(src.split(':')[1], 10);
+        if (!isNaN(iid)) existingIssueIds.add(iid);
+      }
+      if (t.title) existingIssueTitles.add(t.title.replace(/^\[Issue\]\s*/i, '').trim().toLowerCase());
+    });
+
     if (plannerTasks && Array.isArray(plannerTasks)) {
       plannerTasks.forEach((pt: any) => {
         if (!pt || !pt.id) return;
+        const isStandaloneIssue = Boolean(pt.is_issue || pt.source === 'issue');
         const idNum = Number(pt.id);
         const pId = pt.projectId ? Number(pt.projectId) : (pt.project_id ? Number(pt.project_id) : null);
         const pName = getProjectName(pId, pt.project_name);
         const assId = pt.assignedTo?.id ? Number(pt.assignedTo.id) : (pt.assigneeId ? Number(pt.assigneeId) : null);
         const assName = pt.assignedTo?.name || getAssigneeName(assId, null);
+
+        if (isStandaloneIssue) {
+          const clean = String(pt.title || '').replace(/^\[Issue\]\s*/i, '').trim().toLowerCase();
+          if (existingIssueIds.has(idNum) || existingIssueTitles.has(clean)) return;
+          const synId = -Math.abs(idNum);
+          if (!map.has(synId)) {
+            map.set(synId, {
+              id: synId,
+              issue_id: idNum,
+              is_issue: true,
+              source: 'issue',
+              title: pt.title || 'Untitled Issue',
+              description: pt.description || null,
+              status: pt.status || 'todo',
+              priority: pt.priority || 'medium',
+              deadline: pt.dueDate || pt.deadline || pt.scheduledDate || null,
+              scheduled_date: pt.scheduledDate || pt.scheduled_date || null,
+              scheduled_start_time: pt.scheduledStartTime || pt.scheduled_start_time || pt.start_time || null,
+              scheduled_end_time: pt.scheduledEndTime || pt.scheduled_end_time || pt.end_time || null,
+              start_date: pt.start_date || null,
+              estimated_hours: pt.extended_time || null,
+              progress: 0,
+              assigned_to_id: assId,
+              assigned_to_name: assName,
+              assigned_to_avatar: pt.assignedTo?.avatar || null,
+              assigned_by_id: null,
+              assigned_by_name: null,
+              reviewer_id: null,
+              reviewer_name: null,
+              project_id: pId,
+              project_name: pName,
+              parent_id: null,
+              quarter_id: null,
+              meeting_id: null,
+              subtasks: [],
+              created_at: pt.createdAt || null,
+            } as any);
+          }
+          return;
+        }
 
         if (!map.has(idNum)) {
           map.set(idNum, {
@@ -330,8 +384,9 @@ export default function DashboardPage() {
     });
   }, [allFlattenedTasks, qLower]);
 
-  // Priorities (P1, P2, P3...) built from Department Objectives + High Priority Tasks
+  // Priorities (P1, P2, P3...): scoped strictly to the current member's assigned objectives & deadline tasks under them (CEO can toggle My vs Team)
   const prioritiesList = useMemo(() => {
+    const showAllTeam = isDirector && priorityScope === 'team';
     const items: Array<{
       key: string;
       rank: number;
@@ -343,65 +398,139 @@ export default function DashboardPage() {
       date: string | null;
       status: string;
       updatesCount: number;
+      objectiveTitle?: string;
       task?: WCTask;
       objectiveNode?: any;
     }> = [];
+    const seenKeys = new Set<string>();
+
+    const walkTaskTree = (t: any, deptName: string, objTitle: string) => {
+      if (!t || !t.id) return;
+      const done = Boolean(t.done) || isTaskDone(t.status);
+      const assignedToMe = t.assignee?.id != null && String(t.assignee.id) === me;
+      if (!done && (showAllTeam || assignedToMe)) {
+        const key = `task-${t.id}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          const dl = t.deadline ? String(t.deadline).slice(0, 10) : null;
+          const isOverdueOrToday = Boolean(dl && dl <= now);
+          const pr = String(t.priority || 'medium').toLowerCase();
+          items.push({
+            key,
+            rank: isOverdueOrToday ? 1 : pr === 'critical' ? 1 : pr === 'high' ? 2 : dl ? 2 : 3,
+            kind: 'task',
+            id: t.id,
+            title: t.title,
+            departmentName: deptName,
+            ownerName: t.assignee?.name || 'Unassigned',
+            date: dl,
+            status: t.status,
+            updatesCount: t.followup_count ?? (t.followups?.length || 0),
+            objectiveTitle: objTitle,
+            task: {
+              ...t,
+              assigned_to_id: t.assignee?.id ?? null,
+              assigned_to_name: t.assignee?.name ?? null,
+              assigned_to_avatar: t.assignee?.avatar ?? null,
+            } as WCTask,
+          });
+        }
+      }
+      if (Array.isArray(t.subtasks)) {
+        t.subtasks.forEach((st: any) => walkTaskTree(st, deptName, objTitle));
+      }
+    };
+
+    const walkObjective = (node: any, deptName: string) => {
+      if (!node || !node.id) return;
+      const isObjDone = node.status === 'done';
+      const isOwnedByMe = node.owner?.id != null && String(node.owner.id) === me;
+
+      // Include objective-level priority if owned by me (or CEO Team view) and active
+      if (!isObjDone && (showAllTeam || isOwnedByMe)) {
+        const key = `obj-${node.id}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          const dl = node.deadline ? String(node.deadline).slice(0, 10) : null;
+          const isOverdueOrToday = Boolean(dl && dl <= now);
+          items.push({
+            key,
+            rank: isOverdueOrToday ? 1 : dl ? 2 : 3,
+            kind: 'objective',
+            id: node.id,
+            title: node.code ? `${node.code} ${node.title}` : node.title,
+            departmentName: deptName,
+            ownerName: node.owner?.name || 'Unassigned',
+            date: dl,
+            status: node.status,
+            updatesCount: node.update_count ?? (node.updates?.length || 0),
+            objectiveNode: node,
+          });
+        }
+      }
+
+      // Include tasks under this objective that are assigned to me (or all if CEO Team view)
+      if (Array.isArray(node.tasks)) {
+        node.tasks.forEach((t: any) => walkTaskTree(t, deptName, node.code ? `${node.code} ${node.title}` : node.title));
+      }
+      if (Array.isArray(node.children)) {
+        node.children.forEach((sub: any) => walkObjective(sub, deptName));
+      }
+    };
 
     if (overview?.departments) {
       for (const dept of overview.departments) {
         for (const obj of dept.objectives_tree || []) {
-          if (obj.status === 'done') continue;
-          const isOverdue = Boolean(obj.overdue);
-          items.push({
-            key: `obj-${obj.id}`,
-            rank: isOverdue ? 1 : 2,
-            kind: 'objective',
-            id: obj.id,
-            title: obj.code ? `${obj.code} ${obj.title}` : obj.title,
-            departmentName: dept.name,
-            ownerName: obj.owner?.name || dept.hod?.name || 'Unassigned',
-            date: obj.deadline || null,
-            status: obj.status,
-            updatesCount: obj.update_count ?? (obj.updates?.length || 0),
-            objectiveNode: obj,
-          });
+          walkObjective(obj, dept.name);
         }
       }
     }
 
-    for (const t of allFlattenedTasks) {
-      if (isTaskDone(t.status)) continue;
-      const pr = String(t.priority || '').toLowerCase();
-      if (!['critical', 'high', 'medium'].includes(pr)) continue;
-      if (!isDirector && String(t.assigned_to_id) !== me) continue;
-      items.push({
-        key: `task-${t.id}`,
-        rank: pr === 'critical' ? 1 : pr === 'high' ? 2 : 3,
-        kind: 'task',
-        id: t.id,
-        title: t.title,
-        departmentName: t.project_name || 'General',
-        ownerName: t.assigned_to_name || 'Unassigned',
-        date: getTaskDueDate(t),
-        status: t.status,
-        updatesCount: t.comments_count || 0,
-        task: t,
-      });
-    }
-
+    // Sort strictly: tasks/objectives with deadlines first (overdue/soonest deadline -> P1, P2, P3...)
     items.sort((a, b) => {
       if (a.rank !== b.rank) return a.rank - b.rank;
-      return String(a.date || '9999').localeCompare(String(b.date || '9999'));
+      const da = a.date || '9999-12-31';
+      const db = b.date || '9999-12-31';
+      if (da !== db) return da.localeCompare(db);
+      return a.kind === 'objective' && b.kind !== 'objective' ? -1 : 1;
     });
 
     const filtered = !qLower
       ? items
       : items.filter(it =>
-          `${it.title} ${it.departmentName} ${it.ownerName} ${it.date || ''}`.toLowerCase().includes(qLower)
+          `${it.title} ${it.departmentName} ${it.ownerName} ${it.objectiveTitle || ''} ${it.date || ''}`.toLowerCase().includes(qLower)
         );
 
-    return filtered.slice(0, 8).map((it, idx) => ({ ...it, pLabel: `P${idx + 1}` }));
-  }, [overview, allFlattenedTasks, isDirector, me, qLower]);
+    return filtered.slice(0, 10).map((it, idx) => ({ ...it, pLabel: `P${idx + 1}` }));
+  }, [overview, isDirector, priorityScope, me, qLower, now]);
+
+  // Map task ID -> priority label (P1, P2, P3...) for Plan My Day ordering & warnings
+  const priorityTaskRanks = useMemo(() => {
+    const map: Record<number, { label: string; rank: number; objectiveTitle?: string }> = {};
+    prioritiesList.forEach((it, idx) => {
+      const rank = idx + 1;
+      const label = it.pLabel;
+      if (it.kind === 'task') {
+        map[Number(it.id)] = { label, rank, objectiveTitle: it.objectiveTitle };
+      } else if (it.kind === 'objective' && it.objectiveNode) {
+        const assignNodeTasks = (node: any) => {
+          for (const t of node.tasks || []) {
+            const assignedToMe = t.assignee?.id != null && String(t.assignee.id) === me;
+            if (!t.done && (isDirector || assignedToMe) && !map[Number(t.id)]) {
+              map[Number(t.id)] = {
+                label,
+                rank,
+                objectiveTitle: node.code ? `${node.code} ${node.title}` : node.title,
+              };
+            }
+          }
+          for (const sub of node.children || []) assignNodeTasks(sub);
+        };
+        assignNodeTasks(it.objectiveNode);
+      }
+    });
+    return map;
+  }, [prioritiesList, isDirector, me]);
 
   // Daily once-per-day automatic "Plan Your Day Today" popup
   useEffect(() => {
@@ -457,9 +586,9 @@ export default function DashboardPage() {
   const todayMeetings = meetings.filter(m => m.date === now && (isDirector || m.attendees?.includes(myName) || String(m.owner_id) === me));
 
   return (
-    <div className="w-full flex flex-col gap-5 bg-background-primary text-text-primary normal-case">
+    <div className="w-full max-w-[1440px] mx-auto flex flex-col gap-5 text-text-primary normal-case">
       {/* 1. TOP EXECUTIVE HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-border-subtle/60">
+      <div className="bg-background-secondary/85 border border-border-subtle rounded-2xl px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <Greeting name={userProfile?.name} />
           <p className="text-xs text-text-secondary mt-0.5">
@@ -531,69 +660,92 @@ export default function DashboardPage() {
         />
       ) : (
         <div className="space-y-5">
-          {/* PRIORITIES (P1, P2, P3...) with right-side Dates & Drawer/Dropdown Toggle */}
-          {prioritiesList.length > 0 && (
-            <div className="bg-background-secondary border border-border-subtle rounded-2xl p-4 space-y-2.5">
+          {/* PRIORITIES (P1, P2, P3...) scoped to my assigned objectives & deadlines */}
+          {(prioritiesList.length > 0 || isDirector) && (
+            <div className="bg-background-secondary border border-border-subtle rounded-2xl p-4 sm:p-5 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Flag size={14} className="text-accent-red" />
                   <h2 className="text-xs font-extrabold uppercase tracking-wider text-text-primary">
-                    Priorities ({prioritiesList.length})
+                    My Objective Priorities ({prioritiesList.length})
                   </h2>
                 </div>
-                <div className="inline-flex items-center bg-background-primary border border-border-subtle rounded-lg p-0.5 text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => setInspectMode('drawer')}
-                    className={cn('px-2 py-0.5 rounded-md font-semibold inline-flex items-center gap-1 cursor-pointer', inspectMode === 'drawer' ? 'bg-accent-blue text-white' : 'text-text-secondary')}
-                  >
-                    <PanelRight size={11} /> Drawer
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInspectMode('dropdown')}
-                    className={cn('px-2 py-0.5 rounded-md font-semibold inline-flex items-center gap-1 cursor-pointer', inspectMode === 'dropdown' ? 'bg-accent-blue text-white' : 'text-text-secondary')}
-                  >
-                    <ChevronDown size={11} /> Dropdown
-                  </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {isDirector && (
+                    <div className="inline-flex items-center bg-background-primary border border-border-subtle rounded-lg p-0.5 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => setPriorityScope('mine')}
+                        className={cn('px-2 py-0.5 rounded-md font-semibold cursor-pointer', priorityScope === 'mine' ? 'bg-accent-blue text-white' : 'text-text-secondary')}
+                      >
+                        My Assigned
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPriorityScope('team')}
+                        className={cn('px-2 py-0.5 rounded-md font-semibold cursor-pointer', priorityScope === 'team' ? 'bg-accent-blue text-white' : 'text-text-secondary')}
+                      >
+                        All Team
+                      </button>
+                    </div>
+                  )}
+                  <div className="inline-flex items-center bg-background-primary border border-border-subtle rounded-lg p-0.5 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setInspectMode('drawer')}
+                      className={cn('px-2 py-0.5 rounded-md font-semibold inline-flex items-center gap-1 cursor-pointer', inspectMode === 'drawer' ? 'bg-accent-blue text-white' : 'text-text-secondary')}
+                    >
+                      <PanelRight size={11} /> Drawer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setInspectMode('dropdown')}
+                      className={cn('px-2 py-0.5 rounded-md font-semibold inline-flex items-center gap-1 cursor-pointer', inspectMode === 'dropdown' ? 'bg-accent-blue text-white' : 'text-text-secondary')}
+                    >
+                      <ChevronDown size={11} /> Dropdown
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                {prioritiesList.map(item => {
-                  const isExpanded = inspectMode === 'dropdown' && expandedPriorityKey === item.key;
-                  const pCls = item.pLabel === 'P1'
-                    ? 'bg-accent-red/15 text-accent-red border-accent-red/30'
-                    : item.pLabel === 'P2'
-                      ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                      : 'bg-accent-blue/10 text-accent-blue border-accent-blue/25';
-                  return (
-                    <div key={item.key} className="rounded-xl border border-border-subtle bg-background-primary overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenPriority(item)}
-                        className="w-full px-3.5 py-2.5 flex items-center justify-between gap-3 hover:bg-surface-hover text-left cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                          <span className={cn('font-mono text-[11px] font-extrabold px-2 py-0.5 rounded-md border shrink-0', pCls)}>
-                            {item.pLabel}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-[13px] font-bold text-text-primary truncate">{item.title}</div>
-                            <div className="text-[11px] text-text-secondary truncate">
-                              {item.departmentName} · {item.ownerName}
-                              {item.updatesCount > 0 && ` · ${item.updatesCount} updates`}
+              {prioritiesList.length === 0 ? (
+                <div className="text-xs text-text-secondary py-2">No active priorities assigned under your objectives right now.</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {prioritiesList.map(item => {
+                    const isExpanded = inspectMode === 'dropdown' && expandedPriorityKey === item.key;
+                    const pCls = item.pLabel === 'P1'
+                      ? 'bg-accent-red/15 text-accent-red border-accent-red/30'
+                      : item.pLabel === 'P2'
+                        ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                        : 'bg-accent-blue/10 text-accent-blue border-accent-blue/25';
+                    return (
+                      <div key={item.key} className="rounded-xl border border-border-subtle bg-background-primary overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenPriority(item)}
+                          className="w-full px-3.5 py-2.5 flex items-center justify-between gap-3 hover:bg-surface-hover text-left cursor-pointer transition-colors"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <span className={cn('font-mono text-[11px] font-extrabold px-2 py-0.5 rounded-md border shrink-0', pCls)}>
+                              {item.pLabel}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[13px] font-bold text-text-primary truncate">{item.title}</div>
+                              <div className="text-[11px] text-text-secondary truncate">
+                                {item.departmentName}
+                                {item.objectiveTitle ? ` · ${item.objectiveTitle}` : ''}
+                                {` · ${item.ownerName}`}
+                                {item.updatesCount > 0 ? ` · ${item.updatesCount} updates` : ''}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <div className="text-right shrink-0 flex items-center gap-2">
-                          {item.date && (
-                            <span className={cn('text-[11.5px] font-semibold', item.date < now ? 'text-accent-red' : 'text-text-secondary')}>
-                              {formatISTDate(item.date)}
+                          <div className="text-right shrink-0 flex items-center gap-2">
+                            <span className={cn('text-[11.5px] font-semibold', item.date && item.date <= now ? 'text-accent-red' : 'text-text-secondary')}>
+                              {item.date ? formatISTDate(item.date) : 'No deadline'}
                             </span>
-                          )}
-                        </div>
-                      </button>
+                          </div>
+                        </button>
 
                       {isExpanded && (
                         <div className="px-4 py-3 border-t border-border-subtle bg-background-secondary/60 space-y-2 text-xs">
@@ -655,7 +807,8 @@ export default function DashboardPage() {
                     </div>
                   );
                 })}
-              </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -820,6 +973,7 @@ export default function DashboardPage() {
         onClose={() => setPlanMyDayOpen(false)}
         overdueTasks={myOverdueTasks}
         allAssignedTasks={allFlattenedTasks}
+        priorityRanks={priorityTaskRanks}
         currentUserId={me}
         todayTasks={todayTasks}
         todayMeetings={todayMeetings}
@@ -866,17 +1020,20 @@ export default function DashboardPage() {
               if (completing === null) return;
               const ext = parseFloat(extendedTime);
               try { 
-                await workcenterService.updateTask(completing, { 
-                  status: 'completed', 
-                  extended_time: isNaN(ext) ? undefined : ext, 
-                  actual_completion_date: completionDate 
-                }); 
+                const realIssueId = (completingTask as any)?.issue_id ?? (completing < 0 ? Math.abs(completing) : null);
+                if (completing > 0) {
+                  await workcenterService.updateTask(completing, { 
+                    status: 'completed', 
+                    extended_time: isNaN(ext) ? undefined : ext, 
+                    actual_completion_date: completionDate 
+                  });
+                }
 
                 // Two-way sync: update corresponding Issue to resolved!
                 if (completingTask) {
-                  let issueId: number | null = null;
+                  let issueId: number | null = realIssueId;
                   const src = (completingTask as any).source;
-                  if (typeof src === 'string' && src.startsWith('issue:')) {
+                  if (!issueId && typeof src === 'string' && src.startsWith('issue:')) {
                     issueId = parseInt(src.split(':')[1], 10);
                   }
                   if (!issueId && isIssue) {

@@ -35,6 +35,9 @@ async function api<T = any>(url: string, opts?: RequestInit): Promise<T> {
     throw new Error(err.detail || err.message || 'Request failed');
   }
   const json = await res.json();
+  if (json && json.status === 'error') {
+    throw new Error(json.message || 'Request failed');
+  }
   return json.data ?? json;
 }
 
