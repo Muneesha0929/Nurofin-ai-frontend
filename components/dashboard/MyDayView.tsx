@@ -288,14 +288,23 @@ export function MyDayView({
     }
     setIsSavingTiming(true);
     try {
-      await workcenterService.updateTask(timingTask.id, {
-        scheduled_start_time: newStart,
-        scheduled_end_time: newEnd,
-      });
+      const realIssueId = (timingTask as any).issue_id ?? (timingTask.id < 0 ? Math.abs(timingTask.id) : null);
+      if (realIssueId && timingTask.id < 0) {
+        await issuesService.updateIssue(realIssueId, {
+          scheduled_date: now,
+          scheduled_start_time: newStart,
+          scheduled_end_time: newEnd,
+        } as any);
+      } else {
+        await workcenterService.updateTask(timingTask.id, {
+          scheduled_start_time: newStart,
+          scheduled_end_time: newEnd,
+        });
+      }
       setTimingTask(null);
       onRefresh();
-    } catch (err) {
-      console.error('Failed to update task timing:', err);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to update task timing.');
     } finally {
       setIsSavingTiming(false);
     }
@@ -306,14 +315,22 @@ export function MyDayView({
     if (!timingTask) return;
     setIsSavingTiming(true);
     try {
-      await workcenterService.updateTask(timingTask.id, {
-        scheduled_start_time: null,
-        scheduled_end_time: null,
-      } as any);
+      const realIssueId = (timingTask as any).issue_id ?? (timingTask.id < 0 ? Math.abs(timingTask.id) : null);
+      if (realIssueId && timingTask.id < 0) {
+        await issuesService.updateIssue(realIssueId, {
+          scheduled_start_time: '',
+          scheduled_end_time: '',
+        } as any);
+      } else {
+        await workcenterService.updateTask(timingTask.id, {
+          scheduled_start_time: '',
+          scheduled_end_time: '',
+        } as any);
+      }
       setTimingTask(null);
       onRefresh();
-    } catch (err) {
-      console.error('Failed to clear task timing:', err);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to clear task timing.');
     } finally {
       setIsSavingTiming(false);
     }

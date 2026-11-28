@@ -48,6 +48,8 @@ export interface ObjectiveNode {
   health?: Health;
   progress_from?: 'tasks' | 'children' | 'manual';
   tasks: LinkedTask[];
+  updates?: ObjectiveUpdateEntry[];
+  update_count?: number;
   children: ObjectiveNode[];
 }
 
@@ -81,6 +83,9 @@ export interface LinkedTask {
   deadline: string | null;
   original_deadline?: string | null;
   deadline_changes?: number;
+  scheduled_date?: string | null;
+  scheduled_start_time?: string | null;
+  scheduled_end_time?: string | null;
   progress?: number;
   overdue: boolean;
   project_id?: number | null;

@@ -23,16 +23,30 @@ export function CompleteTaskModal({
 }: CompleteTaskModalProps) {
   const [completionDate, setCompletionDate] = useState(new Date().toISOString().split('T')[0]);
   const [mounted, setMounted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  useEffect(() => {
+    if (isOpen) {
+      setSubmitting(false);
+      setCompletionDate(new Date().toISOString().split('T')[0]);
+    }
+  }, [isOpen]);
+
   if (!isOpen || !mounted) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(taskExtendedTime, completionDate);
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onSubmit(taskExtendedTime, completionDate);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const quickHours = [
@@ -43,11 +57,18 @@ export function CompleteTaskModal({
   ];
 
   const modalContent = (
-    <div className="fixed inset-0 z-[10050] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-[10050] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      onClick={e => {
+        e.stopPropagation();
+        if (!submitting) onClose();
+      }}
+    >
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
+        onClick={e => e.stopPropagation()}
         className="bg-surface-card border border-border-subtle rounded-xl p-6 shadow-2xl w-full max-w-sm flex flex-col gap-4 relative z-[10060]"
       >
         <h3 className="text-lg font-bold text-text-primary flex items-center gap-2">
@@ -117,21 +138,23 @@ export function CompleteTaskModal({
           <div className="flex gap-2 justify-end mt-2 pt-4 border-t border-border-subtle">
             <button
               type="button"
+              disabled={submitting}
               onClick={onClose}
-              className="px-4 h-10 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded-lg font-bold transition-all text-xs cursor-pointer"
+              className="px-4 h-10 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded-lg font-bold transition-all text-xs cursor-pointer disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
+              disabled={submitting}
               className={cn(
-                "px-6 h-10 text-white font-bold rounded-lg shadow-md transition-all text-xs cursor-pointer",
+                "px-6 h-10 text-white font-bold rounded-lg shadow-md transition-all text-xs cursor-pointer disabled:opacity-60",
                 isIssue 
                   ? "bg-amber-600 hover:bg-amber-700" 
                   : "bg-green-500 hover:bg-green-600"
               )}
             >
-              {isIssue ? 'Mark as Resolved' : 'Mark Complete'}
+              {submitting ? 'Saving...' : isIssue ? 'Mark as Resolved' : 'Mark Complete'}
             </button>
           </div>
         </form>

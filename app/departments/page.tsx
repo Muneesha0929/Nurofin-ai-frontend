@@ -4,11 +4,12 @@ import React, { Suspense, createContext, useCallback, useContext, useEffect, use
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  Building2, Plus, ChevronRight, ChevronLeft, Pencil, Trash2, X, Users, Target, Calendar, CheckCircle2, AlertCircle, FolderKanban,
+  Building2, Plus, ChevronRight, ChevronLeft, Pencil, Trash2, X, Users, Target, Calendar, CheckCircle2, AlertCircle, FolderKanban, MessageSquare, Send, PanelRight, ChevronDown,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { HoldToDelete } from '@/components/HoldToDelete';
 import { cn } from '@/utils/cn';
+import { formatISTDate, formatISTTime } from '@/utils/date';
 import { usersService } from '@/services/users';
 import { projectsService } from '@/services/projects';
 import { Project } from '@/types';
@@ -95,7 +96,7 @@ function DepartmentsRouter() {
 /* ============================================================ list */
 
 function DepartmentList() {
-  const { userProfile } = useStore();
+  const { userProfile, searchQuery } = useStore();
   const director = isDirectorRole(userProfile?.role);
   const [data, setData] = useState<QuarterOverview | null>(null);
   const [error, setError] = useState('');
@@ -112,6 +113,29 @@ function DepartmentList() {
     api.overview().then(setData).catch(e => setError(e.message));
   }, []);
   useEffect(load, [load]);
+  useEffect(() => {
+    const onRefresh = () => load();
+    window.addEventListener('app:refresh', onRefresh);
+    window.addEventListener('objective:updated', onRefresh);
+    window.addEventListener('task:created', onRefresh);
+    return () => {
+      window.removeEventListener('app:refresh', onRefresh);
+      window.removeEventListener('objective:updated', onRefresh);
+      window.removeEventListener('task:created', onRefresh);
+    };
+  }, [load]);
+
+  const filteredDepartments = useMemo(() => {
+    if (!data?.departments) return [];
+    const q = (searchQuery || '').trim().toLowerCase();
+    if (!q) return data.departments;
+    return data.departments.filter(d =>
+      d.name.toLowerCase().includes(q) ||
+      (d.short_code && d.short_code.toLowerCase().includes(q)) ||
+      (d.hod?.name && d.hod.name.toLowerCase().includes(q)) ||
+      d.members.some(m => m.name.toLowerCase().includes(q))
+    );
+  }, [data, searchQuery]);
   useEffect(() => {
     const id = Number(params.get('undo'));
     if (id) { setUndo({ id, name: params.get('name') || 'Department' }); router.replace('/departments'); }
@@ -157,7 +181,7 @@ function DepartmentList() {
 
       {data && data.departments.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {data.departments.map(d => (
+          {filteredDepartments.map(d => (
             <div key={d.id} className="relative group/card">
               <DeptCard d={d} quarter={data.quarter} />
               {director && (
@@ -283,6 +307,7 @@ function DepartmentForm({ dept, onClose, onSaved, onDeleted }: { dept?: TargetDe
 /* ============================================================ department page */
 
 function DepartmentView({ id, focusId }: { id: number; focusId: number | null }) {
+  const { inspectMode, setInspectMode } = useStore();
   const [fy, setFy] = useState<number | undefined>(undefined);
   const [data, setData] = useState<DepartmentDetail | null>(null);
   const [error, setError] = useState('');
@@ -327,6 +352,18 @@ function DepartmentView({ id, focusId }: { id: number; focusId: number | null })
     setOpen(prev => (prev.has(q.quarter_number) ? prev : new Set(prev).add(q.quarter_number)));
     return scrollAndFlash(`objective-${focusId}`);
   }, [focusId, data]);
+
+  useEffect(() => {
+    const onRefresh = () => load();
+    window.addEventListener('app:refresh', onRefresh);
+    window.addEventListener('objective:updated', onRefresh);
+    window.addEventListener('task:created', onRefresh);
+    return () => {
+      window.removeEventListener('app:refresh', onRefresh);
+      window.removeEventListener('objective:updated', onRefresh);
+      window.removeEventListener('task:created', onRefresh);
+    };
+  }, [load]);
 
   if (error) return <><BackLink /><ErrorNote text={error} /></>;
   if (!data) return <div className="text-[13px] text-text-secondary animate-pulse">Loading department…</div>;
@@ -392,11 +429,29 @@ function DepartmentView({ id, focusId }: { id: number; focusId: number | null })
       <div className="flex flex-wrap items-center justify-between gap-3 mt-1">
         <div>
           <div className="text-[15px] font-extrabold">Quarters · {data.fy_label}</div>
-          <div className="text-[12.5px] text-text-secondary">Open a quarter to read the Director’s target, then view the objectives set from it.</div>
+          <div className="text-[12.5px] text-text-secondary">Click the left arrow (▸) on any objective to reveal its tasks and follow-ups.</div>
         </div>
-        <div className="flex items-center gap-1">
-          <Btn kind="ghost" onClick={() => { setOpen(new Set()); setFy(data.fiscal_year - 1); }} aria-label="Previous financial year"><ChevronLeft size={14} /> FY {data.fiscal_year - 1}-{String(data.fiscal_year).slice(-2)}</Btn>
-          <Btn kind="ghost" onClick={() => { setOpen(new Set()); setFy(data.fiscal_year + 1); }} aria-label="Next financial year">FY {data.fiscal_year + 1}-{String(data.fiscal_year + 2).slice(-2)} <ChevronRight size={14} /></Btn>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex items-center bg-background-secondary border border-border-subtle rounded-lg p-0.5 text-[11.5px]" title="Choose how task & objective details open">
+            <button
+              type="button"
+              onClick={() => setInspectMode('drawer')}
+              className={cn('px-2.5 py-1 rounded-md font-semibold inline-flex items-center gap-1 cursor-pointer', inspectMode === 'drawer' ? 'bg-accent-blue text-white' : 'text-text-secondary hover:text-text-primary')}
+            >
+              <PanelRight size={12} /> Drawer
+            </button>
+            <button
+              type="button"
+              onClick={() => setInspectMode('dropdown')}
+              className={cn('px-2.5 py-1 rounded-md font-semibold inline-flex items-center gap-1 cursor-pointer', inspectMode === 'dropdown' ? 'bg-accent-blue text-white' : 'text-text-secondary hover:text-text-primary')}
+            >
+              <ChevronDown size={12} /> Dropdown
+            </button>
+          </div>
+          <div className="flex items-center gap-1">
+            <Btn kind="ghost" onClick={() => { setOpen(new Set()); setFy(data.fiscal_year - 1); }} aria-label="Previous financial year"><ChevronLeft size={14} /> FY {data.fiscal_year - 1}-{String(data.fiscal_year).slice(-2)}</Btn>
+            <Btn kind="ghost" onClick={() => { setOpen(new Set()); setFy(data.fiscal_year + 1); }} aria-label="Next financial year">FY {data.fiscal_year + 1}-{String(data.fiscal_year + 2).slice(-2)} <ChevronRight size={14} /></Btn>
+          </div>
         </div>
       </div>
 
@@ -565,11 +620,14 @@ function ObjectiveList({ dept, q, projects, reload }: { dept: DepartmentDetail; 
 }
 
 function ObjectiveCard({ o, n, dept, q, people, projects, reload }: { o: ObjectiveNode; n: number; dept: DepartmentDetail; q: DepartmentQuarter; people: PersonBrief[]; projects: Project[]; reload: () => void }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [showFollowups, setShowFollowups] = useState(false);
+  const [objUpdateText, setObjUpdateText] = useState('');
+  const [postingObjUpdate, setPostingObjUpdate] = useState(false);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editingProject, setEditingProject] = useState(false);
-  const { userProfile } = useStore();
+  const { userProfile, inspectMode } = useStore();
   const me = dept.me ?? userProfile?.id;
   const { can_plan } = dept.permissions;
   const canEditProj = can_plan || (o.owner && String(o.owner.id) === String(me));
@@ -585,6 +643,22 @@ function ObjectiveCard({ o, n, dept, q, people, projects, reload }: { o: Objecti
   const holdsFocus = hasFocus(o, focusId);
   useEffect(() => { if (holdsFocus) setOpen(true); }, [holdsFocus]);
 
+  const updates = o.updates || [];
+  const updateCount = o.update_count ?? updates.length;
+
+  const postObjUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!objUpdateText.trim()) return;
+    setPostingObjUpdate(true);
+    try {
+      await api.postUpdate(o.id, objUpdateText.trim());
+      setObjUpdateText('');
+      reload();
+    } catch {} finally {
+      setPostingObjUpdate(false);
+    }
+  };
+
   if (editing) {
     return <ObjectiveForm people={people} projects={projects} initial={o} code={objCode} q={q} onCancel={() => setEditing(false)}
       onSubmit={async v => { await api.updateObjective(o.id, v); setEditing(false); reload(); }} />;
@@ -593,14 +667,26 @@ function ObjectiveCard({ o, n, dept, q, people, projects, reload }: { o: Objecti
   return (
     <div id={`objective-${o.id}`} className="border border-border-subtle rounded-xl overflow-hidden scroll-mt-24">
       <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3', p1Accent(prio))}>
-        <button onClick={() => setOpen(!open)} aria-expanded={open} aria-label="Show sub-objectives" className="text-text-secondary hover:text-text-primary">
+        <button onClick={() => setOpen(!open)} aria-expanded={open} aria-label="Show tasks and sub-objectives" title={open ? 'Hide tasks & sub-objectives' : 'Show tasks & sub-objectives'} className="text-text-secondary hover:text-text-primary cursor-pointer">
           <ChevronRight size={15} className={cn('transition-transform', open && 'rotate-90')} />
         </button>
         <CodeChip code={objCode} />
         <div className="flex-1 min-w-[220px]">
           <div className="flex items-center gap-2 flex-wrap min-w-0">
-            <button onClick={() => openPanel(o.id)} title={o.title} className="text-[13.5px] font-bold text-left hover:text-accent-blue min-w-0 max-w-full break-words">{o.title}</button>
+            <button onClick={() => (inspectMode === 'dropdown' ? setOpen(!open) : openPanel(o.id))} title={o.title} className="text-[13.5px] font-bold text-left hover:text-accent-blue cursor-pointer min-w-0 max-w-full break-words">{o.title}</button>
             <PriorityPicker objectiveId={o.id} value={prio} canEdit={canPrio} onChanged={p => { setPrio(p); reload(); }} />
+            {updateCount > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (inspectMode === 'drawer') openPanel(o.id);
+                  else { setOpen(true); setShowFollowups(!showFollowups); }
+                }}
+                className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-0.5 rounded-full bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 cursor-pointer"
+              >
+                <MessageSquare size={10} /> {updateCount} {updateCount === 1 ? 'follow-up' : 'follow-ups'}
+              </button>
+            )}
             {editingProject ? (
               <select
                 autoFocus
@@ -653,6 +739,42 @@ function ObjectiveCard({ o, n, dept, q, people, projects, reload }: { o: Objecti
       </div>
       {open && (
         <div className="border-t border-border-subtle">
+          {/* Objective Follow-ups / Updates */}
+          {(updates.length > 0 || showFollowups) && (
+            <div className="px-4 py-2.5 pl-12 bg-background-primary/40 border-b border-border-subtle space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10.5px] font-bold uppercase tracking-wider text-text-secondary flex items-center gap-1">
+                  <MessageSquare size={11} className="text-accent-blue" /> Objective Follow-ups ({updateCount})
+                </span>
+                <button type="button" onClick={() => openPanel(o.id)} className="text-[11px] font-semibold text-accent-blue hover:underline cursor-pointer">
+                  Open in Drawer
+                </button>
+              </div>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                {updates.map(u => (
+                  <div key={u.id} className="rounded-lg border border-border-subtle bg-background-secondary px-2.5 py-2 text-[12px] space-y-0.5">
+                    <div className="text-[11px] text-text-secondary flex flex-wrap items-center gap-1.5">
+                      <span className="font-semibold text-text-primary">{formatISTDate(u.created_at)}</span>
+                      <span className="font-mono">· {formatISTTime(u.created_at, { withTimezone: false })}</span>
+                      <span className="font-bold text-accent-blue">· {u.user?.name || 'Teammate'}</span>
+                    </div>
+                    <div className="text-text-primary whitespace-pre-line">{u.text}</div>
+                  </div>
+                ))}
+              </div>
+              <form onSubmit={postObjUpdate} className="flex items-center gap-1.5">
+                <input
+                  value={objUpdateText}
+                  onChange={e => setObjUpdateText(e.target.value)}
+                  placeholder={`Post follow-up on Objective ${objCode}...`}
+                  className="flex-1 rounded-md border border-border-subtle bg-background-primary px-2.5 py-1 text-[11.5px] outline-none focus:border-accent-blue"
+                />
+                <button type="submit" disabled={postingObjUpdate || !objUpdateText.trim()} className="px-2.5 py-1 rounded-md bg-accent-blue text-white text-[11px] font-semibold disabled:opacity-50 inline-flex items-center gap-1 cursor-pointer">
+                  <Send size={10} /> Post
+                </button>
+              </form>
+            </div>
+          )}
           {o.children.map((c, j) => <SubRow key={c.id} c={c} code={codeOf(c, prefix, `${o.code || n}.${j + 1}`)} dept={dept} q={q} people={people} projects={projects} reload={reload} />)}
           <div className="px-4 py-1.5 border-t border-border-subtle first:border-t-0 pl-12">
             {o.tasks.length > 0 && <div className="text-[10.5px] font-bold uppercase tracking-[0.06em] text-text-secondary pt-1">Tasks directly on this objective</div>}
@@ -682,9 +804,10 @@ function ObjectiveCard({ o, n, dept, q, people, projects, reload }: { o: Objecti
 }
 
 function SubRow({ c, code, dept, q, people, projects, reload }: { c: ObjectiveNode; code: string; dept: DepartmentDetail; q: DepartmentQuarter; people: PersonBrief[]; projects: Project[]; reload: () => void }) {
+  const [openTasks, setOpenTasks] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editingProject, setEditingProject] = useState(false);
-  const { userProfile } = useStore();
+  const { userProfile, inspectMode } = useStore();
   const me = dept.me ?? userProfile?.id;
   const canEditProj = dept.permissions.can_plan || (c.owner && String(c.owner.id) === String(me));
   const openPanel = useContext(OpenObjective);
@@ -692,6 +815,8 @@ function SubRow({ c, code, dept, q, people, projects, reload }: { c: ObjectiveNo
   const [prio, setPrio] = useOptimistic<Priority | null>(c.priority ?? null);
   const canPrio = canSetPriority(userProfile);
   const canMoveDate = dept.permissions.can_plan || (!!c.owner && String(c.owner.id) === String(me));
+  const updates = c.updates || [];
+  const updateCount = c.update_count ?? updates.length;
   if (editing) {
     return <div className="p-3 border-t border-border-subtle first:border-t-0 bg-background-primary">
       <ObjectiveForm people={people} projects={projects} initial={c} code={code} q={q} sub onCancel={() => setEditing(false)} onSubmit={async v => { await api.updateObjective(c.id, v); setEditing(false); reload(); }} />
@@ -699,12 +824,24 @@ function SubRow({ c, code, dept, q, people, projects, reload }: { c: ObjectiveNo
   }
   return (
     <div id={`objective-${c.id}`} className="border-t border-border-subtle first:border-t-0 scroll-mt-24">
-    <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 pl-12 text-[13px]', p1Accent(prio))}>
+    <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 pl-10 text-[13px]', p1Accent(prio))}>
+      <button type="button" onClick={() => setOpenTasks(!openTasks)} aria-expanded={openTasks} title={openTasks ? 'Hide tasks' : 'Show tasks & follow-ups'} className="text-text-secondary hover:text-text-primary cursor-pointer">
+        <ChevronRight size={13} className={cn('transition-transform', openTasks && 'rotate-90')} />
+      </button>
       <CodeChip code={code} />
       <div className="flex-1 min-w-[200px]">
         <div className="flex items-center gap-2 flex-wrap min-w-0">
-          <button onClick={() => openPanel(c.id)} title={c.title} className="font-medium text-left hover:text-accent-blue min-w-0 max-w-full break-words">{c.title}</button>
+          <button onClick={() => (inspectMode === 'dropdown' ? setOpenTasks(!openTasks) : openPanel(c.id))} title={c.title} className="font-medium text-left hover:text-accent-blue cursor-pointer min-w-0 max-w-full break-words">{c.title}</button>
           <PriorityPicker objectiveId={c.id} value={prio} canEdit={canPrio} onChanged={p => { setPrio(p); reload(); }} />
+          {updateCount > 0 && (
+            <button
+              type="button"
+              onClick={() => (inspectMode === 'drawer' ? openPanel(c.id) : setOpenTasks(!openTasks))}
+              className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-accent-blue/10 text-accent-blue cursor-pointer"
+            >
+              <MessageSquare size={9} /> {updateCount}
+            </button>
+          )}
           {editingProject ? (
             <select
               autoFocus
@@ -753,9 +890,23 @@ function SubRow({ c, code, dept, q, people, projects, reload }: { c: ObjectiveNo
       <ItemProgress item={c} dept={dept} reload={reload} />
       {dept.permissions.can_plan && <RowActions onEdit={() => setEditing(true)} onDelete={async () => { await api.deleteObjective(c.id); reload(); }} />}
     </div>
-    <div className="pl-[84px] pr-4 pb-2 -mt-1">
-      <ObjectiveTasks objectiveId={c.id} tasks={c.tasks} people={people} onChanged={reload} parentCode={code} startIndex={1} projectId={c.project_id} onOpenTask={openTask} canPlan={dept.permissions.can_plan} />
-    </div>
+    {openTasks && (
+      <div className="pl-[84px] pr-4 pb-2.5 space-y-2">
+        {updates.length > 0 && (
+          <div className="rounded-lg border border-border-subtle bg-background-primary/50 p-2 space-y-1 max-h-36 overflow-y-auto">
+            {updates.map(u => (
+              <div key={u.id} className="text-[11.5px] border-b border-border-subtle/50 last:border-b-0 pb-1 last:pb-0">
+                <span className="font-semibold text-text-primary">{formatISTDate(u.created_at)}</span>
+                <span className="text-text-secondary font-mono"> · {formatISTTime(u.created_at, { withTimezone: false })}</span>
+                <span className="font-bold text-accent-blue"> · {u.user?.name || 'Teammate'}</span>
+                <span className="text-text-primary"> — {u.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <ObjectiveTasks objectiveId={c.id} tasks={c.tasks} people={people} onChanged={reload} parentCode={code} startIndex={1} projectId={c.project_id} onOpenTask={openTask} canPlan={dept.permissions.can_plan} />
+      </div>
+    )}
     </div>
   );
 }

@@ -159,7 +159,14 @@ function IssueCenterPage() {
     const interval = setInterval(() => {
       if (!createOpen && !detailOpen) loadData(true);
     }, 30000);
-    return () => clearInterval(interval);
+    const onRefresh = () => loadData(true);
+    window.addEventListener('app:refresh', onRefresh);
+    window.addEventListener('issue:updated', onRefresh);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('app:refresh', onRefresh);
+      window.removeEventListener('issue:updated', onRefresh);
+    };
   }, [loadData, createOpen, detailOpen]);
 
   const onSubmit = async (data: IssueFormValues) => {

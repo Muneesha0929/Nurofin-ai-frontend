@@ -29,7 +29,10 @@ export default function ClientLayout({
     themeColor,
     setThemeColor,
     customColor,
-    setCustomColor
+    setCustomColor,
+    setInspectMode,
+    setLiveSyncConnected,
+    refreshTrigger
   } = useStore();
   const pathname = usePathname();
   const router = useRouter();
@@ -164,6 +167,13 @@ export default function ClientLayout({
   // Fetch notifications from backend on mount and poll every 30 seconds
   const { setNotifications } = useStore();
   useEffect(() => {
+    const savedInspect = localStorage.getItem('nurofin-inspect-mode');
+    if (savedInspect === 'drawer' || savedInspect === 'dropdown') {
+      setInspectMode(savedInspect);
+    }
+  }, [setInspectMode]);
+
+  useEffect(() => {
     if (!localStorage.getItem('auth_token')) return;
     let active = true;
     const fetchNotifs = async () => {
@@ -177,7 +187,68 @@ export default function ClientLayout({
     fetchNotifs();
     const interval = setInterval(fetchNotifs, 30000);
     return () => { active = false; clearInterval(interval); };
-  }, [setNotifications]);
+  }, [setNotifications, refreshTrigger]);
+
+  // Real-time SSE connection for live cross-user updates without manual refresh
+  useEffect(() => {
+    if (isLoginPage || typeof window === 'undefined') return;
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
+    let es: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
+
+    const connect = () => {
+      if (closed) return;
+      try {
+        es = new EventSource(`/api/v1/events/live?token=${encodeURIComponent(token)}`);
+        es.onopen = () => setLiveSyncConnected(true);
+        es.addEventListener('connected', () => setLiveSyncConnected(true));
+        es.addEventListener('live', (evt) => {
+          try {
+            const parsed = JSON.parse((evt as MessageEvent).data || '{}');
+            const evType = parsed?.type || '';
+            if (evType.startsWith('task') || evType.startsWith('comment')) {
+              window.dispatchEvent(new CustomEvent('task:created', { detail: parsed.payload }));
+              window.dispatchEvent(new CustomEvent('live:task', { detail: parsed.payload }));
+            }
+            if (evType.startsWith('objective')) {
+              window.dispatchEvent(new CustomEvent('objective:updated', { detail: parsed.payload }));
+            }
+            if (evType.startsWith('issue')) {
+              window.dispatchEvent(new CustomEvent('issue:updated', { detail: parsed.payload }));
+            }
+            window.dispatchEvent(new CustomEvent('app:live_event', { detail: parsed }));
+            queryClient.invalidateQueries();
+          } catch {}
+        });
+        es.onerror = () => {
+          setLiveSyncConnected(false);
+          es?.close();
+          if (!closed) {
+            reconnectTimer = setTimeout(connect, 4000);
+          }
+        };
+      } catch {
+        setLiveSyncConnected(false);
+      }
+    };
+
+    connect();
+    return () => {
+      closed = true;
+      setLiveSyncConnected(false);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      es?.close();
+    };
+  }, [isLoginPage, queryClient, setLiveSyncConnected]);
+
+  // Invalidate queries on in-place refresh button click
+  useEffect(() => {
+    if (refreshTrigger > 0) {
+      queryClient.invalidateQueries();
+    }
+  }, [refreshTrigger, queryClient]);
 
   // Load user settings when user profile is loaded or changes dynamically
   useEffect(() => {
@@ -301,7 +372,7 @@ export default function ClientLayout({
           <Topbar />
 
           {/* Core Content Area */}
-          <main className="flex-1 overflow-y-auto overflow-x-auto scrollbar-thin px-3 sm:px-5 md:px-6 pt-6 pb-36 min-w-0">
+          <main className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin px-5 sm:px-7 md:px-8 pt-6 pb-32 min-w-0">
             {children}
           </main>
           {/* Global Task Adding Option (Docked at Bottom of Every Page) */}
